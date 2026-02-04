@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Type Filter: Decision Memo</title>
+    <style>
+        @page {
+            size: letter;
+            margin: 1in 0.75in;
+            @bottom-center {
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 9pt;
+                color: #666;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            font-size: 11pt;
+            line-height: 1.5;
+            color: #1a1a1a;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Header styling */
+        .memo-header {
+            border-bottom: 3px solid #2c5aa0;
+            padding-bottom: 20px;
+            margin-bottom: 25px;
+        }
+
+        .memo-title {
+            font-size: 22pt;
+            font-weight: bold;
+            color: #2c5aa0;
+            margin: 0 0 20px 0;
+            letter-spacing: -0.5px;
+        }
+
+        .memo-meta {
+            display: table;
+            width: 100%;
+            font-size: 10pt;
+        }
+
+        .memo-meta-row {
+            display: table-row;
+        }
+
+        .memo-meta-label {
+            display: table-cell;
+            font-weight: bold;
+            width: 60px;
+            padding: 3px 10px 3px 0;
+            color: #555;
+        }
+
+        .memo-meta-value {
+            display: table-cell;
+            padding: 3px 0;
+        }
+
+        /* Horizontal rule */
+        hr {
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 25px 0;
+        }
+
+        /* Section headings */
+        h2 {
+            font-size: 14pt;
+            color: #2c5aa0;
+            margin: 30px 0 15px 0;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        h3 {
+            font-size: 12pt;
+            color: #333;
+            margin: 20px 0 10px 0;
+        }
+
+        /* Executive summary box */
+        .summary-box {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-left: 4px solid #2c5aa0;
+            padding: 15px 20px;
+            margin: 20px 0;
+        }
+
+        .summary-box p {
+            margin: 0 0 10px 0;
+        }
+
+        .summary-box p:last-child {
+            margin: 0;
+        }
+
+        .highlight-question {
+            font-weight: bold;
+            color: #2c5aa0;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            font-size: 10pt;
+        }
+
+        th {
+            background: #2c5aa0;
+            color: white;
+            font-weight: bold;
+            text-align: left;
+            padding: 10px 12px;
+        }
+
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e0e0e0;
+            vertical-align: top;
+        }
+
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        tr:hover {
+            background: #e9ecef;
+        }
+
+        /* Metric highlight */
+        .metric-positive {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .metric-neutral {
+            color: #666;
+        }
+
+        /* Option boxes */
+        .option-box {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            page-break-inside: avoid;
+        }
+
+        .option-box h3 {
+            margin-top: 0;
+            color: #2c5aa0;
+            border-bottom: 1px solid #e0e0e0;
+            padding-bottom: 10px;
+        }
+
+        .option-box.recommended {
+            border: 2px solid #2c5aa0;
+            background: #f8fafc;
+        }
+
+        .pros-cons {
+            display: table;
+            width: 100%;
+        }
+
+        .pros, .cons {
+            display: table-cell;
+            width: 50%;
+            vertical-align: top;
+            padding-right: 15px;
+        }
+
+        .cons {
+            padding-right: 0;
+            padding-left: 15px;
+        }
+
+        .pros h4, .cons h4 {
+            font-size: 11pt;
+            margin: 0 0 8px 0;
+        }
+
+        .pros h4 {
+            color: #28a745;
+        }
+
+        .cons h4 {
+            color: #dc3545;
+        }
+
+        .pros ul, .cons ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .pros li, .cons li {
+            margin-bottom: 5px;
+            font-size: 10pt;
+        }
+
+        .best-for {
+            background: #e7f3ff;
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin-top: 15px;
+            font-size: 10pt;
+        }
+
+        .best-for strong {
+            color: #2c5aa0;
+        }
+
+        /* Scenario boxes */
+        .scenario {
+            background: #f8f9fa;
+            border-left: 3px solid #6c757d;
+            padding: 12px 15px;
+            margin: 10px 0;
+            font-size: 10pt;
+        }
+
+        .scenario.success {
+            border-left-color: #28a745;
+        }
+
+        .scenario.failure {
+            border-left-color: #dc3545;
+        }
+
+        .scenario-title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .scenario-quote {
+            font-style: italic;
+            color: #555;
+            margin: 8px 0;
+        }
+
+        .scenario-result {
+            font-weight: bold;
+        }
+
+        .scenario.success .scenario-result {
+            color: #28a745;
+        }
+
+        .scenario.failure .scenario-result {
+            color: #dc3545;
+        }
+
+        /* Recommendation box */
+        .recommendation {
+            background: linear-gradient(135deg, #e7f3ff 0%, #d4e9ff 100%);
+            border: 2px solid #2c5aa0;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 25px 0;
+        }
+
+        .recommendation h2 {
+            color: #2c5aa0;
+            margin-top: 0;
+            border: none;
+        }
+
+        /* Questions list */
+        .questions-list {
+            background: #fff9e6;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .questions-list h2 {
+            color: #856404;
+            margin-top: 0;
+            border: none;
+        }
+
+        .questions-list ol {
+            margin: 0;
+            padding-left: 20px;
+        }
+
+        .questions-list li {
+            margin-bottom: 12px;
+        }
+
+        .questions-list li:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Next steps */
+        .next-steps {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-top: 25px;
+        }
+
+        .next-steps h2 {
+            margin-top: 0;
+        }
+
+        /* Footer */
+        .memo-footer {
+            margin-top: 40px;
+            padding-top: 15px;
+            border-top: 1px solid #ddd;
+            font-style: italic;
+            color: #666;
+            font-size: 10pt;
+        }
+
+        /* Key observation callout */
+        .key-observation {
+            background: #e8f4e8;
+            border-left: 4px solid #28a745;
+            padding: 10px 15px;
+            margin: 15px 0;
+            font-size: 10pt;
+        }
+
+        .key-observation strong {
+            color: #28a745;
+        }
+    </style>
+</head>
+<body>
+    <div class="memo-header">
+        <h1 class="memo-title">Location Type Filter: Decision Memo</h1>
+        <div class="memo-meta">
+            <div class="memo-meta-row">
+                <span class="memo-meta-label">To:</span>
+                <span class="memo-meta-value">Damione</span>
+            </div>
+            <div class="memo-meta-row">
+                <span class="memo-meta-label">From:</span>
+                <span class="memo-meta-value">Lead Pipeline Team</span>
+            </div>
+            <div class="memo-meta-row">
+                <span class="memo-meta-label">Date:</span>
+                <span class="memo-meta-value">February 3, 2026</span>
+            </div>
+            <div class="memo-meta-row">
+                <span class="memo-meta-label">Re:</span>
+                <span class="memo-meta-value">Optimizing Contact Search for Vending Services Territory Coverage</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="summary-box">
+        <p>We need your input on which location filter strategy to use when searching for potential vending service clients in an operator's territory. This decision affects how many leads we find and the quality of those leads.</p>
+        <p class="highlight-question">The Question: When searching for contacts within a 15-mile radius, should we require that both the contact AND their company headquarters be in the territory, or just the contact?</p>
+    </div>
+
+    <h2>Background</h2>
+    <p>ZoomInfo's Contact Search API offers different "Location Type" filters that determine which contacts are returned:</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 30%">Location Type</th>
+                <th>What It Means</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Person AND HQ</strong></td>
+                <td>Contact's work location AND company headquarters must BOTH be in the search radius</td>
+            </tr>
+            <tr>
+                <td><strong>Person</strong></td>
+                <td>Only the contact's work location must be in the radius (HQ can be anywhere)</td>
+            </tr>
+            <tr>
+                <td><strong>Combined</strong></td>
+                <td>Run both searches and merge results</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>Test Results: Northbrook, IL (ZIP 60062, 15-mile radius)</h2>
+    <p>We ran identical searches with both filters. Same ZIP codes, same industries, same quality filters.</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Metric</th>
+                <th>Person AND HQ</th>
+                <th>Person Only</th>
+                <th>Difference</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Companies Found</strong></td>
+                <td>46</td>
+                <td>56</td>
+                <td class="metric-positive">+10 (+22%)</td>
+            </tr>
+            <tr>
+                <td><strong>Contacts Found</strong></td>
+                <td>79</td>
+                <td>80</td>
+                <td class="metric-neutral">+1</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>What "Person" Finds That "Person AND HQ" Misses</h2>
+    <p>These companies have employees working at physical sites in the territory, but their corporate headquarters is elsewhere:</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Company</th>
+                <th>Contact</th>
+                <th>Title</th>
+                <th>Why They Appeared</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>LOGISTEED America</strong></td>
+                <td>Christopher Baillie</td>
+                <td>Branch Manager</td>
+                <td>Japanese logistics company with Chicago branch</td>
+            </tr>
+            <tr>
+                <td><strong>Farrow</strong></td>
+                <td>Lorrie Roddy</td>
+                <td>Branch Manager (Chicago)</td>
+                <td>Canadian company with Chicago branch</td>
+            </tr>
+            <tr>
+                <td><strong>Caterpillar</strong></td>
+                <td>Filip Marek</td>
+                <td>Division CFO</td>
+                <td>HQ in Peoria, IL - office in territory</td>
+            </tr>
+            <tr>
+                <td><strong>Caremark (CVS)</strong></td>
+                <td>Dawn Matras</td>
+                <td>Director, Specialty Customer Care</td>
+                <td>HQ in Rhode Island</td>
+            </tr>
+            <tr>
+                <td><strong>The Hoxton</strong></td>
+                <td>Amos Kelsey</td>
+                <td>General Manager</td>
+                <td>UK hotel chain with Chicago property</td>
+            </tr>
+            <tr>
+                <td><strong>Crowne Plaza</strong></td>
+                <td>Cher Jacobsen</td>
+                <td>General Manager</td>
+                <td>IHG hotel with local property</td>
+            </tr>
+            <tr>
+                <td><strong>Pampered Chef</strong></td>
+                <td>Bikram Sohi</td>
+                <td>COO</td>
+                <td>Berkshire Hathaway subsidiary</td>
+            </tr>
+            <tr>
+                <td><strong>WillScot</strong></td>
+                <td>A.J. McGrath</td>
+                <td>VP and General Manager</td>
+                <td>HQ in Phoenix, AZ</td>
+            </tr>
+            <tr>
+                <td><strong>Canadian Alliance Terminals</strong></td>
+                <td>William McKinnon</td>
+                <td>President</td>
+                <td>Canadian company with Chicago operations</td>
+            </tr>
+            <tr>
+                <td><strong>Barrett Distribution</strong></td>
+                <td>Arthur Barrett</td>
+                <td>President</td>
+                <td>HQ in Massachusetts</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="key-observation">
+        <strong>Key Observation:</strong> Many of these are <strong>branch managers</strong> or <strong>local general managers</strong> — people who likely CAN authorize vending for their specific facility.
+    </div>
+
+    <h2>What "Person AND HQ" Finds That "Person" Misses</h2>
+    <p>These companies appeared in the Person AND HQ search but not in the Person-only search (due to result ranking/pagination):</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Company</th>
+                <th>Contact</th>
+                <th>Title</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Loyola Academy</td>
+                <td>Lynn Egan</td>
+                <td>Director, Communications</td>
+            </tr>
+            <tr>
+                <td>Wespath Benefits</td>
+                <td>Christopher Wampler</td>
+                <td>Director, Project Management</td>
+            </tr>
+            <tr>
+                <td>Harper College</td>
+                <td>Riaz Yusuff</td>
+                <td>Chief Information Officer</td>
+            </tr>
+            <tr>
+                <td>Northwest Community Healthcare</td>
+                <td>Randi Zitron</td>
+                <td>Director, HR</td>
+            </tr>
+            <tr>
+                <td>Prospect Heights School District 23</td>
+                <td>Christopher Alms</td>
+                <td>Director, Technology</td>
+            </tr>
+            <tr>
+                <td>Radio Flyer</td>
+                <td>Amy Bastuga</td>
+                <td>Chief People Officer</td>
+            </tr>
+            <tr>
+                <td>ITW</td>
+                <td>Randall Scheuneman</td>
+                <td>VP & Chief Accounting Officer</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="key-observation">
+        <strong>Key Observation:</strong> These are <strong>local institutions</strong> (schools, colleges, healthcare) where the contact likely has direct authority.
+    </div>
+
+    <h2>The Trade-Off</h2>
+
+    <div class="option-box recommended">
+        <h3>Option A: Person AND HQ (Current Manual Process)</h3>
+        <div class="pros-cons">
+            <div class="pros">
+                <h4>Pros</h4>
+                <ul>
+                    <li>Higher confidence the contact has local decision authority</li>
+                    <li>Avoids "that's a corporate decision" responses</li>
+                    <li>Filters to truly local businesses</li>
+                    <li>Matches our existing manual workflow</li>
+                </ul>
+            </div>
+            <div class="cons">
+                <h4>Cons</h4>
+                <ul>
+                    <li>Misses branch offices of national chains</li>
+                    <li>Lower volume (46 vs 56 companies in test)</li>
+                    <li>May miss legitimate opportunities at regional facilities</li>
+                </ul>
+            </div>
+        </div>
+        <div class="best-for">
+            <strong>Best For:</strong> Prioritizing quality over quantity; focusing on owner-operated or locally-headquartered businesses
+        </div>
+    </div>
+
+    <div class="option-box">
+        <h3>Option B: Person Only</h3>
+        <div class="pros-cons">
+            <div class="pros">
+                <h4>Pros</h4>
+                <ul>
+                    <li>22% more companies found</li>
+                    <li>Captures branch offices and regional facilities</li>
+                    <li>Finds contacts who physically work at sites in the territory</li>
+                    <li>Branch managers often CAN authorize vending for their location</li>
+                </ul>
+            </div>
+            <div class="cons">
+                <h4>Cons</h4>
+                <ul>
+                    <li>Some contacts may need to escalate to corporate</li>
+                    <li>May include facilities with national vending contracts</li>
+                    <li>Slightly more filtering needed during outreach</li>
+                </ul>
+            </div>
+        </div>
+        <div class="best-for">
+            <strong>Best For:</strong> Maximizing coverage; willing to handle some "call corporate" responses
+        </div>
+    </div>
+
+    <div class="option-box">
+        <h3>Option C: Combined (Run Both, Merge Results)</h3>
+        <div class="pros-cons">
+            <div class="pros">
+                <h4>Pros</h4>
+                <ul>
+                    <li>Maximum coverage — gets local companies AND branch offices</li>
+                    <li>No companies missed due to ranking/pagination</li>
+                    <li>Estimated 60-70 companies (vs 46 or 56 alone)</li>
+                    <li>No additional cost (ZoomInfo only charges for enrichment, not searches)</li>
+                </ul>
+            </div>
+            <div class="cons">
+                <h4>Cons</h4>
+                <ul>
+                    <li>More contacts to review and qualify</li>
+                    <li>National chains often have inaccessible corporate decision makers</li>
+                    <li>Branch managers may lack authority despite local presence</li>
+                    <li>Implementation complexity</li>
+                </ul>
+            </div>
+        </div>
+        <div class="best-for">
+            <strong>Best For:</strong> Comprehensive territory coverage when operators are willing to navigate corporate procurement processes
+        </div>
+    </div>
+
+    <h2>Concrete Scenario: Making a Sale</h2>
+
+    <div class="scenario success">
+        <div class="scenario-title">Scenario 1: Local Business (Person AND HQ)</div>
+        <p>You call <strong>Wilmette Park District</strong>. Jeffery Groves, General Manager of Recreation Facilities, answers.</p>
+        <p class="scenario-quote">"Yes, I can make that decision. Let's set up a meeting."</p>
+        <p class="scenario-result">Result: Direct path to sale.</p>
+    </div>
+
+    <div class="scenario success">
+        <div class="scenario-title">Scenario 2: Branch Office (Person Only)</div>
+        <p>You call <strong>LOGISTEED America</strong> (Chicago branch). Christopher Baillie, Branch Manager, answers.</p>
+        <p class="scenario-quote">"I manage this facility. Vending is my call for this location."</p>
+        <p class="scenario-result">Result: Direct path to sale for that facility.</p>
+    </div>
+
+    <div class="scenario failure">
+        <div class="scenario-title">Scenario 3: Branch Office with Corporate Control</div>
+        <p>You call <strong>Caremark (CVS)</strong>. Dawn Matras, Director, answers.</p>
+        <p class="scenario-quote">"Vending is handled through our corporate facilities team in Rhode Island."</p>
+        <p class="scenario-result">Result: Dead end or long sales cycle.</p>
+    </div>
+
+    <div class="recommendation">
+        <h2>Our Recommendation</h2>
+        <p>We recommend starting with <strong>Option A (Person AND HQ)</strong> as the default, with the ability to switch to <strong>Option B (Person)</strong> when:</p>
+        <ul>
+            <li>An operator's territory has few results with Person AND HQ</li>
+            <li>The operator is willing to pursue national chain locations</li>
+            <li>The target is 75+ companies and Person AND HQ yields &lt;50</li>
+        </ul>
+        <p>This matches the manual process that's been working, while giving flexibility for territories that need more volume.</p>
+    </div>
+
+    <div class="questions-list">
+        <h2>Questions for Your Decision</h2>
+        <ol>
+            <li><strong>Volume vs. Quality:</strong> Is finding 22% more companies worth potentially more "call corporate" responses?</li>
+            <li><strong>National Chains:</strong> Are branch locations of national chains (hotels, logistics, healthcare systems) viable targets, or do they typically have corporate vending contracts?</li>
+            <li><strong>Operator Preference:</strong> Should operators be able to choose their preferred filter, or should we standardize?</li>
+            <li><strong>Combined Approach:</strong> Is the additional review time worth it to get maximum coverage, knowing many national chain contacts may be dead ends?</li>
+        </ol>
+    </div>
+
+    <div class="next-steps">
+        <h2>Next Steps</h2>
+        <p>Once you provide direction, we will:</p>
+        <ol>
+            <li>Set the appropriate default in the system</li>
+            <li>Document the guidance for operators</li>
+            <li>Optionally implement the combined approach if desired</li>
+        </ol>
+        <p>Please let us know which approach you'd like us to proceed with.</p>
+    </div>
+
+    <div class="memo-footer">
+        Prepared by the Lead Pipeline Development Team
+    </div>
+</body>
+</html>

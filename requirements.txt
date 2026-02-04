@@ -1,0 +1,10 @@
+streamlit>=1.28.0
+libsql-experimental>=0.0.30
+pandas>=2.0.0
+requests>=2.31.0
+httpx>=0.25.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Development
+pytest>=7.0.0
