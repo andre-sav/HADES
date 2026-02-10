@@ -1,110 +1,120 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-03
-**Status:** Combined Location Type Search Feature Implemented ✅
+**Date:** 2026-02-10
+**Status:** Intent switched to legacy API, Turso reconnect added, auth token persisted, API debug panel built
 
 ## What's Working
 
-1. **Authentication** ✅ - OAuth working, tokens refresh properly
-2. **Contact Search** ✅ - All filters working
-3. **Contact Enrich** ✅ - 3-level nested response parsing fixed
-4. **Scoring** ✅ - Working
-5. **CSV Export** ✅ - Working
-6. **Test Mode** ✅ - Geography Workflow can run without using credits
-7. **Target Contacts Expansion** ✅ - Auto-expand search to meet target count
-8. **Combined Location Search** ✅ - Toggle to merge PersonAndHQ + Person results
+1. **Authentication** - Legacy JWT from `/authenticate`, token persisted to Turso DB across restarts
+2. **Contact Search** - All filters working, including companyId-based search (`/search/contact`)
+3. **Contact Enrich** - 3-level nested response parsing fixed (needs production test)
+4. **Intent Search** - Switched from v2 JSON:API (`/gtm/data/v1/intent/search`, OAuth2-only) to legacy (`/search/intent`, JWT-compatible). Includes SIC code and employee filters.
+5. **Scoring** - Intent leads, geography leads, and intent-contact scoring
+6. **CSV Export** - VanillaSoft format, supports both workflows + validation checklist
+7. **Test Mode** - Skips enrichment step only (search calls still use real API)
+8. **Target Contacts Expansion** - Auto-expand search to meet target count (Geography)
+9. **Combined Location Search** - Toggle to merge PersonAndHQ + Person results (Geography)
+10. **Intent Full Pipeline** - Search → Select → Find contacts → Enrich → Score → Export
+11. **UX Overhaul** - Action bar, summary strip, run logs, export validation, tighter layout
+12. **Shadcn UI** - `streamlit-shadcn-ui` adopted: tabs, switches, buttons, metric cards, alert dialogs
+13. **API Debug Panel** - Intent Workflow shows full request body, response body, headers, error details
+14. **Turso Reconnect** - Auto-reconnects on stale Hrana stream errors (survives idle timeouts)
+15. **Token Persistence** - ZoomInfo JWT saved to Turso `sync_metadata` table, loaded on restart to avoid auth rate limits
 
-## Session Summary (2026-02-03)
+## Known Issues
 
-### Features Added
+- **Intent endpoint: `sicCodes` format** — Legacy `/search/intent` requires comma-separated string, now fixed. All legacy endpoints follow this pattern.
+- **v2 Intent API requires OAuth2 PKCE** — The new `/gtm/data/v1/intent/search` endpoint rejects legacy JWT tokens (error ZI0001: "Unauthorized access"). Would need DevPortal OAuth2 PKCE flow to use it. Currently using legacy endpoint instead.
+- **`@st.cache_resource` gotcha** — Code changes to cached classes (TursoDatabase, ZoomInfoClient) require Streamlit restart to take effect. The cached instance keeps the old class definition.
+- **Contact Enrich** — Response parsing fixed but never tested with real production data.
+- **Test Mode** — Only skips enrichment; search steps still call live API and consume credits.
 
-**Target Contacts with Auto-Expansion:**
-- User sets target contact count (default: 25, range: 5-100)
-- "Stop early" checkbox (default: ON for Autopilot, OFF for Manual Review)
-- Automatic expansion when target not met, in this order:
-  1. Management → +Director → +VP/C-Level
-  2. Employee range → remove 5,000 cap
-  3. Accuracy → 85 → 75
-  4. Radius → 12.5mi → 15mi → 17.5mi → 20mi (max)
-- Results show expansion summary with target status
-- Contacts deduplicated by personId across searches
+---
 
-**Combined Location Type Search:**
-- Default location type: Person AND HQ (local businesses with direct authority)
-- Toggle: "Include Person-only results" checkbox
-- When enabled: Runs both PersonAndHQ + Person searches and merges results
-- Finds branch offices of national chains (more contacts, some may lack local authority)
-- Results deduplicated by contact ID across both searches
-- Decision documented in `docs/location-type-decision-memo.pdf`
+## Session Summary (2026-02-10, Session 2)
 
-### Bug Fixes
-- Fixed `KeyError: 'zipCodeRadiusList'` - Changed to correct key `zipCode`
-- Fixed radio button horizontal display - Removed CSS forcing row layout
-- Added ZIP code display in contact preview
-- Fixed `ContactQueryParams` missing `employee_max` parameter - Added field to dataclass
+### Turso Stale Connection Fix
+- `turso_db.py`: Added `_reconnect()` and `_is_stale_stream_error()` to `TursoDatabase`
+- `execute()`, `execute_write()`, `execute_many()` all auto-reconnect on "stream not found" 404 errors
+- Root cause: Turso closes idle Hrana streams server-side; cached connection goes stale
 
-### Code Quality Improvements
-- Added logging to expansion loop exception handler
-- Created 23 unit tests for expand_search functionality
-- Updated CLAUDE.md with expansion feature documentation
+### ZoomInfo Token Persistence
+- `zoominfo_client.py`: Added `_load_persisted_token()` and `_persist_token()` to `ZoomInfoClient`
+- Token stored in Turso `sync_metadata` table (key: `zoominfo_token`, value: JSON with jwt + expires_at)
+- `_get_token()` flow: check in-memory → check DB → call `/authenticate`
+- Prevents auth rate limits on Streamlit restarts
 
-## Key Files Modified
+### Intent Search: Legacy API Migration
+- **Problem**: v2 endpoint `/gtm/data/v1/intent/search` requires OAuth2 PKCE tokens (scope `api:data:intent`), incompatible with legacy JWT from `/authenticate`
+- **Fix**: Switched to legacy `/search/intent` endpoint which works with JWT auth
+- Legacy endpoint supports ICP filters: `employeeRangeMin` (string), `sicCodes` (comma-separated string)
+- Response normalization handles both legacy field names (`companyId`, `intentStrength`) and fallbacks
+- All 5 intent search tests updated for legacy format
+
+### Auth Error Guard
+- `_authenticate()` now raises `ZoomInfoAuthError` if response is 200 but JWT is missing
+- Previously silently set `access_token = None`, causing all subsequent API calls to fail with 401
+
+### API Debug Panel (Intent Workflow)
+- Shows full request: method, URL, query params, request body
+- Shows full response: HTTP status, headers (checkbox toggle), response body as JSON
+- Shows errors: message, attempt count, auth response body when relevant
+- `ZoomInfoClient.last_exchange` captures every HTTP request/response for debugging
+- Auto-expands on error for immediate visibility
+
+### Key Files Modified
 
 ```
-pages/2_Geography_Workflow.py   - Target contacts UI, expand_search(), results summary
-zoominfo_client.py              - Added employee_max to ContactQueryParams
-tests/test_expand_search.py     - 23 new tests for expansion logic
-CLAUDE.md                       - Updated documentation
-docs/plans/2026-02-03-target-contacts-expansion-design.md - Feature design
-docs/plans/2026-02-03-target-contacts-expansion.md - Implementation plan
+turso_db.py                   - Stale stream reconnect logic
+zoominfo_client.py            - Token persistence, legacy intent endpoint, last_exchange debug, auth guard
+pages/1_Intent_Workflow.py    - API debug panel (request/response/error display)
+tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 ```
 
-## Expansion Strategy (9 Steps)
+## Previous Session (2026-02-10, Session 1)
 
-Strategy: Expand filter criteria FIRST, radius LAST (preserve geographic area)
-
-```python
-EXPANSION_STEPS = [
-    # Phase 1: Expand management levels (stay in territory)
-    {"management_levels": ["Manager", "Director"]},
-    {"management_levels": ["Manager", "Director", "VP Level Exec", "C Level Exec"]},
-    # Phase 2: Remove employee cap (larger companies)
-    {"employee_max": 0},  # Remove 5000 cap (0 = no limit)
-    # Phase 3: Lower accuracy threshold
-    {"accuracy_min": 85},
-    {"accuracy_min": 75},
-    # Phase 4: Expand radius as last resort
-    {"radius": 12.5},
-    {"radius": 15.0},
-    {"radius": 17.5},
-    {"radius": 20.0},
-]
-```
+- Shadcn UI adoption across all pages
+- Intent Search migrated to v2 JSON:API (later reverted to legacy in Session 2)
+- UX overhaul: action bar, summary strip, run logs, export validation
+- Beads issue tracker initialized
+- 288 tests passing
 
 ## Test Coverage
 
-- **240 tests passing** (217 original + 23 new expansion tests)
-- All tests green as of session end
+- **288 tests passing** (all green, run `python -m pytest tests/ -v`)
 
 ## API Usage
 
 | Limit | Used | Total | Remaining |
 |-------|------|-------|-----------|
 | Unique IDs (Credits) | ~566 | 30,000 | ~29,434 |
-| API Requests | ~31 | 3,000,000 | ~3M |
+| API Requests | ~107 | 3,000,000 | ~3M |
 
-## Next Steps
+## Next Steps (Priority Order)
 
-1. **Manual test expansion feature** - Test in browser with various target counts
-2. **Test enrichment** - Full pipeline with real enrichment
-3. **Production testing** - Real workflow end-to-end
+1. **Live test Intent pipeline** — Search → Select → Find Contacts → Enrich → Export (auth fixed, legacy endpoint working)
+2. **Live test enrichment** — Verify enrich API works with real data
+3. **Live test Geography pipeline** — Full end-to-end with real API
+4. **Production test UX** — Verify action bar, summary strip, export validation with real data
+5. **Consider OAuth2 PKCE** — If v2 intent endpoint features are needed (DevPortal access required)
+
+## Beads Status
+
+```
+HADES-1ln [P2] Live test Intent pipeline end-to-end
+HADES-5c7 [P2] Live test Contact Enrich with real data
+HADES-kyi [P2] Live test Geography pipeline end-to-end
+HADES-bk3 [P2] Production test UX (shadcn, action bar, export validation)
+```
 
 ## Commands
 
 ```bash
 streamlit run app.py          # Run app
-python -m pytest tests/ -v    # Run tests (240 passing)
+python -m pytest tests/ -v    # Run tests (288 passing)
+bd ready                      # See available work
+bd list                       # All issues
 ```
 
 ---
-*Last updated: 2026-02-03*
+*Last updated: 2026-02-10*

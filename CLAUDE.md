@@ -10,9 +10,25 @@ Streamlit UI → ZoomInfo API → Scoring Engine → Turso DB → CSV Export
 
 **Key Components:**
 - **Turso (libsql)** - Cloud SQLite for persistence (operators, cache, usage tracking)
-- **ZoomInfo API** - OAuth client with retry logic, rate limiting, Contact Search
+- **ZoomInfo API** - OAuth client with retry logic, rate limiting, Contact Search, Intent Search (v2 JSON:API)
 - **Scoring Engine** - Weighted scoring based on signal strength, proximity, on-site likelihood
 - **Cost Tracker** - Budget controls with weekly caps and alerts
+
+## Session Workflow
+
+**Session Start:**
+1. Run `bd ready` to see available work
+2. Run `bd list --status=in_progress` to check for incomplete work
+3. Read `docs/SESSION_HANDOFF.md` for context from last session
+
+**During Work:**
+- `bd update <id> --status=in_progress` before starting a task
+- `bd close <id>` when done
+- `bd create --type=bug --title="..."` for bugs discovered during work
+
+**Session End:**
+1. Update `docs/SESSION_HANDOFF.md` with: what was done, uncommitted changes, next steps
+2. `bd sync` to commit beads state
 
 ## File Structure
 
@@ -38,7 +54,7 @@ HADES/
 │   ├── 4_CSV_Export.py           # Export with operator metadata
 │   ├── 5_Usage_Dashboard.py      # Credit usage monitoring
 │   └── 6_Executive_Summary.py    # MTD metrics and trends
-├── tests/                # 206 tests (pytest)
+├── tests/                # 288 tests (pytest)
 └── docs/
     └── stories/          # User stories with acceptance criteria
 ```
@@ -220,9 +236,11 @@ states = get_states_from_zips(zips)
 
 ## Status
 
-- **240 tests passing** (all tests green)
+- **288 tests passing** (all tests green)
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
+- ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).
 - ✅ **Target Contacts Expansion** - Implemented 2026-02-03
+- ✅ **Shadcn UI Adopted** - `streamlit-shadcn-ui` across all pages
 - 🔧 **Contact Enrich** - API returns data, response parsing fixed (needs production test)
 - See `docs/SESSION_HANDOFF.md` for detailed debugging context
 
@@ -234,10 +252,10 @@ All search params must be **comma-separated strings**, not arrays:
 
 ## Next Steps
 
-1. **Test expansion feature** - Manual test in Geography Workflow
-2. **Test enrich fix** - Run Pipeline Test, verify enrichment works
-3. **Full pipeline test** - Search → Enrich → Score → Export → Usage tracking
-3. **Geography Workflow** - Production flow test
+1. **Live test Intent pipeline** - Search → Select → Find Contacts → Enrich → Export (blocked by 429)
+2. **Live test enrichment** - Verify enrich API works with real data
+3. **Live test Geography pipeline** - Full end-to-end with real API
+4. **Production test UX** - Verify shadcn components, action bar, export validation with real data
 
 ---
-*Last updated: 2026-02-02*
+*Last updated: 2026-02-10*

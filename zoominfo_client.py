@@ -55,11 +55,18 @@ class ZoomInfoAuthError(ZoomInfoError):
 class ZoomInfoRateLimitError(ZoomInfoError):
     """Rate limit exceeded."""
 
-    def __init__(self, retry_after: int = 60):
+    def __init__(self, retry_after: int = 60, detail: str = ""):
         self.retry_after = retry_after
+        if retry_after >= 60:
+            wait_display = f"{retry_after // 60} minute{'s' if retry_after >= 120 else ''}"
+        else:
+            wait_display = f"{retry_after} seconds"
+        msg = f"Rate limit reached. Try again in {wait_display}."
+        if detail:
+            msg = f"{detail} {msg}"
         super().__init__(
-            message=f"Rate limit exceeded. Retry after {retry_after} seconds.",
-            user_message=f"ZoomInfo rate limit reached. Please wait {retry_after} seconds and try again.",
+            message=f"Rate limit exceeded. Retry after {retry_after} seconds. {detail}".strip(),
+            user_message=msg,
             recoverable=True,
         )
 
@@ -78,13 +85,19 @@ class ZoomInfoAPIError(ZoomInfoError):
 
 @dataclass
 class IntentQueryParams:
-    """Parameters for Intent API query."""
+    """Parameters for Intent API query (v2 - JSON:API format)."""
 
     topics: list[str]
-    signal_strengths: list[str] | None = None  # High, Medium, Low
-    employee_min: int | None = None
-    sic_codes: list[str] | None = None
-    page_size: int = 100
+    signal_strengths: list[str] | None = None  # High, Medium, Low (maps to signalScoreMin)
+    signal_score_min: int | None = None  # 60-100 (overrides signal_strengths if set)
+    signal_score_max: int | None = None  # 60-100
+    audience_strength_min: str | None = None  # A, B, C, D, E
+    audience_strength_max: str | None = None  # A, B, C, D, E
+    signal_start_date: str | None = None  # YYYY-MM-DD
+    signal_end_date: str | None = None  # YYYY-MM-DD
+    employee_min: int | None = None  # Not used by new API, kept for backward compat
+    sic_codes: list[str] | None = None  # Not used by new API, kept for backward compat
+    page_size: int = 25
     page: int = 1
 
 
@@ -104,9 +117,10 @@ class GeoQueryParams:
 class ContactQueryParams:
     """Parameters for Contact Search API query."""
 
-    zip_codes: list[str]
-    radius_miles: int
-    states: list[str]  # State codes (e.g., ["CA", "TX"]) - REQUIRED
+    zip_codes: list[str] | None = None
+    radius_miles: int = 0
+    states: list[str] | None = None  # State codes (e.g., ["CA", "TX"])
+    company_ids: list[str] | None = None  # Search by company IDs (Intent workflow)
     location_type: str = "PersonAndHQ"  # PersonAndHQ, PersonOrHQ, Person, HQ, PersonThenHQ
     employee_min: int | None = None
     employee_max: int | None = None  # None = use config default, explicit None after init = no max
@@ -185,12 +199,18 @@ class ZoomInfoClient:
     BASE_URL = "https://api.zoominfo.com"
     TOKEN_URL = "https://api.zoominfo.com/authenticate"
 
-    def __init__(self, client_id: str, client_secret: str):
+    # Minimum seconds between API requests (proactive rate limiting)
+    MIN_REQUEST_INTERVAL = 0.5
+
+    def __init__(self, client_id: str, client_secret: str, token_store=None):
         self.client_id = client_id
         self.client_secret = client_secret
         self.access_token: str | None = None
         self.token_expires_at: datetime | None = None
         self._session = requests.Session()
+        self._last_request_time: float = 0.0
+        self._token_store = token_store  # TursoDatabase instance for token persistence
+        self.last_exchange: dict | None = None  # Captures last API request/response for debugging
 
     def _get_token(self) -> str:
         """Get valid access token, refreshing if needed."""
@@ -199,8 +219,54 @@ class ZoomInfoClient:
             if datetime.now() < self.token_expires_at - timedelta(minutes=5):
                 return self.access_token
 
+        # Try loading persisted token from DB before hitting the auth endpoint
+        if not self.access_token and self._token_store:
+            self._load_persisted_token()
+            if self.access_token and self.token_expires_at:
+                if datetime.now() < self.token_expires_at - timedelta(minutes=5):
+                    logger.info("Using persisted ZoomInfo token from database")
+                    return self.access_token
+
         self._authenticate()
         return self.access_token
+
+    def _load_persisted_token(self) -> None:
+        """Load cached token from database."""
+        try:
+            rows = self._token_store.execute(
+                "SELECT value FROM sync_metadata WHERE key = ?",
+                ("zoominfo_token",),
+            )
+            if rows:
+                import json
+                data = json.loads(rows[0][0])
+                token = data.get("jwt")
+                expires_at_str = data.get("expires_at")
+                if token and expires_at_str:
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    if datetime.now() < expires_at - timedelta(minutes=5):
+                        self.access_token = token
+                        self.token_expires_at = expires_at
+        except Exception as e:
+            logger.debug(f"Could not load persisted token: {e}")
+
+    def _persist_token(self) -> None:
+        """Save current token to database."""
+        if not self._token_store or not self.access_token:
+            return
+        try:
+            import json
+            data = json.dumps({
+                "jwt": self.access_token,
+                "expires_at": self.token_expires_at.isoformat(),
+            })
+            self._token_store.execute_write(
+                "INSERT INTO sync_metadata (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+                ("zoominfo_token", data),
+            )
+        except Exception as e:
+            logger.debug(f"Could not persist token: {e}")
 
     def _authenticate(self) -> None:
         """Obtain OAuth access token."""
@@ -216,6 +282,11 @@ class ZoomInfoClient:
                 timeout=30,
             )
 
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 60))
+                logger.warning(f"Authentication rate limited. Retry-After: {retry_after}s")
+                raise ZoomInfoRateLimitError(retry_after, "Authentication endpoint rate limited.")
+
             if response.status_code == 401:
                 logger.error("Authentication failed: Invalid credentials")
                 raise ZoomInfoAuthError("Invalid credentials")
@@ -227,10 +298,22 @@ class ZoomInfoClient:
             data = response.json()
             self.access_token = data.get("jwt")
 
+            if not self.access_token:
+                # Log full response for debugging
+                logger.error(f"Auth response missing JWT. Status: {response.status_code}, Keys: {list(data.keys())}, Body: {str(data)[:500]}")
+                self._last_auth_response = data
+                raise ZoomInfoAuthError(
+                    f"Auth succeeded (HTTP {response.status_code}) but no JWT in response. "
+                    f"Response keys: {list(data.keys())}"
+                )
+
             # Token typically valid for 1 hour
             expires_in = data.get("expiresIn", 3600)
             self.token_expires_at = datetime.now() + timedelta(seconds=expires_in)
             logger.info(f"Authentication successful. Token expires in {expires_in}s")
+
+            # Persist token to survive restarts
+            self._persist_token()
 
         except requests.RequestException as e:
             logger.error(f"Authentication connection error: {e}")
@@ -243,23 +326,55 @@ class ZoomInfoClient:
         max_retries: int = 3,
         **kwargs,
     ) -> dict:
-        """Make authenticated API request with retry logic."""
+        """Make authenticated API request with retry logic and proactive rate limiting."""
+        # Proactive rate limiting: ensure minimum gap between requests
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.MIN_REQUEST_INTERVAL:
+            wait = self.MIN_REQUEST_INTERVAL - elapsed
+            logger.debug(f"Rate limiter: waiting {wait:.2f}s before {endpoint}")
+            time.sleep(wait)
+
         url = f"{self.BASE_URL}{endpoint}"
+        request_body = kwargs.get("json", {})
+
+        # Initialize exchange tracking BEFORE any calls that can throw
+        self.last_exchange = {
+            "request": {
+                "method": method,
+                "url": url,
+                "body": request_body or None,
+                "query_params": kwargs.get("params"),
+            },
+            "response": None,
+            "error": None,
+            "attempts": 0,
+        }
+
+        try:
+            token = self._get_token()
+        except Exception as auth_err:
+            self.last_exchange["error"] = f"Authentication failed: {auth_err}"
+            # Capture auth response if available
+            auth_resp = getattr(self, "_last_auth_response", None)
+            if auth_resp:
+                self.last_exchange["auth_response"] = auth_resp
+            raise
+
         headers = {
-            "Authorization": f"Bearer {self._get_token()}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
 
         # Log request details
-        request_body = kwargs.get("json", {})
         logger.info(f"API Request: {method} {endpoint}")
         if request_body:
-            # Log key parameters without sensitive data
             log_body = {k: v for k, v in request_body.items() if k not in ["jwt", "password"]}
             logger.debug(f"Request body: {json.dumps(log_body, indent=2)}")
 
         last_error = None
+
         for attempt in range(max_retries):
+            self.last_exchange["attempts"] = attempt + 1
             try:
                 logger.debug(f"Attempt {attempt + 1}/{max_retries}")
                 response = self._session.request(
@@ -269,22 +384,52 @@ class ZoomInfoClient:
                     timeout=60,
                     **kwargs,
                 )
+                self._last_request_time = time.time()
+
+                # Capture response for debugging
+                try:
+                    resp_body = response.json()
+                except Exception:
+                    resp_body = response.text[:2000] if response.text else None
+                self.last_exchange["response"] = {
+                    "status_code": response.status_code,
+                    "headers": dict(response.headers),
+                    "body": resp_body,
+                }
 
                 # Handle rate limiting
                 if response.status_code == 429:
                     retry_after = int(response.headers.get("Retry-After", 60))
-                    logger.warning(f"Rate limited on {endpoint}. Retry after {retry_after}s (attempt {attempt + 1}/{max_retries})")
+                    # Parse response body for detail
+                    detail = ""
+                    try:
+                        body = response.json()
+                        detail = body.get("error", body.get("message", response.text[:200]))
+                    except Exception:
+                        detail = response.text[:200] if response.text else ""
+                    logger.warning(
+                        f"Rate limited on {endpoint}. Retry-After: {retry_after}s, "
+                        f"detail: {detail} (attempt {attempt + 1}/{max_retries})"
+                    )
+                    # Don't retry if Retry-After is very long (quota-level limit)
+                    max_wait = 120  # 2 minutes max per retry
+                    if retry_after > max_wait:
+                        logger.error(f"Retry-After {retry_after}s exceeds max wait {max_wait}s — not retrying")
+                        raise ZoomInfoRateLimitError(retry_after, detail)
                     if attempt < max_retries - 1:
                         time.sleep(retry_after)
                         continue
-                    raise ZoomInfoRateLimitError(retry_after)
+                    raise ZoomInfoRateLimitError(retry_after, detail)
 
                 # Handle auth errors
                 if response.status_code == 401:
                     logger.warning(f"Auth error on {endpoint}, refreshing token (attempt {attempt + 1}/{max_retries})")
-                    # Token might be expired, try to refresh
-                    self._authenticate()
-                    headers["Authorization"] = f"Bearer {self.access_token}"
+                    try:
+                        self._authenticate()
+                        headers["Authorization"] = f"Bearer {self.access_token}"
+                    except Exception as auth_err:
+                        self.last_exchange["error"] = f"Re-authentication failed: {auth_err}"
+                        raise
                     continue
 
                 # Handle server errors with retry
@@ -313,48 +458,106 @@ class ZoomInfoClient:
 
             except requests.RequestException as e:
                 last_error = e
+                self.last_exchange["error"] = f"Connection error: {str(e)}"
                 logger.warning(f"Connection error on {endpoint}: {e} (attempt {attempt + 1}/{max_retries})")
                 if attempt < max_retries - 1:
                     time.sleep(2**attempt)
                     continue
                 raise ZoomInfoAPIError(0, f"Connection error: {str(e)}")
 
+        self.last_exchange["error"] = f"Max retries exceeded: {str(last_error)}"
         raise ZoomInfoAPIError(0, f"Max retries exceeded: {str(last_error)}")
 
     def search_intent(self, params: IntentQueryParams) -> dict:
         """
         Query Intent API for companies showing intent signals.
 
+        Uses the legacy Enterprise API endpoint at /search/intent
+        (works with JWT from /authenticate).
+
         Returns dict with 'data' (list of leads) and 'pagination' info.
         """
         logger.info(f"Intent Search: topics={params.topics}, page={params.page}")
 
-        # Apply ICP filters if not specified
-        employee_min = params.employee_min or get_employee_minimum()
-        employee_max = get_employee_maximum()
-        sic_codes = params.sic_codes or get_sic_codes()
-
+        # Build legacy request body
         request_body = {
-            "intentTopicList": params.topics,
-            "companyEmployeeCount": {"min": employee_min, "max": employee_max},
-            "sicCodeList": sic_codes,
+            "topics": params.topics,
             "rpp": params.page_size,
             "page": params.page,
         }
 
-        # Add signal strength filter if specified
-        if params.signal_strengths:
-            request_body["intentSignalStrengthList"] = params.signal_strengths
+        # Signal strength: use explicit score if set, otherwise map from categorical
+        if params.signal_score_min is not None:
+            request_body["signalScoreMin"] = params.signal_score_min
+        elif params.signal_strengths:
+            strength_to_score = {"High": 90, "Medium": 75, "Low": 60}
+            min_score = min(strength_to_score.get(s, 60) for s in params.signal_strengths)
+            request_body["signalScoreMin"] = min_score
 
-        response = self._request("POST", "/intent/search", json=request_body)
+        if params.signal_score_max is not None:
+            request_body["signalScoreMax"] = params.signal_score_max
+        if params.audience_strength_min:
+            request_body["audienceStrengthMin"] = params.audience_strength_min
+        if params.audience_strength_max:
+            request_body["audienceStrengthMax"] = params.audience_strength_max
+        if params.signal_start_date:
+            request_body["signalStartDate"] = params.signal_start_date
+        if params.signal_end_date:
+            request_body["signalEndDate"] = params.signal_end_date
+
+        # ICP filters supported by legacy endpoint (comma-separated strings)
+        if params.employee_min:
+            request_body["employeeRangeMin"] = str(params.employee_min)
+        if params.sic_codes:
+            request_body["sicCodes"] = ",".join(params.sic_codes)
+
+        response = self._request("POST", "/search/intent", json=request_body)
+
+        # Legacy response: data is a flat list of intent records
+        raw_data = response.get("data", [])
+        normalized = []
+        for item in raw_data:
+            # Legacy fields are already in the expected format
+            signal_strength = item.get("intentStrength", item.get("signalStrength", ""))
+            signal_score = item.get("signalScore", 0)
+
+            # If no categorical strength, derive from score
+            if not signal_strength and signal_score:
+                if signal_score >= 90:
+                    signal_strength = "High"
+                elif signal_score >= 75:
+                    signal_strength = "Medium"
+                else:
+                    signal_strength = "Low"
+
+            normalized.append({
+                "companyId": item.get("companyId", item.get("id", "")),
+                "companyName": item.get("companyName", item.get("name", "")),
+                "companyWebsite": item.get("companyWebsite", item.get("website", "")),
+                "intentStrength": signal_strength,
+                "intentTopic": item.get("intentTopic", item.get("topic", "")),
+                "intentDate": item.get("intentDate", item.get("signalDate", "")),
+                "sicCode": item.get("sicCode", ""),
+                "city": item.get("city", ""),
+                "state": item.get("state", ""),
+                "employees": item.get("employees", item.get("employeeCount", "")),
+                "signalScore": signal_score,
+                "audienceStrength": item.get("audienceStrength", ""),
+                "category": item.get("category", ""),
+                "spikesInDateRange": item.get("spikesInDateRange", 0),
+                "hasOtherTopicConsumption": item.get("hasOtherTopicConsumption", False),
+                "recommendedContacts": item.get("recommendedContacts", []),
+            })
+
+        total = response.get("totalResults", len(normalized))
 
         result = {
-            "data": response.get("data", []),
+            "data": normalized,
             "pagination": {
-                "totalResults": response.get("totalResults", 0),
+                "totalResults": total,
                 "pageSize": params.page_size,
                 "currentPage": params.page,
-                "totalPages": (response.get("totalResults", 0) + params.page_size - 1) // params.page_size,
+                "totalPages": (total + params.page_size - 1) // params.page_size if total > 0 else 1,
             },
         }
         logger.info(f"Intent Search complete: {len(result['data'])} results on page {params.page}, {result['pagination']['totalResults']} total")
@@ -473,17 +676,26 @@ class ZoomInfoClient:
 
     def search_contacts(self, params: ContactQueryParams) -> dict:
         """
-        Query Contact Search API for contacts by location.
+        Query Contact Search API for contacts by location or company IDs.
 
-        Uses locationSearchType to filter contacts where both the contact's
-        office AND company HQ match the location criteria.
+        When company_ids is provided, searches by companyId (Intent workflow).
+        Otherwise uses location filters (ZIP, state, radius).
 
         Returns dict with 'data' (list of contacts) and 'pagination' info.
         """
-        logger.info(
-            f"Contact Search: {len(params.zip_codes)} ZIP(s), radius={params.radius_miles}mi, "
-            f"states={params.states}, page={params.page}"
-        )
+        # Determine search mode
+        is_company_search = bool(params.company_ids)
+
+        if is_company_search:
+            logger.info(
+                f"Contact Search (by company): {len(params.company_ids)} company ID(s), page={params.page}"
+            )
+        else:
+            zip_count = len(params.zip_codes) if params.zip_codes else 0
+            logger.info(
+                f"Contact Search: {zip_count} ZIP(s), radius={params.radius_miles}mi, "
+                f"states={params.states}, page={params.page}"
+            )
         logger.info(
             f"  Filters: accuracy>={params.contact_accuracy_score_min}, "
             f"mgmt_levels={params.management_levels}, exclude_exported={params.exclude_org_exported}"
@@ -503,23 +715,36 @@ class ZoomInfoClient:
         # Build request body with correct ZoomInfo API field names
         # Based on official docs + API error feedback: fields expect comma-separated strings
 
-        # ZoomInfo API limits zipCode to 500 characters (~80 ZIP codes max)
-        zip_str = ",".join(params.zip_codes) if params.zip_codes else None
-        if zip_str and len(zip_str) > 500:
-            # Truncate to fit within limit (keep first ~80 ZIPs)
-            max_zips = 80
-            truncated_zips = params.zip_codes[:max_zips]
-            zip_str = ",".join(truncated_zips)
-            logger.warning(f"ZIP code list truncated from {len(params.zip_codes)} to {max_zips} (API 500 char limit)")
+        if is_company_search:
+            # Company ID search - no location filters
+            # ZoomInfo companyId field: comma-separated string, 500 char limit
+            company_id_str = ",".join(params.company_ids)
+            request_body = {
+                "companyId": company_id_str,
+            }
+        else:
+            # Location-based search
+            # ZoomInfo API limits zipCode to 500 characters (~80 ZIP codes max)
+            zip_str = ",".join(params.zip_codes) if params.zip_codes else None
+            if zip_str and len(zip_str) > 500:
+                # Truncate to fit within limit (keep first ~80 ZIPs)
+                max_zips = 80
+                truncated_zips = params.zip_codes[:max_zips]
+                zip_str = ",".join(truncated_zips)
+                logger.warning(f"ZIP code list truncated from {len(params.zip_codes)} to {max_zips} (API 500 char limit)")
 
-        request_body = {
-            # Location filters - state satisfies locationSearchType dependency
-            "state": ",".join(params.states) if params.states else None,
-            "zipCode": zip_str,
-            "locationSearchType": params.location_type,  # PersonAndHQ, PersonOrHQ, Person, HQ
-        }
-        # Remove None values
-        request_body = {k: v for k, v in request_body.items() if v is not None}
+            request_body = {
+                # Location filters - state satisfies locationSearchType dependency
+                "state": ",".join(params.states) if params.states else None,
+                "zipCode": zip_str,
+                "locationSearchType": params.location_type,  # PersonAndHQ, PersonOrHQ, Person, HQ
+            }
+            # Remove None values
+            request_body = {k: v for k, v in request_body.items() if v is not None}
+
+            # Add ZIP radius if searching with radius (not manual ZIP list)
+            if params.radius_miles and params.radius_miles > 0:
+                request_body["zipCodeRadiusMiles"] = params.radius_miles
 
         # Pagination goes in query params (per API docs)
         query_params = {
@@ -527,10 +752,6 @@ class ZoomInfoClient:
             "page[number]": params.page,
             "sort": params.sort_by,
         }
-
-        # Add ZIP radius if searching with radius (not manual ZIP list)
-        if params.radius_miles and params.radius_miles > 0:
-            request_body["zipCodeRadiusMiles"] = params.radius_miles
 
         # Employee count filter - separate min/max fields (API expects strings)
         if employee_min:
@@ -593,6 +814,10 @@ class ZoomInfoClient:
 
         Returns list of all contacts across pages and batches (deduplicated by id).
         """
+        # Company ID search: batch by company IDs instead of ZIPs
+        if params.company_ids:
+            return self._search_contacts_by_company_batched(params, max_pages, progress_callback)
+
         # ZoomInfo API limits zipCode to ~500 chars. Split into batches if needed.
         MAX_ZIPS_PER_BATCH = 75
         zip_codes = params.zip_codes or []
@@ -639,7 +864,11 @@ class ZoomInfoClient:
 
         Internal method called by search_contacts_all_pages.
         """
-        logger.info(f"Contact Search (batch): {len(params.zip_codes)} ZIP(s), states={params.states}, max_pages={max_pages}")
+        if params.company_ids:
+            logger.info(f"Contact Search (batch): {len(params.company_ids)} company ID(s), max_pages={max_pages}")
+        else:
+            zip_count = len(params.zip_codes) if params.zip_codes else 0
+            logger.info(f"Contact Search (batch): {zip_count} ZIP(s), states={params.states}, max_pages={max_pages}")
         all_contacts = []
         current_page = 1
         actual_page_size = None  # Track what ZoomInfo actually returns per page
@@ -674,6 +903,82 @@ class ZoomInfoClient:
 
         logger.info(f"Contact Search (batch) complete: {len(all_contacts)} contacts from {current_page} pages")
         return all_contacts
+
+    def _search_contacts_by_company_batched(
+        self,
+        params: ContactQueryParams,
+        max_pages: int = 10,
+        progress_callback=None,
+    ) -> list[dict]:
+        """
+        Search contacts by company IDs with batching for the 500-char API limit.
+
+        Splits company IDs into batches of ~40 (each ID ~10 chars + comma),
+        searches each batch, and deduplicates results.
+        """
+        MAX_COMPANY_IDS_PER_BATCH = 40
+        company_ids = params.company_ids or []
+
+        if len(company_ids) <= MAX_COMPANY_IDS_PER_BATCH:
+            return self._search_contacts_single_batch(params, max_pages, progress_callback)
+
+        logger.info(f"Contact Search (by company): {len(company_ids)} IDs exceeds {MAX_COMPANY_IDS_PER_BATCH}, splitting into batches")
+        all_contacts_by_id = {}
+
+        for batch_start in range(0, len(company_ids), MAX_COMPANY_IDS_PER_BATCH):
+            batch_ids = company_ids[batch_start:batch_start + MAX_COMPANY_IDS_PER_BATCH]
+            batch_num = (batch_start // MAX_COMPANY_IDS_PER_BATCH) + 1
+            total_batches = (len(company_ids) + MAX_COMPANY_IDS_PER_BATCH - 1) // MAX_COMPANY_IDS_PER_BATCH
+
+            logger.info(f"Contact Search: Company batch {batch_num}/{total_batches} with {len(batch_ids)} IDs")
+
+            from dataclasses import replace
+            batch_params = replace(params, company_ids=batch_ids)
+
+            batch_contacts = self._search_contacts_single_batch(batch_params, max_pages, progress_callback)
+
+            for contact in batch_contacts:
+                contact_id = contact.get("id") or contact.get("personId")
+                if contact_id and contact_id not in all_contacts_by_id:
+                    all_contacts_by_id[contact_id] = contact
+
+        all_contacts = list(all_contacts_by_id.values())
+        logger.info(f"Contact Search (by company) complete: {len(all_contacts)} unique contacts from {total_batches} batches")
+        return all_contacts
+
+    def search_contacts_by_company(
+        self,
+        company_ids: list[str],
+        management_levels: list[str] | None = None,
+        accuracy_min: int = 95,
+        required_fields: list[str] | None = None,
+        max_pages: int = 5,
+        progress_callback=None,
+    ) -> list[dict]:
+        """
+        Search contacts at specific companies (convenience method for Intent workflow).
+
+        Wraps ContactQueryParams creation + search_contacts_one_per_company().
+
+        Args:
+            company_ids: List of ZoomInfo company IDs
+            management_levels: Filter by management level
+            accuracy_min: Minimum accuracy score
+            required_fields: Required phone/email fields
+            max_pages: Max pages per batch
+            progress_callback: Optional progress callback
+
+        Returns:
+            List of contacts, one per company (highest accuracy score).
+        """
+        logger.info(f"Contact Search by Company: {len(company_ids)} companies")
+        params = ContactQueryParams(
+            company_ids=company_ids,
+            management_levels=management_levels or ["Manager"],
+            contact_accuracy_score_min=accuracy_min,
+            required_fields=required_fields,
+        )
+        return self.search_contacts_one_per_company(params, max_pages, progress_callback)
 
     def search_contacts_one_per_company(
         self,
@@ -893,9 +1198,10 @@ class ZoomInfoClient:
         elif isinstance(params, ContactQueryParams):
             key_data = {
                 "type": "contact",
-                "zip_codes": sorted(params.zip_codes),
+                "zip_codes": sorted(params.zip_codes or []),
                 "radius": params.radius_miles,
-                "states": sorted(params.states),
+                "states": sorted(params.states or []),
+                "company_ids": sorted(params.company_ids or []),
                 "location_type": params.location_type,
                 "employee_min": params.employee_min,
                 "sic_codes": sorted(params.sic_codes or []),
@@ -924,7 +1230,13 @@ class ZoomInfoClient:
 @st.cache_resource
 def get_zoominfo_client() -> ZoomInfoClient:
     """Get cached ZoomInfo client instance from Streamlit secrets."""
+    from turso_db import get_database
+    try:
+        token_store = get_database()
+    except Exception:
+        token_store = None
     return ZoomInfoClient(
         client_id=st.secrets["ZOOMINFO_CLIENT_ID"],
         client_secret=st.secrets["ZOOMINFO_CLIENT_SECRET"],
+        token_store=token_store,
     )

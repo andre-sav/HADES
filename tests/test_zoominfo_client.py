@@ -190,10 +190,19 @@ class TestIntentSearch:
         return client
 
     def test_search_intent(self, client):
-        """Test intent search."""
+        """Test intent search with legacy response format."""
         mock_response = {
             "data": [
-                {"companyId": "123", "companyName": "Test Co", "intentStrength": "High"}
+                {
+                    "companyId": "123",
+                    "companyName": "Test Co",
+                    "companyWebsite": "testco.com",
+                    "intentTopic": "Vending",
+                    "intentStrength": "High",
+                    "signalScore": 92,
+                    "audienceStrength": "A",
+                    "intentDate": "2026-02-01T00:00:00",
+                }
             ],
             "totalResults": 1,
         }
@@ -203,28 +212,80 @@ class TestIntentSearch:
             result = client.search_intent(params)
 
         assert len(result["data"]) == 1
-        assert result["data"][0]["companyName"] == "Test Co"
+        lead = result["data"][0]
+        assert lead["companyName"] == "Test Co"
+        assert lead["companyId"] == "123"
+        assert lead["intentStrength"] == "High"
+        assert lead["signalScore"] == 92
+        assert lead["intentTopic"] == "Vending"
+        assert lead["intentDate"] == "2026-02-01T00:00:00"
         assert result["pagination"]["totalResults"] == 1
 
+    def test_search_intent_request_format(self, client):
+        """Test intent search sends legacy format to /search/intent."""
+        mock_response = {"data": [], "totalResults": 0}
+
+        with patch.object(client, "_request", return_value=mock_response) as mock_req:
+            params = IntentQueryParams(topics=["Vending"])
+            client.search_intent(params)
+
+        call_args = mock_req.call_args
+        # Verify legacy endpoint path
+        assert call_args[0][1] == "/search/intent"
+        # Verify flat request body (not JSON:API envelope)
+        body = call_args[1]["json"]
+        assert body["topics"] == ["Vending"]
+        assert body["rpp"] == 25
+        assert body["page"] == 1
+
     def test_search_intent_with_filters(self, client):
-        """Test intent search with custom filters."""
+        """Test intent search maps signal_strengths to signalScoreMin."""
         mock_response = {"data": [], "totalResults": 0}
 
         with patch.object(client, "_request", return_value=mock_response) as mock_req:
             params = IntentQueryParams(
                 topics=["Vending", "Breakroom"],
                 signal_strengths=["High", "Medium"],
-                employee_min=100,
-                sic_codes=["5812"],
             )
             client.search_intent(params)
 
-        call_args = mock_req.call_args
-        body = call_args[1]["json"]
-        assert body["intentTopicList"] == ["Vending", "Breakroom"]
-        assert body["intentSignalStrengthList"] == ["High", "Medium"]
-        assert body["companyEmployeeCount"]["min"] == 100
-        assert body["sicCodeList"] == ["5812"]
+        body = mock_req.call_args[1]["json"]
+        assert body["topics"] == ["Vending", "Breakroom"]
+        # High=90, Medium=75 → min is 75
+        assert body["signalScoreMin"] == 75
+
+    def test_search_intent_signal_score_override(self, client):
+        """Test explicit signal_score_min overrides signal_strengths."""
+        mock_response = {"data": [], "totalResults": 0}
+
+        with patch.object(client, "_request", return_value=mock_response) as mock_req:
+            params = IntentQueryParams(
+                topics=["Vending"],
+                signal_strengths=["High"],  # Would map to 90
+                signal_score_min=80,  # Explicit override
+            )
+            client.search_intent(params)
+
+        body = mock_req.call_args[1]["json"]
+        assert body["signalScoreMin"] == 80
+
+    def test_search_intent_signal_strength_mapping(self, client):
+        """Test signalScore to intentStrength normalization."""
+        mock_response = {
+            "data": [
+                {"signalScore": 95, "intentTopic": "A", "companyId": "1", "companyName": "High"},
+                {"signalScore": 80, "intentTopic": "B", "companyId": "2", "companyName": "Med"},
+                {"signalScore": 65, "intentTopic": "C", "companyId": "3", "companyName": "Low"},
+            ],
+            "totalResults": 3,
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            result = client.search_intent(IntentQueryParams(topics=["Test"]))
+
+        assert result["data"][0]["intentStrength"] == "High"
+        assert result["data"][1]["intentStrength"] == "Medium"
+        assert result["data"][2]["intentStrength"] == "Low"
 
     def test_search_intent_all_pages(self, client):
         """Test fetching all pages."""
@@ -982,3 +1043,131 @@ class TestContactEnrich:
 
         # Check outputFields is an array (not comma-separated string)
         assert body["outputFields"] == ["firstName", "lastName", "email"]
+
+
+class TestContactSearchByCompanyId:
+    """Tests for Contact Search by company ID (Intent workflow)."""
+
+    @pytest.fixture
+    def client(self):
+        """Create client with mocked request."""
+        client = ZoomInfoClient("id", "secret")
+        client._get_token = MagicMock(return_value="token")
+        return client
+
+    def test_search_contacts_by_company_id(self, client):
+        """Test contact search using companyId sends correct request body."""
+        mock_response = {"data": [], "totalResults": 0}
+
+        with patch.object(client, "_request", return_value=mock_response) as mock_req:
+            params = ContactQueryParams(
+                company_ids=["111", "222", "333"],
+                management_levels=["Manager"],
+            )
+            client.search_contacts(params)
+
+        call_args = mock_req.call_args
+        body = call_args[1]["json"]
+
+        # Should have companyId, not location fields
+        assert body["companyId"] == "111,222,333"
+        assert "state" not in body
+        assert "zipCode" not in body
+        assert "locationSearchType" not in body
+        assert "zipCodeRadiusMiles" not in body
+
+    def test_search_contacts_by_company_id_with_quality_filters(self, client):
+        """Test companyId search still applies quality filters."""
+        mock_response = {"data": [], "totalResults": 0}
+
+        with patch.object(client, "_request", return_value=mock_response) as mock_req:
+            params = ContactQueryParams(
+                company_ids=["111"],
+                management_levels=["Manager", "Director"],
+                contact_accuracy_score_min=85,
+                required_fields=["mobilePhone", "phone"],
+                required_fields_operator="or",
+            )
+            client.search_contacts(params)
+
+        call_args = mock_req.call_args
+        body = call_args[1]["json"]
+
+        assert body["companyId"] == "111"
+        assert body["managementLevel"] == "Manager,Director"
+        assert body["contactAccuracyScoreMin"] == "85"
+        assert body["requiredFields"] == "mobilePhone,phone"
+        assert body["companyPastOrPresent"] == "present"
+        assert body["excludePartialProfiles"] is True
+
+    def test_contact_query_hash_with_company_ids(self):
+        """Test hash includes company_ids and is consistent."""
+        client = ZoomInfoClient("id", "secret")
+
+        params1 = ContactQueryParams(company_ids=["111", "222"])
+        params2 = ContactQueryParams(company_ids=["222", "111"])  # Different order
+
+        hash1 = client.get_query_hash(params1)
+        hash2 = client.get_query_hash(params2)
+
+        # Order shouldn't matter (sorted in hash)
+        assert hash1 == hash2
+
+    def test_contact_query_hash_company_vs_location(self):
+        """Test company ID search produces different hash from location search."""
+        client = ZoomInfoClient("id", "secret")
+
+        params_company = ContactQueryParams(company_ids=["111"])
+        params_location = ContactQueryParams(zip_codes=["75201"], states=["TX"])
+
+        hash1 = client.get_query_hash(params_company)
+        hash2 = client.get_query_hash(params_location)
+
+        assert hash1 != hash2
+
+    def test_search_contacts_by_company_convenience(self, client):
+        """Test the search_contacts_by_company convenience method."""
+        mock_contacts = [
+            {"personId": "1", "companyId": "A", "contactAccuracyScore": 95},
+            {"personId": "2", "companyId": "A", "contactAccuracyScore": 85},
+            {"personId": "3", "companyId": "B", "contactAccuracyScore": 90},
+        ]
+
+        with patch.object(client, "search_contacts_all_pages", return_value=mock_contacts):
+            results = client.search_contacts_by_company(
+                company_ids=["A", "B"],
+                management_levels=["Manager"],
+                accuracy_min=85,
+            )
+
+        # Should deduplicate to 1 per company
+        assert len(results) == 2
+
+    def test_search_contacts_optional_fields(self, client):
+        """Test ContactQueryParams works with all optional fields defaulted."""
+        mock_response = {"data": [], "totalResults": 0}
+
+        with patch.object(client, "_request", return_value=mock_response):
+            # Minimal params - just company_ids
+            params = ContactQueryParams(company_ids=["111"])
+            result = client.search_contacts(params)
+
+        assert result["data"] == []
+
+    def test_search_contacts_backward_compat(self, client):
+        """Test existing callers with zip_codes still work."""
+        mock_response = {"data": [], "totalResults": 0}
+
+        with patch.object(client, "_request", return_value=mock_response) as mock_req:
+            params = ContactQueryParams(
+                zip_codes=["75201"],
+                radius_miles=25,
+                states=["TX"],
+            )
+            client.search_contacts(params)
+
+        call_args = mock_req.call_args
+        body = call_args[1]["json"]
+        assert body["state"] == "TX"
+        assert body["zipCode"] == "75201"
+        assert "companyId" not in body

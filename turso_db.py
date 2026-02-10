@@ -29,22 +29,58 @@ class TursoDatabase:
             self._conn = libsql.connect(self.url, auth_token=self.auth_token)
         return self._conn
 
+    def _reconnect(self):
+        """Force a new connection (e.g. after a stale Hrana stream)."""
+        self._conn = None
+        return self.connection
+
+    def _is_stale_stream_error(self, exc: Exception) -> bool:
+        """Check if an exception is a stale Hrana stream error."""
+        msg = str(exc).lower()
+        return "stream not found" in msg or ("hrana" in msg and "404" in msg)
+
     def execute(self, query: str, params: tuple = ()) -> list:
-        """Execute query and return results."""
-        cursor = self.connection.execute(query, params)
-        return cursor.fetchall()
+        """Execute query and return results. Reconnects on stale stream."""
+        try:
+            cursor = self.connection.execute(query, params)
+            return cursor.fetchall()
+        except (ValueError, Exception) as e:
+            if self._is_stale_stream_error(e):
+                logger.warning("Stale Hrana stream detected, reconnecting...")
+                cursor = self._reconnect().execute(query, params)
+                return cursor.fetchall()
+            raise
 
     def execute_write(self, query: str, params: tuple = ()) -> int:
-        """Execute insert/update/delete and return lastrowid."""
-        cursor = self.connection.execute(query, params)
-        self.connection.commit()
-        return cursor.lastrowid
+        """Execute insert/update/delete and return lastrowid. Reconnects on stale stream."""
+        try:
+            cursor = self.connection.execute(query, params)
+            self.connection.commit()
+            return cursor.lastrowid
+        except (ValueError, Exception) as e:
+            if self._is_stale_stream_error(e):
+                logger.warning("Stale Hrana stream detected, reconnecting...")
+                conn = self._reconnect()
+                cursor = conn.execute(query, params)
+                conn.commit()
+                return cursor.lastrowid
+            raise
 
     def execute_many(self, query: str, params_list: list[tuple]) -> None:
-        """Execute batch insert/update."""
-        for params in params_list:
-            self.connection.execute(query, params)
-        self.connection.commit()
+        """Execute batch insert/update. Reconnects on stale stream."""
+        try:
+            for params in params_list:
+                self.connection.execute(query, params)
+            self.connection.commit()
+        except (ValueError, Exception) as e:
+            if self._is_stale_stream_error(e):
+                logger.warning("Stale Hrana stream detected, reconnecting...")
+                conn = self._reconnect()
+                for params in params_list:
+                    conn.execute(query, params)
+                conn.commit()
+                return
+            raise
 
     def init_schema(self) -> None:
         """Initialize database schema."""
@@ -391,6 +427,32 @@ class TursoDatabase:
             }
             for r in rows
         ]
+
+    def get_last_query(self, workflow_type: str) -> dict | None:
+        """Get the most recent query for a specific workflow type."""
+        rows = self.execute(
+            "SELECT id, workflow_type, query_params, leads_returned, leads_exported, created_at "
+            "FROM query_history WHERE workflow_type = ? ORDER BY created_at DESC LIMIT 1",
+            (workflow_type,),
+        )
+        if not rows:
+            return None
+        r = rows[0]
+        return {
+            "id": r[0],
+            "workflow_type": r[1],
+            "query_params": json.loads(r[2]) if r[2] else {},
+            "leads_returned": r[3],
+            "leads_exported": r[4],
+            "created_at": r[5],
+        }
+
+    def update_query_exported(self, query_id: int, leads_exported: int) -> None:
+        """Update the leads_exported count for a query."""
+        self.execute_write(
+            "UPDATE query_history SET leads_exported = ? WHERE id = ?",
+            (leads_exported, query_id),
+        )
 
 
 @st.cache_resource(ttl=3600)  # Refresh connection every hour to prevent stale connections
