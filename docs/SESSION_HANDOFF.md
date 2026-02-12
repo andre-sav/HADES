@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-11
-**Status:** CSS theme overhaul complete, Chrome extension debugging in progress
+**Status:** UX overhaul complete, all sessions committed, outcome-driven scoring designed
 
 ## What's Working
 
@@ -30,8 +30,76 @@
 - **`@st.cache_resource` gotcha** — Code changes to cached classes require Streamlit restart.
 - **Contact Enrich** — Response parsing fixed but never tested with real production data.
 - **Intent search is free** — Only enrichment costs credits. Intent search `credits_used` set to 0.
-- **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee services", "Water Coolers" (not "Vending", "Break Room", etc.)
+- **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers" (not "Vending", "Break Room", etc.)
 - **Claude in Chrome extension conflict** — Claude Desktop's native messaging host (`com.anthropic.claude_browser_extension.json`) claims the same Chrome extension ID as Claude Code's host. Renamed Desktop host to `.bak` but extension still won't connect. May need extension reload or reinstall. See troubleshooting notes in session 5.
+
+---
+
+## Session Summary (2026-02-11, Session 6)
+
+### Visual UX Audit & Fixes (10 issues)
+
+Chrome MCP working — performed visual audit of all 6 pages + home. Identified 10 cross-cutting UX issues and fixed all of them:
+
+1. **White metric cards** — Replaced all `ui.metric_card()` (shadcn iframe, white bg) with custom `metric_card()` across 7 files
+2. **Chart theming** — Executive Summary Plotly charts: per-workflow colors (indigo=Intent, cyan=Geography), transparent bg, dotted gridlines, Urbanist font
+3. **Table styling** — Added `styled_table()` helper with alternating rows, hover, monospace numbers, status pills. Updated home page and Export tables
+4. **Empty states** — Improved Export empty state, Usage weekly context caption, Geography operator count hint
+5. **Button hierarchy** — Verified CSS already correct, no changes needed
+6. **Font loading** — Verified Urbanist + IBM Plex Mono loading correctly via Chrome JS
+7. **Sidebar icons** — CSS pseudo-elements for sidebar nav items
+8. **Color palette** — Progress bar success color changed from green to indigo→cyan gradient
+9. **Loading states** — Consolidated shimmer keyframe to global CSS
+10. **Information density** — Operators pagination (20/page), card-style home quick actions, styled Executive Summary table
+
+### CodeRabbit Review & Fixes (6 applied)
+
+Ran full project review. Applied 6 fixes:
+- Bare `except:pass` → logs error with `st.caption()` (Intent workflow)
+- SQLite parameter limit → batches `IN` clause to 900 params (turso_db.py)
+- Missing delete error handling → try/except with `st.error()` (Operators)
+- `ui.button()` None guard → `bool()` wrapper (ui_components.py)
+- Unreachable geo "selecting" state → changed key from `geo_contacts_by_company` to `geo_preview_contacts`
+- "Coffee services" → "Coffee Services" (icp.yaml)
+
+### Outcome-Driven Scoring Design
+
+Brainstormed and designed a feedback loop system for data-calibrated lead scoring:
+- **Batch ID tracking**: HADES export → VanillaSoft "Import Notes" → Zoho CRM custom field
+- **Outcome tables**: `historical_outcomes` (3,000+ existing leads) + `lead_outcomes` (ongoing)
+- **Historical bootstrap**: Import 319 delivery records + 3,000+ total VanillaSoft-sourced leads from Zoho
+- **Calibration engine**: Conversion rates by SIC code, employee range, proximity, state → replace hardcoded weights
+- **Score Calibration page**: Review suggested vs current weights, approve before applying
+- **Future path**: Graduate to logistic regression at 500+ HADES-originated outcomes
+- Design doc: `docs/plans/2026-02-11-outcome-driven-scoring-design.md`
+
+### Committed All Sessions
+
+First commit since initial: `9b03af0` — 34 files, +4,346/-697 lines covering sessions 1-6. 293 tests pass (pre-commit hook verified).
+
+### Key Files Modified
+```
+ui_components.py               - styled_table(), sidebar icons, progress bar color, shimmer consolidation
+app.py                         - Custom metric cards, styled recent runs table, card-style quick actions
+pages/1_Intent_Workflow.py     - Custom metric cards, enrichment error logging
+pages/2_Geography_Workflow.py  - Custom metric cards, operator count hint
+pages/3_Operators.py           - Custom metric cards, pagination (20/page), delete error handling
+pages/4_CSV_Export.py          - Custom metric cards, styled table, improved empty state
+pages/5_Usage_Dashboard.py     - Custom metric cards, budget context caption
+pages/6_Executive_Summary.py   - Custom metric cards, per-workflow chart colors, styled table, rgba fix
+turso_db.py                    - get_company_ids_bulk batching (900 per query)
+config/icp.yaml                - "Coffee Services" capitalization fix
+docs/plans/2026-02-11-outcome-driven-scoring-design.md  - NEW: outcome scoring design
+docs/ux-audit-2026-02-11.md    - NEW: visual UX audit with 10 findings
+```
+
+### Uncommitted Changes
+None — working tree clean.
+
+### What Needs Doing Next Session
+1. **Implement outcome-driven scoring** — Follow design doc, start with batch ID generation + outcome tables
+2. **Live test all pipelines** — Intent, Geography, Enrich, Export end-to-end (beads HADES-1ln, HADES-kyi, HADES-5c7, HADES-kbu)
+3. **Harden API clients** — Edge case tests for messy data (bead HADES-20n)
 
 ---
 
@@ -224,12 +292,9 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Next Steps (Priority Order)
 
-1. **Verify CSS theme** — Open localhost:8502, review all 6 pages with new theme (fix Chrome extension or just open manually)
-2. **Home page redesign** — Priority 2: active dashboard with pipeline status, next actions
-3. **Table styling** — Priority 3: inline score bars, row emphasis
-4. **Live test Intent pipeline** — Re-run intent search after null fallback fix
-5. **Live test all pipelines** — Intent, Geography, Enrich, Export end-to-end
-6. **Harden API clients** — Edge case tests for messy data
+1. **Implement outcome-driven scoring** — Follow `docs/plans/2026-02-11-outcome-driven-scoring-design.md`
+2. **Live test all pipelines** — Intent, Geography, Enrich, Export end-to-end
+3. **Harden API clients** — Edge case tests for messy data
 
 ## Beads Status
 
@@ -237,7 +302,7 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 HADES-1ln [P2] Live test Intent pipeline end-to-end
 HADES-5c7 [P2] Live test Contact Enrich with real data
 HADES-kyi [P2] Live test Geography pipeline end-to-end
-HADES-bk3 [P2] Production test UX (shadcn, action bar, export validation)
+HADES-bk3 [P2] CLOSED - Production test UX (visual audit + 10 fixes applied)
 HADES-20n [P2] Harden API clients: edge case tests for messy data
 HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
 ```
@@ -260,4 +325,4 @@ bd list                       # All issues
 ```
 
 ---
-*Last updated: 2026-02-11*
+*Last updated: 2026-02-11 (Session 6)*
