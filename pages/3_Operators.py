@@ -6,7 +6,7 @@ Superhuman-inspired: clean, focused, inline editing.
 import streamlit as st
 import streamlit_shadcn_ui as ui
 from turso_db import get_database
-from ui_components import inject_base_styles, page_header, metric_card, paginate_items, pagination_controls
+from ui_components import inject_base_styles, page_header, paginate_items, pagination_controls
 
 st.set_page_config(page_title="Operators", page_icon="👤", layout="wide")
 
@@ -49,13 +49,13 @@ if "operators_adding" not in st.session_state:
 # =============================================================================
 # HEADER
 # =============================================================================
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.title("Operators")
-    st.caption("Manage operators for lead assignment")
-with col2:
-    operators = db.get_operators()
-    metric_card("Operators", len(operators))
+operators = db.get_operators()
+
+page_header(
+    "Operators",
+    "Manage operators for lead assignment",
+    right_content=(f'<span style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: 600; color: #f0f2f5;">{len(operators)}</span>', f"{len(operators):,} operators"),
+)
 
 st.markdown("---")
 

@@ -1024,8 +1024,9 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
     @st.fragment
     def intent_results_table(scored_leads):
         display_data = []
-        for lead in scored_leads:
+        for idx, lead in enumerate(scored_leads):
             display_data.append({
+                "_idx": idx,
                 "Name": f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(),
                 "Title": lead.get("jobTitle", ""),
                 "Company": lead.get("companyName", "") or lead.get("company", {}).get("name", ""),
@@ -1075,7 +1076,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
 
         # Display
         st.dataframe(
-            filtered_df,
+            filtered_df.drop(columns=["_idx"]),
             use_container_width=True,
             hide_index=True,
             column_config={
@@ -1101,7 +1102,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         col1, col2, col3 = st.columns([2, 1, 1])
 
         with col2:
-            csv = filtered_df.to_csv(index=False)
+            csv = filtered_df.drop(columns=["_idx"]).to_csv(index=False)
             st.download_button(
                 "📥 Download CSV",
                 data=csv,
@@ -1115,7 +1116,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
 
         # Store for export page
         if len(filtered_df) > 0:
-            filtered_indices = filtered_df.index.tolist()
+            filtered_indices = filtered_df["_idx"].tolist()
             st.session_state.intent_export_leads = [scored_leads[i] for i in filtered_indices]
 
     intent_results_table(scored)

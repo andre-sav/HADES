@@ -7,14 +7,17 @@ hard_filters:
     minimum: 50
     maximum: 5000
 
-  # SIC codes - 22 target codes for ZoomInfo queries
-  # Source: ZoomInfo account filter (2026-01-30)
+  # SIC codes - 25 target codes for ZoomInfo queries
+  # Source: ZoomInfo account filter (2026-01-30) + 3 from HLM delivery data
   sic_codes:
     - "3531"    # Construction Machinery
     - "3599"    # Industrial Machinery NEC
     - "3999"    # Manufacturing Industries NEC
+    - "4213"    # Trucking, Except Local (NEW - 19.0% delivery rate)
     - "4225"    # General Warehousing and Storage
     - "4231"    # Terminal and Joint Terminal Maintenance
+    - "4581"    # Services to Air Transportation (NEW - 27.3% delivery rate)
+    - "4731"    # Freight Transportation Arrangement (NEW - 20.0% delivery rate)
     - "5511"    # Motor Vehicle Dealers (New and Used)
     - "7011"    # Hotels and Motels
     - "7021"    # Rooming and Boarding Houses
@@ -71,53 +74,41 @@ freshness:
     label: "Stale"
 
 # On-site Likelihood by SIC Code (for scoring)
-# High = employees consistently on-site (100 points)
-# Medium = mixed on-site/remote (70 points)
-# Low = often remote-capable (40 points)
+# Scores derived from HLM delivery data (N=3,135, Delivered vs Not Delivered)
+# Min-max scaled: best SIC=100, worst SIC=20, min 10 records required
+# SICs without sufficient data use the default score
 onsite_likelihood:
-  high:
-    score: 100
-    sic_codes:
-      - "3531"    # Construction Machinery
-      - "4225"    # Warehousing
-      - "7011"    # Hotels
-      - "7021"    # Rooming/Boarding Houses
-      - "7991"    # Fitness Facilities
-      - "8051"    # Skilled Nursing
-      - "8059"    # Nursing Care
-      - "8062"    # Hospitals
-      - "8211"    # Schools
-      - "8221"    # Colleges
-      - "8361"    # Residential Care
-      - "9223"    # Correctional Institutions
-      - "9711"    # National Security
-  medium:
-    score: 70
-    sic_codes:
-      - "3599"    # Industrial Machinery
-      - "4231"    # Terminal Maintenance
-      - "5511"    # Auto Dealers
-      - "7033"    # RV Parks
-      - "7359"    # Equipment Rental
-      - "8322"    # Social Services
-      - "8331"    # Job Training
-  low:
-    score: 40
-    sic_codes:
-      - "3999"    # Manufacturing NEC
-      - "9229"    # Public Safety
+  sic_scores:
+    "3599":  47    # Industrial Machinery NEC         (N=33, rate=9.1%)
+    "3999":  35    # Manufacturing Industries NEC      (N=76, rate=5.3%)
+    "4213":  76    # Trucking, Except Local            (N=79, rate=19.0%)
+    "4581": 100    # Services to Air Transportation    (N=11, rate=27.3%)
+    "4731":  79    # Freight Transportation            (N=20, rate=20.0%)
+    "5511":  43    # Motor Vehicle Dealers             (N=379, rate=7.9%)
+    "7011":  40    # Hotels and Motels                 (N=410, rate=6.8%)
+    "7991":  50    # Physical Fitness Facilities       (N=39, rate=10.3%)
+    "8051":  42    # Skilled Nursing Care              (N=245, rate=7.3%)
+    "8059":  56    # Nursing and Personal Care NEC     (N=146, rate=12.3%)
+    "8062":  33    # General Medical Hospitals         (N=133, rate=4.5%)
+    "8211":  37    # Elementary and Secondary Schools  (N=236, rate=5.9%)
+    "8221":  41    # Colleges and Universities         (N=28, rate=7.1%)
+    "8322":  31    # Individual and Family Services    (N=78, rate=3.8%)
+    "8331":  51    # Job Training and Vocational Rehab (N=67, rate=10.4%)
+    "8361":  71    # Residential Care                  (N=218, rate=17.4%)
+  default: 40            # Unknown/insufficient data SICs
 
 # Employee Scale Scoring (for geography workflow)
+# Scores derived from HLM delivery data — small companies convert best
 employee_scale:
   - min: 50
     max: 100
-    score: 40
+    score: 100   # 10.0% delivery rate (was 40)
   - min: 101
     max: 500
-    score: 70
+    score: 80    # 7.7% delivery rate (was 70)
   - min: 501
     max: 999999
-    score: 100
+    score: 20    # 1.0% delivery rate (was 100)
 
 # Proximity Scoring (for geography workflow)
 # Score based on distance from target zip

@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-11
-**Status:** UX overhaul complete, all sessions committed, outcome-driven scoring designed
+**Date:** 2026-02-12
+**Status:** Data-driven scoring calibration complete, full code review fixes applied, 296 tests passing
 
 ## What's Working
 
@@ -10,8 +10,8 @@
 3. **Contact Enrich** - 3-level nested response parsing fixed (needs production test)
 4. **Intent Search** - Legacy `/search/intent` with proper field normalization (nested `company` object + null field fallbacks)
 5. **Two-Phase Intent Pipeline** - Phase 1: Resolve hashed→numeric company IDs (enrich 1 contact, cache in Turso). Phase 2: Contact Search with ICP filters (management level, accuracy, phone)
-6. **Scoring** - Intent leads, geography leads, and intent-contact scoring. US date format parsing for legacy API (`M/D/YYYY h:mm AM`)
-7. **CSV Export** - VanillaSoft format, supports both workflows + validation checklist
+6. **Scoring** - Data-calibrated per-SIC scores from HLM delivery data (N=3,136). Inverted employee scale. 25 SIC codes.
+7. **CSV Export** - VanillaSoft format, supports both workflows + validation checklist + mobile phone formatting
 8. **Test Mode** - Skips enrichment step only (search calls still use real API)
 9. **Target Contacts Expansion** - Auto-expand search to meet target count (Geography)
 10. **Combined Location Search** - Toggle to merge PersonAndHQ + Person results (Geography)
@@ -22,6 +22,7 @@
 15. **Token Persistence** - ZoomInfo JWT saved to Turso `sync_metadata` table, loaded on restart
 16. **Company ID Cache** - Turso `company_id_mapping` table persists hashed→numeric ID resolutions across sessions
 17. **Editable Contact Filters** - Management level, accuracy minimum, phone fields editable in Intent Workflow Filters expander
+18. **Calibration Script** - `calibrate_scoring.py` analyzes enriched delivery data and outputs per-SIC scores
 
 ## Known Issues
 
@@ -32,6 +33,78 @@
 - **Intent search is free** — Only enrichment costs credits. Intent search `credits_used` set to 0.
 - **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers" (not "Vending", "Break Room", etc.)
 - **Claude in Chrome extension conflict** — Claude Desktop's native messaging host (`com.anthropic.claude_browser_extension.json`) claims the same Chrome extension ID as Claude Code's host. Renamed Desktop host to `.bak` but extension still won't connect. May need extension reload or reinstall. See troubleshooting notes in session 5.
+
+---
+
+## Session Summary (2026-02-12, Session 7)
+
+### Data-Driven Scoring Calibration (Plan Implementation)
+
+Replaced all intuition-based scoring with empirically derived values from 3,136 HLM Locating delivery records:
+
+1. **Created `data/sic_manual_overrides.csv`** — 29 manual SIC classifications for Delivered records with no `vs_sic` match (100% SIC coverage on delivered records)
+2. **Created `calibrate_scoring.py`** — Standalone analysis script: reads enriched CSV + overrides, computes per-SIC delivery rates, min-max scales to 20-100 scores, analyzes employee scale
+3. **Updated `config/icp.yaml`** — Replaced tier-based `onsite_likelihood` (high=100/medium=70/low=40) with per-SIC score map (16 SICs with 10+ records). Inverted `employee_scale` (50-100emp→100, 501+→20). Added 3 new SIC codes (4213 Trucking, 4581 Aviation, 4731 Freight). Total: 22→25 SICs.
+4. **Rewrote `utils.py:get_onsite_likelihood_score()`** — From tier-iteration to single dict lookup against `sic_scores` map
+5. **Updated all tests** — New per-SIC score assertions, inverted employee scale, recalculated composite scores
+
+**Key data insights:**
+- Hotels (7011) dropped from 100→40 (only 6.8% delivery rate)
+- Residential Care (8361) rose to 71 (17.4% rate)
+- Aviation Services (4581) top performer at 100 (27.3% rate)
+- Small companies (50-100emp) convert at 10% vs large (501+) at 1% — completely inverted from prior assumption
+
+### Full Project Code Review (13 Issues Fixed)
+
+Ran comprehensive code review, identified and fixed all 13 issues:
+
+**Critical (2):**
+- DataFrame index mismatch in Intent/Geography workflows — added `_idx` column for safe filtered-row mapping
+- Parameter mutation in ZoomInfo pagination — added `dataclasses.replace()` copies in all 3 methods
+
+**High (4):**
+- Redundant `(ValueError, Exception)` catch → simplified to `Exception` in turso_db.py
+- `execute_many` replay risk — added rollback + docstring explaining reconnect safety
+- CLAUDE.md stale "22 SIC codes" → updated to 25 in 3 locations
+- Mobile phone unformatted in export — added `format_phone()` call
+
+**Medium (7):**
+- Hardcoded SIC sets in calibration script → reads from icp.yaml via `load_icp_sics()`
+- `lru_cache` on `load_config()` prevents hot-reload → added docstring note
+- Missing combined search integration tests → added 2 tests
+- Hardcoded proximity default 70 → config-driven `get_proximity_score(15.0)`
+- `_last_auth_response` not initialized in `__init__` → added
+- Budget alert scale inconsistency → normalized to `threshold_percent`
+- Missing enrich response format tests → added 2 tests for uncovered paths
+
+### Key Files Modified
+```
+config/icp.yaml               - Per-SIC scores, inverted employee scale, 3 new SIC codes
+utils.py                       - Rewrote get_onsite_likelihood_score(), 3 new SIC descriptions
+scoring.py                     - Config-driven proximity default
+calibrate_scoring.py           - NEW: calibration analysis script
+data/sic_manual_overrides.csv  - NEW: 29 manual SIC classifications
+pages/1_Intent_Workflow.py     - _idx column for safe index mapping
+pages/2_Geography_Workflow.py  - _idx column for safe index mapping
+zoominfo_client.py             - replace(params) copies, _last_auth_response init
+turso_db.py                    - Simplified exception handling, execute_many rollback
+export.py                      - Mobile phone formatting
+cost_tracker.py                - Budget alert scale normalization
+CLAUDE.md                      - Updated SIC count 22→25
+tests/test_utils.py            - Empirical score assertions, inverted employee scale
+tests/test_scoring.py          - Recalculated composite scores
+tests/test_export.py           - Mobile phone formatting test
+tests/test_expand_search.py    - 2 combined search integration tests
+tests/test_zoominfo_client.py  - 2 enrich response format tests
+```
+
+### Uncommitted Changes
+21 files modified (+523/-311 lines) plus new untracked files (calibrate_scoring.py, sic_manual_overrides.csv, enrichment data files, screenshots). All changes uncommitted — needs commit.
+
+### What Needs Doing Next Session
+1. **Commit all changes** — 21 modified files + new files from sessions 6-7
+2. **Live test all pipelines** — Intent, Geography, Enrich, Export end-to-end (beads HADES-1ln, HADES-kyi, HADES-5c7, HADES-kbu)
+3. **Harden API clients** — Edge case tests for messy data (bead HADES-20n)
 
 ---
 
@@ -281,7 +354,7 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Test Coverage
 
-- **293 tests passing** (all green, run `python -m pytest tests/ -v`)
+- **296 tests passing** (all green, run `python -m pytest tests/ -v`)
 
 ## API Usage
 
@@ -292,7 +365,7 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Next Steps (Priority Order)
 
-1. **Implement outcome-driven scoring** — Follow `docs/plans/2026-02-11-outcome-driven-scoring-design.md`
+1. **Commit all changes** — 21 modified files from sessions 6-7 + new files
 2. **Live test all pipelines** — Intent, Geography, Enrich, Export end-to-end
 3. **Harden API clients** — Edge case tests for messy data
 
@@ -319,10 +392,11 @@ To restore: rename back (remove `.bak`). Extension still not connecting after re
 
 ```bash
 streamlit run app.py          # Run app (currently running on port 8502)
-python -m pytest tests/ -v    # Run tests (293 passing)
+python -m pytest tests/ -v    # Run tests (296 passing)
 bd ready                      # See available work
 bd list                       # All issues
+python calibrate_scoring.py   # Re-run calibration analysis
 ```
 
 ---
-*Last updated: 2026-02-11 (Session 6)*
+*Last updated: 2026-02-12 (Session 7)*

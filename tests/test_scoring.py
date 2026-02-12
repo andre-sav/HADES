@@ -28,14 +28,15 @@ class TestIntentScoring:
         lead = {
             "intentStrength": "High",
             "intentDate": today,
-            "sicCode": "7011",  # Hotels - high on-site
+            "sicCode": "7011",  # Hotels - 6.8% delivery rate
         }
 
         result = calculate_intent_score(lead)
 
-        assert result["score"] >= 90  # Should be very high
+        # 100*0.50 + 40*0.25 + 100*0.25 = 85
+        assert result["score"] == 85
         assert result["signal_score"] == 100
-        assert result["onsite_score"] == 100
+        assert result["onsite_score"] == 40
         assert result["freshness_score"] == 100
         assert result["freshness_label"] == "Hot"
         assert result["excluded"] is False
@@ -46,14 +47,15 @@ class TestIntentScoring:
         lead = {
             "intentStrength": "Medium",
             "intentDate": warm_date,
-            "sicCode": "5511",  # Auto Dealers - medium on-site
+            "sicCode": "5511",  # Auto Dealers - 7.9% delivery rate
         }
 
         result = calculate_intent_score(lead)
 
-        assert 50 <= result["score"] <= 75
+        # 70*0.50 + 43*0.25 + 70*0.25 = 63.25 -> 63
+        assert result["score"] == 63
         assert result["signal_score"] == 70
-        assert result["onsite_score"] == 70
+        assert result["onsite_score"] == 43
         assert result["freshness_score"] == 70
         assert result["freshness_label"] == "Warm"
         assert result["excluded"] is False
@@ -64,14 +66,15 @@ class TestIntentScoring:
         lead = {
             "intentStrength": "Low",
             "intentDate": cooling_date,
-            "sicCode": "3999",  # Manufacturing NEC - low on-site
+            "sicCode": "3999",  # Manufacturing NEC - 5.3% delivery rate
         }
 
         result = calculate_intent_score(lead)
 
-        assert result["score"] <= 50
+        # 40*0.50 + 35*0.25 + 40*0.25 = 38.75 -> 39
+        assert result["score"] == 39
         assert result["signal_score"] == 40
-        assert result["onsite_score"] == 40
+        assert result["onsite_score"] == 35
         assert result["freshness_score"] == 40
         assert result["freshness_label"] == "Cooling"
         assert result["excluded"] is False
@@ -109,7 +112,7 @@ class TestIntentScoring:
         lead = {
             "intentStrength": "High",  # 100 * 0.50 = 50
             "intentDate": today,        # 100 * 0.25 = 25
-            "sicCode": "7011",          # 100 * 0.25 = 25
+            "sicCode": "4581",          # 100 * 0.25 = 25 (best SIC)
         }
 
         result = calculate_intent_score(lead)
@@ -125,46 +128,49 @@ class TestGeographyScoring:
         """Test scoring for close, large company."""
         lead = {
             "distance": 3.0,
-            "sicCode": "7011",  # Hotels - high on-site
+            "sicCode": "7011",  # Hotels - 6.8% delivery rate
             "employees": 600,
         }
 
         result = calculate_geography_score(lead)
 
-        assert result["score"] >= 90
+        # 100*0.50 + 40*0.30 + 20*0.20 = 66
+        assert result["score"] == 66
         assert result["proximity_score"] == 100  # Within 5 miles
-        assert result["onsite_score"] == 100
-        assert result["employee_score"] == 100  # 500+
+        assert result["onsite_score"] == 40
+        assert result["employee_score"] == 20   # 500+ (worst bucket)
 
     def test_medium_distance_medium_company(self):
         """Test scoring for medium distance, medium company."""
         lead = {
             "distance": 15.0,
-            "sicCode": "5511",  # Auto Dealers - medium on-site
+            "sicCode": "5511",  # Auto Dealers - 7.9% delivery rate
             "employees": 200,
         }
 
         result = calculate_geography_score(lead)
 
-        assert 50 <= result["score"] <= 80
+        # 70*0.50 + 43*0.30 + 80*0.20 = 63.9 -> 64
+        assert result["score"] == 64
         assert result["proximity_score"] == 70  # 10-25 miles
-        assert result["onsite_score"] == 70
-        assert result["employee_score"] == 70  # 100-500
+        assert result["onsite_score"] == 43
+        assert result["employee_score"] == 80  # 100-500
 
     def test_far_small_company(self):
         """Test scoring for far, small company."""
         lead = {
             "distance": 60.0,
-            "sicCode": "3999",  # Manufacturing NEC - low on-site
+            "sicCode": "3999",  # Manufacturing NEC - 5.3% delivery rate
             "employees": 75,
         }
 
         result = calculate_geography_score(lead)
 
-        assert result["score"] <= 50
+        # 30*0.50 + 35*0.30 + 100*0.20 = 45.5 -> 46
+        assert result["score"] == 46
         assert result["proximity_score"] == 30  # 50-100 miles
-        assert result["onsite_score"] == 40
-        assert result["employee_score"] == 40  # 50-100
+        assert result["onsite_score"] == 35
+        assert result["employee_score"] == 100  # 50-100 (best bucket)
 
     def test_missing_distance(self):
         """Test handling of missing distance."""

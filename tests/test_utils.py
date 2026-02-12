@@ -48,8 +48,11 @@ class TestConfigLoading:
         """Test SIC codes list."""
         codes = get_sic_codes()
         assert isinstance(codes, list)
-        assert len(codes) == 22  # 22 target SIC codes from ZoomInfo filter
+        assert len(codes) == 25  # 22 original + 3 from HLM delivery data
         assert "7011" in codes  # Hotels
+        assert "4213" in codes  # Trucking (new)
+        assert "4581" in codes  # Aviation (new)
+        assert "4731" in codes  # Freight (new)
 
     def test_get_employee_minimum(self):
         """Test employee minimum."""
@@ -60,7 +63,7 @@ class TestConfigLoading:
         """Test SIC codes return with descriptions."""
         result = get_sic_codes_with_descriptions()
 
-        assert len(result) == 22
+        assert len(result) == 25
         assert all(isinstance(item, tuple) for item in result)
         assert all(len(item) == 2 for item in result)
 
@@ -145,34 +148,39 @@ class TestScoringConfig:
         mult, label = get_freshness_multiplier(100)
         assert mult == 0.0
 
-    def test_get_onsite_likelihood_high(self):
-        """Test high on-site likelihood SIC codes."""
-        assert get_onsite_likelihood_score("7011") == 100  # Hotels
-        assert get_onsite_likelihood_score("8062") == 100  # Hospitals
-        assert get_onsite_likelihood_score("8211") == 100  # Schools
+    def test_get_onsite_likelihood_empirical_scores(self):
+        """Test per-SIC scores from HLM delivery data calibration."""
+        assert get_onsite_likelihood_score("4581") == 100  # Aviation (27.3% rate)
+        assert get_onsite_likelihood_score("4731") == 79   # Freight (20.0% rate)
+        assert get_onsite_likelihood_score("4213") == 76   # Trucking (19.0% rate)
+        assert get_onsite_likelihood_score("8361") == 71   # Residential Care (17.4%)
+        assert get_onsite_likelihood_score("8059") == 56   # Nursing Care (12.3%)
+        assert get_onsite_likelihood_score("8331") == 51   # Job Training (10.4%)
+        assert get_onsite_likelihood_score("7991") == 50   # Fitness (10.3%)
+        assert get_onsite_likelihood_score("3599") == 47   # Industrial Machinery (9.1%)
+        assert get_onsite_likelihood_score("5511") == 43   # Auto Dealers (7.9%)
+        assert get_onsite_likelihood_score("8051") == 42   # Skilled Nursing (7.3%)
+        assert get_onsite_likelihood_score("8221") == 41   # Colleges (7.1%)
+        assert get_onsite_likelihood_score("7011") == 40   # Hotels (6.8%)
+        assert get_onsite_likelihood_score("8211") == 37   # Schools (5.9%)
+        assert get_onsite_likelihood_score("3999") == 35   # Manufacturing NEC (5.3%)
+        assert get_onsite_likelihood_score("8062") == 33   # Hospitals (4.5%)
+        assert get_onsite_likelihood_score("8322") == 31   # Social Services (3.8%)
 
-    def test_get_onsite_likelihood_medium(self):
-        """Test medium on-site likelihood SIC codes."""
-        assert get_onsite_likelihood_score("5511") == 70  # Auto Dealers
-        assert get_onsite_likelihood_score("7033") == 70  # RV Parks
-
-    def test_get_onsite_likelihood_low(self):
-        """Test low on-site likelihood SIC codes."""
-        assert get_onsite_likelihood_score("3999") == 40  # Manufacturing NEC
-        assert get_onsite_likelihood_score("9229") == 40  # Public Safety
-
-    def test_get_onsite_likelihood_unknown(self):
-        """Test unknown SIC code defaults to low."""
-        assert get_onsite_likelihood_score("9999") == 40
+    def test_get_onsite_likelihood_default(self):
+        """Test SICs without sufficient data use default score."""
+        assert get_onsite_likelihood_score("9999") == 40  # Unknown SIC
+        assert get_onsite_likelihood_score("3531") == 40  # ICP but no data
+        assert get_onsite_likelihood_score("9229") == 40  # ICP but no data
 
     def test_get_employee_scale_score(self):
-        """Test employee scale scoring."""
-        assert get_employee_scale_score(50) == 40
-        assert get_employee_scale_score(100) == 40
-        assert get_employee_scale_score(101) == 70
-        assert get_employee_scale_score(500) == 70
-        assert get_employee_scale_score(501) == 100
-        assert get_employee_scale_score(10000) == 100
+        """Test employee scale scoring (inverted — small companies convert best)."""
+        assert get_employee_scale_score(50) == 100   # Small: 10.0% delivery rate
+        assert get_employee_scale_score(100) == 100
+        assert get_employee_scale_score(101) == 80    # Medium: 7.7% delivery rate
+        assert get_employee_scale_score(500) == 80
+        assert get_employee_scale_score(501) == 20    # Large: 1.0% delivery rate
+        assert get_employee_scale_score(10000) == 20
 
     def test_get_proximity_score(self):
         """Test proximity scoring."""

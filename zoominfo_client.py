@@ -6,7 +6,7 @@ import logging
 import time
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -211,6 +211,7 @@ class ZoomInfoClient:
         self._last_request_time: float = 0.0
         self._token_store = token_store  # TursoDatabase instance for token persistence
         self.last_exchange: dict | None = None  # Captures last API request/response for debugging
+        self._last_auth_response: dict | None = None  # Captures auth error details for debugging
 
     def _get_token(self) -> str:
         """Get valid access token, refreshing if needed."""
@@ -645,6 +646,7 @@ class ZoomInfoClient:
         current_page = 1
         raw_keys = []
         raw_sample = {}
+        params = replace(params)  # Local copy to avoid mutating caller's params
 
         while current_page <= max_pages:
             params.page = current_page
@@ -689,6 +691,7 @@ class ZoomInfoClient:
         logger.info(f"Company Search (all pages): {len(params.zip_codes)} ZIP(s), max_pages={max_pages}")
         all_leads = []
         current_page = 1
+        params = replace(params)  # Local copy to avoid mutating caller's params
 
         while current_page <= max_pages:
             params.page = current_page
@@ -867,7 +870,6 @@ class ZoomInfoClient:
                 logger.info(f"Contact Search: Batch {batch_num}/{total_batches} with {len(batch_zips)} ZIPs")
 
                 # Create params copy with batch ZIPs
-                from dataclasses import replace
                 batch_params = replace(params, zip_codes=batch_zips)
 
                 batch_contacts = self._search_contacts_single_batch(batch_params, max_pages, progress_callback)
@@ -904,6 +906,7 @@ class ZoomInfoClient:
         all_contacts = []
         current_page = 1
         actual_page_size = None  # Track what ZoomInfo actually returns per page
+        params = replace(params)  # Local copy to avoid mutating caller's params
 
         while current_page <= max_pages:
             params.page = current_page
@@ -964,7 +967,6 @@ class ZoomInfoClient:
 
             logger.info(f"Contact Search: Company batch {batch_num}/{total_batches} with {len(batch_ids)} IDs")
 
-            from dataclasses import replace
             batch_params = replace(params, company_ids=batch_ids)
 
             batch_contacts = self._search_contacts_single_batch(batch_params, max_pages, progress_callback)

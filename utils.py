@@ -14,7 +14,10 @@ import yaml
 
 @lru_cache(maxsize=1)
 def load_config() -> dict:
-    """Load ICP configuration from YAML file."""
+    """Load ICP configuration from YAML file.
+
+    Cached for the process lifetime — restart the app to pick up YAML changes.
+    """
     config_path = Path(__file__).parent / "config" / "icp.yaml"
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
@@ -53,17 +56,15 @@ def get_freshness_multiplier(age_days: int) -> tuple[float, str]:
 
 
 def get_onsite_likelihood_score(sic_code: str) -> int:
-    """Get on-site likelihood score for a SIC code."""
+    """Get on-site likelihood score for a SIC code.
+
+    Looks up per-SIC scores derived from HLM delivery data.
+    Falls back to default score for unknown SICs.
+    """
     config = load_config()
     onsite = config.get("onsite_likelihood", {})
-
-    for level in ["high", "medium", "low"]:
-        level_config = onsite.get(level, {})
-        if sic_code in level_config.get("sic_codes", []):
-            return level_config.get("score", 40)
-
-    # Default to low if SIC not found
-    return 40
+    sic_scores = onsite.get("sic_scores", {})
+    return sic_scores.get(sic_code, onsite.get("default", 40))
 
 
 def get_employee_scale_score(employee_count: int) -> int:
@@ -114,13 +115,16 @@ def get_sic_codes() -> list[str]:
     return config.get("hard_filters", {}).get("sic_codes", [])
 
 
-# SIC code descriptions for UI display (22 target codes)
+# SIC code descriptions for UI display (25 target codes)
 SIC_CODE_DESCRIPTIONS = {
     "3531": "Construction Machinery",
     "3599": "Industrial Machinery NEC",
     "3999": "Manufacturing Industries NEC",
+    "4213": "Trucking, Except Local",
     "4225": "General Warehousing and Storage",
     "4231": "Terminal and Joint Terminal Maintenance",
+    "4581": "Services to Air Transportation",
+    "4731": "Freight Transportation Arrangement",
     "5511": "Motor Vehicle Dealers (New and Used)",
     "7011": "Hotels and Motels",
     "7021": "Rooming and Boarding Houses",

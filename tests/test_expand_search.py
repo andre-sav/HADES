@@ -446,3 +446,91 @@ class TestLocationTypeTagging:
                 all_contacts[person_id] = c
 
         assert "_location_type" not in all_contacts["p1"]
+
+
+class TestCombinedSearchIntegration:
+    """Test the combined PersonAndHQ + Person search path through expand_search."""
+
+    @patch("expand_search.time.sleep")  # Skip rate limit delay in tests
+    def test_combined_search_makes_two_api_calls(self, mock_sleep):
+        """When include_person_only=True, expand_search runs both PersonAndHQ and Person searches."""
+        from expand_search import expand_search
+
+        mock_client = Mock()
+        personandhq_contacts = [
+            {"personId": "p1", "companyId": "c1", "companyName": "HQ Corp",
+             "contactAccuracyScore": 95, "firstName": "Alice", "lastName": "A"},
+        ]
+        person_only_contacts = [
+            {"personId": "p2", "companyId": "c2", "companyName": "Branch Corp",
+             "contactAccuracyScore": 92, "firstName": "Bob", "lastName": "B"},
+        ]
+
+        # expand_search calls client.search_contacts_all_pages
+        mock_client.search_contacts_all_pages.side_effect = [
+            personandhq_contacts,
+            person_only_contacts,
+        ]
+
+        result = expand_search(
+            client=mock_client,
+            base_params={
+                "radius": 10.0,
+                "accuracy_min": 95,
+                "management_levels": ["Manager"],
+                "employee_max": 5000,
+                "location_type": "PersonAndHQ",
+                "include_person_only": True,
+                "sic_codes": ["7011"],
+            },
+            zip_codes=["75201"],
+            states=["TX"],
+            target=2,
+            stop_early=True,
+        )
+
+        # Should have made 2 API calls (PersonAndHQ + Person)
+        assert result["searches_performed"] == 2
+        assert mock_client.search_contacts_all_pages.call_count == 2
+        # Should have found both contacts
+        assert len(result["contacts"]) == 2
+        # Contacts should be tagged with location type
+        contacts_by_pid = {c["personId"]: c for c in result["contacts"]}
+        assert contacts_by_pid["p1"]["_location_type"] == "PersonAndHQ"
+        assert contacts_by_pid["p2"]["_location_type"] == "Person"
+
+    @patch("expand_search.time.sleep")
+    def test_combined_search_deduplicates_across_searches(self, mock_sleep):
+        """Person-only duplicates of PersonAndHQ contacts should be dropped."""
+        from expand_search import expand_search
+
+        mock_client = Mock()
+        shared_contact = {
+            "personId": "p1", "companyId": "c1", "companyName": "Overlap Corp",
+            "contactAccuracyScore": 95, "firstName": "Alice", "lastName": "A",
+        }
+        mock_client.search_contacts_all_pages.side_effect = [
+            [shared_contact],
+            [dict(shared_contact)],  # Duplicate in Person search
+        ]
+
+        result = expand_search(
+            client=mock_client,
+            base_params={
+                "radius": 10.0,
+                "accuracy_min": 95,
+                "management_levels": ["Manager"],
+                "employee_max": 5000,
+                "location_type": "PersonAndHQ",
+                "include_person_only": True,
+                "sic_codes": ["7011"],
+            },
+            zip_codes=["75201"],
+            states=["TX"],
+            target=5,
+            stop_early=False,
+        )
+
+        # Should only have 1 unique contact despite appearing in both searches
+        assert len(result["contacts"]) == 1
+        assert result["contacts"][0]["_location_type"] == "PersonAndHQ"

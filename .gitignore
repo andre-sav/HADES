@@ -31,3 +31,13 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Large data files (enrichment intermediates)
+data/enriched_*.csv
+data/nonhlm_*.csv
+
+# Screenshots
+/*.png
+
+# Playwright MCP
+.playwright-mcp/

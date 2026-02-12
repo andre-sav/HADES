@@ -44,7 +44,7 @@ class TursoDatabase:
         try:
             cursor = self.connection.execute(query, params)
             return cursor.fetchall()
-        except (ValueError, Exception) as e:
+        except Exception as e:
             if self._is_stale_stream_error(e):
                 logger.warning("Stale Hrana stream detected, reconnecting...")
                 cursor = self._reconnect().execute(query, params)
@@ -57,7 +57,7 @@ class TursoDatabase:
             cursor = self.connection.execute(query, params)
             self.connection.commit()
             return cursor.lastrowid
-        except (ValueError, Exception) as e:
+        except Exception as e:
             if self._is_stale_stream_error(e):
                 logger.warning("Stale Hrana stream detected, reconnecting...")
                 conn = self._reconnect()
@@ -67,14 +67,23 @@ class TursoDatabase:
             raise
 
     def execute_many(self, query: str, params_list: list[tuple]) -> None:
-        """Execute batch insert/update. Reconnects on stale stream."""
+        """Execute batch insert/update. Reconnects on stale stream.
+
+        Safe to replay all items on reconnect because the old connection
+        never committed — partial writes are rolled back when the stream dies.
+        """
         try:
             for params in params_list:
                 self.connection.execute(query, params)
             self.connection.commit()
-        except (ValueError, Exception) as e:
+        except Exception as e:
             if self._is_stale_stream_error(e):
                 logger.warning("Stale Hrana stream detected, reconnecting...")
+                # Attempt rollback on old connection to ensure no partial state
+                try:
+                    self.connection.rollback()
+                except Exception:
+                    pass  # Connection is dead, rollback is best-effort
                 conn = self._reconnect()
                 for params in params_list:
                     conn.execute(query, params)

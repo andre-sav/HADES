@@ -1326,7 +1326,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
     @st.fragment
     def geo_results_table(scored_leads):
         display_data = []
-        for lead in scored_leads:
+        for idx, lead in enumerate(scored_leads):
             loc_type = lead.get("_location_type", "")
             loc_type_display = ""
             if loc_type == "PersonAndHQ":
@@ -1335,6 +1335,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                 loc_type_display = "Person-only"
 
             display_data.append({
+                "_idx": idx,
                 "Name": f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(),
                 "Title": lead.get("jobTitle", ""),
                 "Company": lead.get("companyName", "") or lead.get("company", {}).get("name", ""),
@@ -1383,7 +1384,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
 
         # Display table
         st.dataframe(
-            filtered_df,
+            filtered_df.drop(columns=["_idx"]),
             use_container_width=True,
             hide_index=True,
             column_config={
@@ -1414,7 +1415,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                 st.caption(f"Export for: **{op.get('operator_name')}** · {op.get('vending_business_name') or 'N/A'}")
 
         with col2:
-            csv = filtered_df.to_csv(index=False)
+            csv = filtered_df.drop(columns=["_idx"]).to_csv(index=False)
             st.download_button(
                 "📥 Download CSV",
                 data=csv,
@@ -1428,7 +1429,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
 
         # Store for export page
         if len(filtered_df) > 0:
-            filtered_indices = filtered_df.index.tolist()
+            filtered_indices = filtered_df["_idx"].tolist()
             st.session_state.geo_export_leads = [scored_leads[i] for i in filtered_indices]
 
     geo_results_table(scored)

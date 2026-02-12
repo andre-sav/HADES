@@ -173,7 +173,7 @@ def inject_base_styles():
 
     h1 {{
         font-weight: 800 !important;
-        font-size: 1.75rem !important;
+        font-size: {FONT_SIZES['3xl']} !important;
     }}
 
     h2 {{
@@ -294,7 +294,7 @@ def inject_base_styles():
     div[data-testid="stMultiSelect"] label,
     div[data-testid="stTextArea"] label {{
         font-family: var(--font-body) !important;
-        font-size: 0.8rem !important;
+        font-size: {FONT_SIZES['xs']} !important;
         font-weight: 500 !important;
         color: {COLORS['text_secondary']} !important;
         text-transform: uppercase;
@@ -684,23 +684,11 @@ def inject_base_styles():
         background: {COLORS['bg_secondary']};
         border: 1px solid {COLORS['border']};
         border-radius: var(--radius);
-        padding: 0.85rem;
+        padding: 1rem 1rem 0.75rem;
         position: relative;
         overflow: hidden;
         box-shadow: var(--card-shadow);
         transition: box-shadow var(--transition), border-color var(--transition);
-    }}
-
-    /* Gradient accent line at top of cards */
-    .metric-card::before {{
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: var(--accent-gradient-h);
-        opacity: 0.7;
     }}
 
     .metric-card:hover {{
@@ -709,10 +697,11 @@ def inject_base_styles():
     }}
 
     .metric-card-value {{
-        font-size: 1.4rem;
-        font-weight: 600;
+        font-size: 1.5rem;
+        font-weight: 700;
         color: {COLORS['text_primary']};
         margin: 0;
+        line-height: 1.2;
     }}
 
     .metric-card-label {{
@@ -722,7 +711,7 @@ def inject_base_styles():
         color: {COLORS['text_muted']};
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        margin: 0 0 2px 0;
+        margin: 0 0 4px 0;
     }}
 
     .metric-card-delta {{
@@ -808,6 +797,43 @@ def inject_base_styles():
 
     .progress-bar-info {{
         background: var(--accent-gradient-h);
+    }}
+
+    /* ================================================================
+       QUICK ACTION CARDS (home page)
+       ================================================================ */
+    .quick-action {{
+        background: {COLORS['bg_secondary']};
+        border: 1px solid {COLORS['border']};
+        border-radius: var(--radius);
+        padding: 1.25rem;
+        text-align: center;
+        transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+    }}
+
+    .quick-action:hover {{
+        border-color: {COLORS['primary']}60;
+        box-shadow: 0 4px 16px {COLORS['primary']}12;
+        transform: translateY(-1px);
+    }}
+
+    .quick-action .icon {{
+        font-size: 1.5rem;
+        margin-bottom: 0.25rem;
+        opacity: 0.85;
+    }}
+
+    .quick-action .title {{
+        font-weight: 600;
+        color: {COLORS['text_primary']};
+        margin-bottom: 0.125rem;
+        font-size: {FONT_SIZES['base']};
+    }}
+
+    .quick-action .desc {{
+        font-size: {FONT_SIZES['xs']};
+        color: {COLORS['text_muted']};
+        line-height: 1.4;
     }}
 
     /* ================================================================
@@ -920,19 +946,19 @@ def inject_base_styles():
     .action-bar {{
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 8px 16px;
+        gap: {SPACING['md']};
+        padding: {SPACING['sm']} {SPACING['md']};
         background: {COLORS['bg_secondary']};
         border: 1px solid {COLORS['border']};
         border-radius: var(--radius);
-        margin-bottom: 12px;
+        margin-bottom: {SPACING['md']};
         box-shadow: var(--card-shadow);
     }}
 
     .action-bar-left {{
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: {SPACING['md']};
         flex: 1;
     }}
 
@@ -941,10 +967,10 @@ def inject_base_styles():
        ================================================================ */
     .summary-strip {{
         display: flex;
-        gap: 28px;
-        padding: 10px 0;
+        gap: {SPACING['xl']};
+        padding: {SPACING['sm']} 0;
         border-bottom: 1px solid {COLORS['border']};
-        margin-bottom: 12px;
+        margin-bottom: {SPACING['md']};
     }}
 
     .summary-item {{
@@ -954,7 +980,7 @@ def inject_base_styles():
 
     .summary-item .label {{
         font-family: var(--font-body);
-        font-size: 0.65rem;
+        font-size: 0.6875rem;
         color: {COLORS['text_muted']};
         text-transform: uppercase;
         letter-spacing: 0.06em;
@@ -962,7 +988,7 @@ def inject_base_styles():
     }}
 
     .summary-item .value {{
-        font-size: 1.1rem;
+        font-size: {FONT_SIZES['lg']};
         font-weight: 600;
         color: {COLORS['text_primary']};
     }}
@@ -976,7 +1002,7 @@ def inject_base_styles():
 
     .metric-inline .label {{
         font-family: var(--font-body);
-        font-size: 0.6rem;
+        font-size: 0.6875rem;
         color: {COLORS['text_muted']};
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -984,7 +1010,7 @@ def inject_base_styles():
     }}
 
     .metric-inline .value {{
-        font-size: 0.95rem;
+        font-size: {FONT_SIZES['base']};
         font-weight: 600;
         color: {COLORS['text_primary']};
     }}
@@ -995,15 +1021,15 @@ def inject_base_styles():
     .validation-grid {{
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 8px;
-        margin-bottom: 12px;
+        gap: {SPACING['sm']};
+        margin-bottom: {SPACING['md']};
     }}
 
     .validation-item {{
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
+        gap: {SPACING['sm']};
+        padding: {SPACING['sm']} {SPACING['md']};
         background: {COLORS['bg_secondary']};
         border: 1px solid {COLORS['border']};
         border-radius: var(--radius-sm);
@@ -1112,6 +1138,7 @@ def page_header(
 
     with col2:
         if action_label and action_callback:
+            st.markdown("")  # Align vertically with title
             if st.button(
                 action_label if not action_icon else f"{action_icon} {action_label}",
                 use_container_width=True
@@ -1510,17 +1537,17 @@ def contact_card(
 
 def labeled_divider(label: str) -> None:
     """
-    Render a horizontal divider with a centered label.
+    Render a section divider with a label.
 
     Args:
         label: Text to display in the divider
     """
     st.markdown(
         f'''
-        <div style="display: flex; align-items: center; margin: {SPACING['md']} 0;">
-            <div style="flex: 1; height: 1px; background: {COLORS['border']};"></div>
-            <span style="padding: 0 {SPACING['md']}; color: {COLORS['text_muted']}; font-size: {FONT_SIZES['sm']};">{label}</span>
-            <div style="flex: 1; height: 1px; background: {COLORS['border']};"></div>
+        <div style="display: flex; align-items: center; margin: {SPACING['lg']} 0 {SPACING['md']} 0;">
+            <div style="flex: 0 0 auto; height: 1px; width: 24px; background: linear-gradient(90deg, transparent, {COLORS['border']});"></div>
+            <span style="padding: 0 {SPACING['sm']}; color: {COLORS['text_secondary']}; font-size: {FONT_SIZES['xs']}; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;">{label}</span>
+            <div style="flex: 1; height: 1px; background: linear-gradient(90deg, {COLORS['border']}, transparent);"></div>
         </div>
         ''',
         unsafe_allow_html=True
@@ -1708,6 +1735,35 @@ def export_quality_warnings(leads: list[dict]) -> None:
             for w in warnings:
                 st.markdown(w)
             st.caption("These contacts are still included in the export. Review if quality is a concern.")
+
+
+# =============================================================================
+# EMPTY STATE
+# =============================================================================
+
+def empty_state(
+    message: str,
+    icon: str = "",
+    hint: Optional[str] = None,
+) -> None:
+    """
+    Render a centered empty state with optional icon and hint.
+
+    Args:
+        message: Primary message
+        icon: Optional icon/emoji
+        hint: Optional secondary guidance text
+    """
+    icon_html = f'<div style="font-size: 1.5rem; margin-bottom: 0.25rem; opacity: 0.4;">{icon}</div>' if icon else ""
+    hint_html = f'<p style="color: {COLORS["text_muted"]}; font-size: {FONT_SIZES["sm"]}; margin-top: 0.25rem;">{hint}</p>' if hint else ""
+    st.markdown(
+        f'''<div style="text-align: center; padding: {SPACING["xl"]} 0 {SPACING["lg"]};">
+            {icon_html}
+            <p style="color: {COLORS["text_secondary"]}; margin: 0;">{message}</p>
+            {hint_html}
+        </div>''',
+        unsafe_allow_html=True,
+    )
 
 
 # =============================================================================

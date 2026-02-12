@@ -17,6 +17,7 @@ from ui_components import (
     page_header,
     colored_progress_bar,
     metric_card,
+    empty_state,
     COLORS,
 )
 
@@ -66,83 +67,82 @@ page_header(
 
 
 # =============================================================================
-# ZOOMINFO API USAGE (stays as expander - it's a fetch action)
+# ZOOMINFO API USAGE
 # =============================================================================
-with st.expander("ZoomInfo API Usage", expanded=False):
-    st.caption("Fetch current usage data directly from ZoomInfo API")
-
-    # Only fetch when user explicitly clicks
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.caption("ZoomInfo API Usage")
+with col2:
     if ui.button(text="Fetch ZoomInfo Usage", variant="default", key="usage_fetch_btn"):
         with st.spinner("Fetching usage data from ZoomInfo..."):
             zi_usage = fetch_zoominfo_usage()
             st.session_state["zi_usage_data"] = zi_usage
 
-    # Display cached data if available
-    if "zi_usage_data" in st.session_state:
-        zi_usage = st.session_state["zi_usage_data"]
+# Display cached data if available
+if "zi_usage_data" in st.session_state:
+    zi_usage = st.session_state["zi_usage_data"]
 
-        if "error" in zi_usage:
-            st.warning(f"Could not fetch ZoomInfo usage: {zi_usage['error']}")
-            st.caption("Check ZoomInfo credentials in .streamlit/secrets.toml")
-        else:
-            # Parse the usage array format from the API
-            usage_data = zi_usage.get("usage", [])
-
-            # Extract metrics from usage array
-            metrics = {}
-            for item in usage_data:
-                limit_type = item.get("limitType", "")
-                metrics[limit_type] = {
-                    "used": item.get("currentUsage", 0),
-                    "limit": item.get("totalLimit", 0),
-                    "remaining": item.get("usageRemaining", 0),
-                    "description": item.get("description", ""),
-                }
-
-            col1, col2, col3 = st.columns(3)
-
-            # Request Limit
-            with col1:
-                req = metrics.get("requestLimit", {})
-                used = req.get("used", 0)
-                limit = req.get("limit", 0)
-                if limit > 0:
-                    metric_card("API Requests", f"{used:,} / {limit:,}")
-                    pct = (used / limit * 100) if limit > 0 else 0
-                    colored_progress_bar(pct)
-                else:
-                    metric_card("API Requests", f"{used:,}")
-
-            # Record Limit
-            with col2:
-                rec = metrics.get("recordLimit", {})
-                used = rec.get("used", 0)
-                limit = rec.get("limit", 0)
-                if limit > 0:
-                    metric_card("Records", f"{used:,} / {limit:,}")
-                    pct = (used / limit * 100) if limit > 0 else 0
-                    colored_progress_bar(pct)
-                else:
-                    metric_card("Records", f"{used:,}")
-
-            # Unique ID Limit
-            with col3:
-                uid = metrics.get("uniqueIdLimit", {})
-                used = uid.get("used", 0)
-                limit = uid.get("limit", 0)
-                if limit > 0:
-                    metric_card("Unique IDs", f"{used:,} / {limit:,}")
-                    pct = (used / limit * 100) if limit > 0 else 0
-                    colored_progress_bar(pct)
-                else:
-                    metric_card("Unique IDs", f"{used:,}")
-
-            # Show raw data in debug mode
-            _raw_sw = ui.switch(default_checked=False, label="Show Raw Response", key="usage_raw_switch")
-            if _raw_sw:
-                st.json(zi_usage)
+    if "error" in zi_usage:
+        st.warning(f"Could not fetch ZoomInfo usage: {zi_usage['error']}")
+        st.caption("Check ZoomInfo credentials in .streamlit/secrets.toml")
     else:
-        st.info("Click 'Fetch ZoomInfo Usage' to load current API usage from ZoomInfo")
+        # Parse the usage array format from the API
+        usage_data = zi_usage.get("usage", [])
+
+        # Extract metrics from usage array
+        metrics = {}
+        for item in usage_data:
+            limit_type = item.get("limitType", "")
+            metrics[limit_type] = {
+                "used": item.get("currentUsage", 0),
+                "limit": item.get("totalLimit", 0),
+                "remaining": item.get("usageRemaining", 0),
+                "description": item.get("description", ""),
+            }
+
+        col1, col2, col3 = st.columns(3)
+
+        # Request Limit
+        with col1:
+            req = metrics.get("requestLimit", {})
+            used = req.get("used", 0)
+            limit = req.get("limit", 0)
+            if limit > 0:
+                metric_card("API Requests", f"{used:,} / {limit:,}")
+                pct = (used / limit * 100) if limit > 0 else 0
+                colored_progress_bar(pct)
+            else:
+                metric_card("API Requests", f"{used:,}")
+
+        # Record Limit
+        with col2:
+            rec = metrics.get("recordLimit", {})
+            used = rec.get("used", 0)
+            limit = rec.get("limit", 0)
+            if limit > 0:
+                metric_card("Records", f"{used:,} / {limit:,}")
+                pct = (used / limit * 100) if limit > 0 else 0
+                colored_progress_bar(pct)
+            else:
+                metric_card("Records", f"{used:,}")
+
+        # Unique ID Limit
+        with col3:
+            uid = metrics.get("uniqueIdLimit", {})
+            used = uid.get("used", 0)
+            limit = uid.get("limit", 0)
+            if limit > 0:
+                metric_card("Unique IDs", f"{used:,} / {limit:,}")
+                pct = (used / limit * 100) if limit > 0 else 0
+                colored_progress_bar(pct)
+            else:
+                metric_card("Unique IDs", f"{used:,}")
+
+        # Show raw data in debug mode
+        with st.expander("Raw Response", expanded=False):
+            st.json(zi_usage)
+
+st.markdown("---")
 
 
 # =============================================================================
@@ -179,12 +179,9 @@ if _usage_active == "Weekly":
         remaining = budget["remaining"]
         st.caption(f"Intent budget: {remaining:,} credits remaining this week ({100 - budget['percent']:.0f}% available)")
     elif total == 0:
-        st.markdown("")
-        st.markdown(
-            f"""<div style="text-align:center; padding: 1rem 0; color: {COLORS['text_muted']};">
-                No credits used this week. Run an Intent or Geography search to get started.
-            </div>""",
-            unsafe_allow_html=True,
+        empty_state(
+            "No credits used this week",
+            hint="Run an Intent or Geography search to get started.",
         )
 
 # --- BY PERIOD TAB ---

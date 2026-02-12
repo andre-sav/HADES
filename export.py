@@ -33,9 +33,11 @@ def build_vanillasoft_row(
         if value is not None:
             row[vs_col] = str(value)
 
-    # Format phone number
+    # Format phone numbers
     if row.get("Business"):
         row["Business"] = format_phone(row["Business"])
+    if row.get("Mobile"):
+        row["Mobile"] = format_phone(row["Mobile"])
 
     # List Source attribution: "{DataSource} {Date}" per VSDP format
     today = datetime.now().strftime("%b %d %Y")  # e.g., "Jan 29 2026"

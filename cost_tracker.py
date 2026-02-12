@@ -129,15 +129,13 @@ class CostTracker:
         for threshold in sorted(alert_thresholds, reverse=True):
             threshold_percent = threshold * 100
             if projected_percent >= threshold_percent:
-                if threshold >= 0.95:
+                if threshold_percent >= 95:
                     alert_level = "critical"
-                    alert_message = f"This query will use {projected_percent:.0f}% of weekly budget."
-                elif threshold >= 0.80:
+                elif threshold_percent >= 80:
                     alert_level = "warning"
-                    alert_message = f"This query will use {projected_percent:.0f}% of weekly budget."
                 else:
                     alert_level = "info"
-                    alert_message = f"This query will use {projected_percent:.0f}% of weekly budget."
+                alert_message = f"This query will use {projected_percent:.0f}% of weekly budget."
                 break
 
         return BudgetStatus(

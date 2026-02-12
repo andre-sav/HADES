@@ -16,6 +16,7 @@ from ui_components import (
     export_validation_checklist,
     metric_card,
     styled_table,
+    empty_state,
     COLORS,
 )
 
@@ -59,20 +60,11 @@ if "last_export_metadata" not in st.session_state:
 # EMPTY STATE - Show CTAs when no leads available
 # =============================================================================
 if not intent_leads and not geo_leads:
-    # Empty state with clear guidance
-    st.markdown("")
-    col_l, col_c, col_r = st.columns([1, 2, 1])
-    with col_c:
-        st.markdown(
-            f"""<div style="text-align:center; padding: 2rem 0;">
-                <div style="font-size: 2.5rem; margin-bottom: 0.5rem; opacity: 0.5;">📤</div>
-                <h3 style="margin-bottom: 0.25rem;">No leads staged for export</h3>
-                <p style="color: {COLORS['text_muted']}; margin-bottom: 1.5rem;">
-                    Run a workflow to find and stage leads, then return here to download your VanillaSoft CSV.
-                </p>
-            </div>""",
-            unsafe_allow_html=True,
-        )
+    empty_state(
+        "No leads staged for export",
+        icon="📤",
+        hint="Run a workflow to find and stage leads, then return here to download your VanillaSoft CSV.",
+    )
 
     col1, col2 = st.columns(2)
     with col1:

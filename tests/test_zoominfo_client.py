@@ -1106,6 +1106,42 @@ class TestContactEnrich:
         # Check outputFields is an array (not comma-separated string)
         assert body["outputFields"] == ["firstName", "lastName", "email"]
 
+    def test_enrich_contacts_dict_with_nested_data_no_result(self, client):
+        """Test dict response with data.data but no result key."""
+        mock_response = {
+            "success": [{"personId": "123"}],
+            "data": {
+                "data": [
+                    {"id": 123, "firstName": "Nested", "lastName": "Data"}
+                ],
+            },
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            params = ContactEnrichParams(person_ids=["123"])
+            result = client.enrich_contacts(params)
+
+        assert len(result["data"]) == 1
+        assert result["data"][0]["firstName"] == "Nested"
+
+    def test_enrich_contacts_dict_direct_contact(self, client):
+        """Test dict response that is itself a contact (firstName at top level)."""
+        mock_response = {
+            "success": [{"personId": "123"}],
+            "data": {
+                "firstName": "TopLevel",
+                "lastName": "Contact",
+                "email": "top@example.com",
+            },
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            params = ContactEnrichParams(person_ids=["123"])
+            result = client.enrich_contacts(params)
+
+        assert len(result["data"]) == 1
+        assert result["data"][0]["firstName"] == "TopLevel"
+
 
 class TestContactSearchByCompanyId:
     """Tests for Contact Search by company ID (Intent workflow)."""

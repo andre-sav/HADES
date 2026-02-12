@@ -110,8 +110,8 @@ def calculate_geography_score(lead: dict, target_zip: str = None) -> dict:
         proximity_score = get_proximity_score(float(distance))
         distance_miles = float(distance)
     else:
-        # Default to medium proximity if distance not provided
-        proximity_score = 70
+        # Default: assume ~15mi (mid-range tier) when distance unknown
+        proximity_score = get_proximity_score(15.0)
         distance_miles = None
 
     # On-site likelihood score

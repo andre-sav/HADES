@@ -42,6 +42,12 @@ class TestBuildVanillasoftRow:
         row = build_vanillasoft_row(lead)
         assert row["Business"] == "(555) 123-4567"
 
+    def test_mobile_phone_formatting(self):
+        """Test that mobile phone numbers are formatted correctly."""
+        lead = {"mobilePhone": "5559876543"}
+        row = build_vanillasoft_row(lead)
+        assert row["Mobile"] == "(555) 987-6543"
+
     def test_list_source_attribution(self):
         """Test that List Source follows VSDP format: '{DataSource} {Date}'."""
         from datetime import datetime

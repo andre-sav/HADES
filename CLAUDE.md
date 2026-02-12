@@ -62,7 +62,7 @@ HADES/
 ## Key Configuration
 
 **config/icp.yaml:**
-- 22 SIC codes (from ZoomInfo account filter)
+- 25 SIC codes (22 from ZoomInfo account filter + 3 from HLM delivery data)
 - Employee range: 50 - 5,000 (starting; expansion may remove upper limit)
 - Intent budget: 500 credits/week with alerts at 50%/80%/95%
 - Geography budget: unlimited
@@ -171,17 +171,20 @@ contacts = client.search_contacts_one_per_company(params)
 - API request preview with formatted JSON
 - Results grouped by company with contact selection
 - Quality filters (accuracy, location type, required fields)
-- Industry filters (22 SIC codes, full names displayed)
+- Industry filters (25 SIC codes, full names displayed)
 - Target contacts input with expansion summary
 
-## SIC Codes (22 target industries)
+## SIC Codes (25 target industries)
 
 ```
 3531 - Construction Machinery
 3599 - Industrial Machinery NEC
 3999 - Manufacturing Industries NEC
+4213 - Trucking, Except Local               (NEW - 19.0% delivery rate)
 4225 - General Warehousing and Storage
 4231 - Terminal and Joint Terminal Maintenance
+4581 - Services to Air Transportation       (NEW - 27.3% delivery rate)
+4731 - Freight Transportation Arrangement   (NEW - 20.0% delivery rate)
 5511 - Motor Vehicle Dealers (New and Used)
 7011 - Hotels and Motels
 7021 - Rooming and Boarding Houses
