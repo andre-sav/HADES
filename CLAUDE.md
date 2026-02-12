@@ -76,6 +76,10 @@ ZOOMINFO_CLIENT_ID = "..."
 ZOOMINFO_CLIENT_SECRET = "..."
 ```
 
+## Testing
+
+Always run `python -m pytest tests/ -x -q --tb=short` after Python changes before committing. Run the full test suite, not just new tests. The pre-commit hook enforces this automatically.
+
 ## Commands
 
 ```bash
@@ -249,6 +253,16 @@ states = get_states_from_zips(zips)
 All search params must be **comma-separated strings**, not arrays:
 - `"state": "TX,CA"` not `["TX", "CA"]`
 - `"employeeRangeMin": "50"` not `50`
+
+## External APIs
+
+### Zoho
+
+When working with Zoho APIs: the CRM module name is "Deals" (not "Potentials"), COQL has rate limits — add delays between queries, and always test API calls with proper auth headers before giving POST/GET commands to the user.
+
+### ZoomInfo
+
+All search params must be comma-separated strings, not arrays. Assume data is messy — handle truncated ZIPs (4-digit and 9-digit), missing fields, HTML entities in text, and null values with defensive parsing.
 
 ## Next Steps
 

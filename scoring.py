@@ -240,18 +240,109 @@ def _calculate_age_days(date_str: str | None) -> int:
 
     try:
         # Handle various date formats
-        if "T" in str(date_str):
-            # ISO format with time
-            intent_date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+        date_s = str(date_str).strip()
+        if "T" in date_s:
+            # ISO format with time: 2026-01-24T00:00:00Z
+            intent_date = datetime.fromisoformat(date_s.replace("Z", "+00:00")).date()
+        elif "/" in date_s:
+            # US format from legacy API: 1/24/2026 12:00 AM or 1/24/2026
+            date_part = date_s.split(" ")[0]  # Strip time portion
+            intent_date = datetime.strptime(date_part, "%m/%d/%Y").date()
         else:
-            # Date only
-            intent_date = datetime.strptime(str(date_str)[:10], "%Y-%m-%d").date()
+            # Date only: 2026-01-24
+            intent_date = datetime.strptime(date_s[:10], "%Y-%m-%d").date()
 
         age = (date.today() - intent_date).days
         return max(0, age)  # Don't return negative days
 
     except (ValueError, TypeError):
         return 999  # Parse error treated as very old
+
+
+def score_intent_contacts(
+    contacts: list[dict],
+    company_scores: dict[str, dict],
+) -> list[dict]:
+    """
+    Score contacts found at intent companies.
+
+    Combines the company's intent score with individual contact quality.
+
+    Weights:
+        - Company intent score: 70%
+        - Contact accuracy: 20%
+        - Phone availability: 10%
+
+    Args:
+        contacts: List of contact dicts from Contact Search
+        company_scores: Dict mapping company_id -> {"_score": int, "intentTopic": str, ...}
+
+    Returns:
+        List of contacts with scoring fields added, sorted by score descending.
+    """
+    scored = []
+
+    for contact in contacts:
+        company_id = (
+            contact.get("companyId")
+            or contact.get("company", {}).get("id")
+            or ""
+        )
+        company_data = company_scores.get(str(company_id), {})
+        company_intent_score = company_data.get("_score", 50)
+
+        # Accuracy component (0-100)
+        accuracy = contact.get("contactAccuracyScore", 0) or 0
+        if accuracy >= 95:
+            accuracy_score = 100
+        elif accuracy >= 85:
+            accuracy_score = 70
+        else:
+            accuracy_score = 40
+
+        # Phone availability component (0-100)
+        has_mobile = bool(contact.get("mobilePhone"))
+        has_any_phone = bool(
+            contact.get("mobilePhone")
+            or contact.get("directPhone")
+            or contact.get("phone")
+        )
+        if has_mobile:
+            phone_score = 100
+        elif has_any_phone:
+            phone_score = 70
+        else:
+            phone_score = 0
+
+        # Weighted composite
+        composite = (
+            company_intent_score * 0.70
+            + accuracy_score * 0.20
+            + phone_score * 0.10
+        )
+
+        scored_contact = {
+            **contact,
+            "_score": round(composite),
+            "_company_intent_score": company_intent_score,
+            "_accuracy_score": accuracy_score,
+            "_phone_score": phone_score,
+            "_intent_topic": company_data.get("intentTopic", ""),
+        }
+        scored.append(scored_contact)
+
+    scored.sort(key=lambda x: x["_score"], reverse=True)
+    return scored
+
+
+def get_score_breakdown_intent_contact(lead: dict) -> str:
+    """Get human-readable score breakdown for intent contact."""
+    return (
+        f"Score: {lead.get('_score', 0)} "
+        f"(Intent: {lead.get('_company_intent_score', 0)}, "
+        f"Accuracy: {lead.get('_accuracy_score', 0)}, "
+        f"Phone: {lead.get('_phone_score', 0)})"
+    )
 
 
 def get_priority_label(score: int) -> str:

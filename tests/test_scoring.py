@@ -12,6 +12,8 @@ from scoring import (
     calculate_geography_score,
     score_intent_leads,
     score_geography_leads,
+    score_intent_contacts,
+    get_score_breakdown_intent_contact,
     get_priority_label,
     _calculate_age_days,
 )
@@ -293,6 +295,21 @@ class TestAgeCalculation:
         """Test invalid date returns max age."""
         assert _calculate_age_days("not-a-date") == 999
 
+    def test_us_format_with_time(self):
+        """Test US format M/D/YYYY h:mm AM from legacy intent API."""
+        today_str = date.today().strftime("%m/%d/%Y") + " 12:00 AM"
+        assert _calculate_age_days(today_str) == 0
+
+    def test_us_format_without_time(self):
+        """Test US format M/D/YYYY without time."""
+        yesterday = date.today() - timedelta(days=1)
+        assert _calculate_age_days(yesterday.strftime("%m/%d/%Y")) == 1
+
+    def test_us_format_single_digit_month(self):
+        """Test US format with single-digit month/day."""
+        today_str = date.today().strftime("%-m/%-d/%Y") + " 3:45 PM"
+        assert _calculate_age_days(today_str) == 0
+
 
 class TestPriorityLabel:
     """Tests for priority label function."""
@@ -316,3 +333,135 @@ class TestPriorityLabel:
         """Test very low priority label."""
         assert get_priority_label(39) == "Very Low"
         assert get_priority_label(0) == "Very Low"
+
+
+class TestIntentContactScoring:
+    """Tests for intent contact scoring (contacts found at intent companies)."""
+
+    def _make_contact(self, company_id="C1", accuracy=95, mobile=True, direct=False, phone=True):
+        """Helper to create a test contact."""
+        c = {
+            "personId": f"P_{company_id}_{accuracy}",
+            "companyId": company_id,
+            "companyName": f"Company {company_id}",
+            "firstName": "Test",
+            "lastName": "Contact",
+            "contactAccuracyScore": accuracy,
+        }
+        if mobile:
+            c["mobilePhone"] = "(555) 111-2222"
+        if direct:
+            c["directPhone"] = "(555) 333-4444"
+        if phone:
+            c["phone"] = "(555) 555-6666"
+        return c
+
+    def _make_company_scores(self, company_ids_and_scores):
+        """Helper: dict mapping company_id -> {"_score": x, "intentTopic": "Vending"}."""
+        return {
+            cid: {"_score": score, "intentTopic": "Vending"}
+            for cid, score in company_ids_and_scores
+        }
+
+    def test_score_inherits_company_score(self):
+        """Test that company intent score contributes 70% of final score."""
+        contacts = [self._make_contact("C1", accuracy=95, mobile=True)]
+        company_scores = self._make_company_scores([("C1", 100)])
+
+        scored = score_intent_contacts(contacts, company_scores)
+
+        assert len(scored) == 1
+        # Company: 100 * 0.70 = 70
+        # Accuracy (95+): 100 * 0.20 = 20
+        # Phone (mobile): 100 * 0.10 = 10
+        # Total: 100
+        assert scored[0]["_score"] == 100
+        assert scored[0]["_company_intent_score"] == 100
+
+    def test_score_accuracy_tiers(self):
+        """Test accuracy score tiers: 95+=100, 85-94=70, <85=40."""
+        company_scores = self._make_company_scores([("C1", 80)])
+
+        # Accuracy 95+ -> 100
+        contacts_high = [self._make_contact("C1", accuracy=97)]
+        scored_high = score_intent_contacts(contacts_high, company_scores)
+        assert scored_high[0]["_accuracy_score"] == 100
+
+        # Accuracy 85-94 -> 70
+        contacts_mid = [self._make_contact("C1", accuracy=90)]
+        scored_mid = score_intent_contacts(contacts_mid, company_scores)
+        assert scored_mid[0]["_accuracy_score"] == 70
+
+        # Accuracy <85 -> 40
+        contacts_low = [self._make_contact("C1", accuracy=75)]
+        scored_low = score_intent_contacts(contacts_low, company_scores)
+        assert scored_low[0]["_accuracy_score"] == 40
+
+    def test_score_phone_bonus(self):
+        """Test phone score: mobile=100, any phone=70, no phone=0."""
+        company_scores = self._make_company_scores([("C1", 80)])
+
+        # Has mobile -> 100
+        contacts_mobile = [self._make_contact("C1", mobile=True, direct=False, phone=False)]
+        scored_mobile = score_intent_contacts(contacts_mobile, company_scores)
+        assert scored_mobile[0]["_phone_score"] == 100
+
+        # Has only direct phone -> 70
+        contacts_direct = [self._make_contact("C1", mobile=False, direct=True, phone=False)]
+        scored_direct = score_intent_contacts(contacts_direct, company_scores)
+        assert scored_direct[0]["_phone_score"] == 70
+
+        # No phone at all -> 0
+        contacts_none = [self._make_contact("C1", mobile=False, direct=False, phone=False)]
+        scored_none = score_intent_contacts(contacts_none, company_scores)
+        assert scored_none[0]["_phone_score"] == 0
+
+    def test_score_sorting(self):
+        """Test contacts are sorted by score descending."""
+        company_scores = self._make_company_scores([("C1", 100), ("C2", 50), ("C3", 80)])
+
+        contacts = [
+            self._make_contact("C2", accuracy=95, mobile=True),  # Low company score
+            self._make_contact("C1", accuracy=95, mobile=True),  # High company score
+            self._make_contact("C3", accuracy=85, mobile=False, phone=True),  # Mid
+        ]
+
+        scored = score_intent_contacts(contacts, company_scores)
+
+        assert scored[0]["companyId"] == "C1"  # Highest
+        assert scored[-1]["companyId"] == "C2"  # Lowest
+        assert scored[0]["_score"] >= scored[1]["_score"] >= scored[2]["_score"]
+
+    def test_score_missing_company(self):
+        """Test scoring when company not in company_scores dict."""
+        contacts = [self._make_contact("UNKNOWN", accuracy=95, mobile=True)]
+        company_scores = {}  # Empty
+
+        scored = score_intent_contacts(contacts, company_scores)
+
+        # Should use default company score of 50
+        assert scored[0]["_company_intent_score"] == 50
+        assert scored[0]["_score"] > 0
+
+    def test_score_breakdown_format(self):
+        """Test human-readable score breakdown."""
+        lead = {
+            "_score": 85,
+            "_company_intent_score": 90,
+            "_accuracy_score": 100,
+            "_phone_score": 70,
+        }
+        breakdown = get_score_breakdown_intent_contact(lead)
+        assert "85" in breakdown
+        assert "90" in breakdown
+        assert "100" in breakdown
+        assert "70" in breakdown
+
+    def test_intent_topic_inherited(self):
+        """Test that intent topic is carried from company scores to contacts."""
+        contacts = [self._make_contact("C1")]
+        company_scores = {"C1": {"_score": 80, "intentTopic": "Vending"}}
+
+        scored = score_intent_contacts(contacts, company_scores)
+
+        assert scored[0]["_intent_topic"] == "Vending"

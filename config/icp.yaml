@@ -153,9 +153,8 @@ cache:
 # Intent Topics
 intent_topics:
   primary:
-    - "Vending"
-  expansion:  # Phase 2
-    - "Breakroom"
-    - "Employee Amenities"
-    - "Office Snacks"
-    - "Micro Market"
+    - "Vending Machines"
+    - "Breakroom Solutions"
+  expansion:
+    - "Coffee Services"
+    - "Water Coolers"

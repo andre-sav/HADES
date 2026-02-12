@@ -347,3 +347,102 @@ class TestExpansionStepApplication:
         assert current_params["accuracy_min"] == 95
         assert current_params["management_levels"] == ["Manager"]
         assert current_params["employee_max"] == 5000
+
+
+class TestLocationTypeTagging:
+    """Test location type tagging for combined search demarcation."""
+
+    def test_process_contacts_adds_location_type_tag(self):
+        """Contacts should be tagged with _location_type when provided."""
+        all_contacts = {}
+
+        contacts = [
+            {"personId": "p1", "firstName": "John", "companyId": "c1"},
+            {"personId": "p2", "firstName": "Jane", "companyId": "c2"},
+        ]
+
+        # Simulate process_contacts with location_type_tag
+        for c in contacts:
+            person_id = c.get("personId")
+            if person_id and person_id not in all_contacts:
+                c["_location_type"] = "PersonAndHQ"
+                all_contacts[person_id] = c
+
+        assert all_contacts["p1"]["_location_type"] == "PersonAndHQ"
+        assert all_contacts["p2"]["_location_type"] == "PersonAndHQ"
+
+    def test_person_only_contacts_tagged_separately(self):
+        """Person-only contacts should be tagged with 'Person' type."""
+        all_contacts = {}
+
+        # First search - PersonAndHQ
+        contacts_hq = [
+            {"personId": "p1", "firstName": "John", "companyId": "c1"},
+        ]
+        for c in contacts_hq:
+            person_id = c.get("personId")
+            if person_id and person_id not in all_contacts:
+                c["_location_type"] = "PersonAndHQ"
+                all_contacts[person_id] = c
+
+        # Second search - Person-only (different contacts)
+        contacts_person = [
+            {"personId": "p2", "firstName": "Jane", "companyId": "c2"},
+            {"personId": "p3", "firstName": "Bob", "companyId": "c3"},
+        ]
+        for c in contacts_person:
+            person_id = c.get("personId")
+            if person_id and person_id not in all_contacts:
+                c["_location_type"] = "Person"
+                all_contacts[person_id] = c
+
+        assert all_contacts["p1"]["_location_type"] == "PersonAndHQ"
+        assert all_contacts["p2"]["_location_type"] == "Person"
+        assert all_contacts["p3"]["_location_type"] == "Person"
+
+    def test_duplicate_contact_keeps_first_tag(self):
+        """When contact appears in both searches, first tag (PersonAndHQ) is kept."""
+        all_contacts = {}
+
+        # First search - PersonAndHQ
+        contacts_hq = [
+            {"personId": "p1", "firstName": "John", "companyId": "c1"},
+        ]
+        for c in contacts_hq:
+            person_id = c.get("personId")
+            if person_id and person_id not in all_contacts:
+                c["_location_type"] = "PersonAndHQ"
+                all_contacts[person_id] = c
+
+        # Second search - Person-only (includes same contact)
+        contacts_person = [
+            {"personId": "p1", "firstName": "John", "companyId": "c1"},  # Duplicate
+        ]
+        for c in contacts_person:
+            person_id = c.get("personId")
+            if person_id and person_id not in all_contacts:
+                # This won't execute because p1 already exists
+                c["_location_type"] = "Person"
+                all_contacts[person_id] = c
+
+        # p1 should retain PersonAndHQ tag (more authoritative)
+        assert all_contacts["p1"]["_location_type"] == "PersonAndHQ"
+
+    def test_no_tag_when_combined_search_disabled(self):
+        """When combined search is disabled, no _location_type tag is added."""
+        all_contacts = {}
+
+        contacts = [
+            {"personId": "p1", "firstName": "John", "companyId": "c1"},
+        ]
+
+        # Simulate process_contacts without location_type_tag (None)
+        location_type_tag = None
+        for c in contacts:
+            person_id = c.get("personId")
+            if person_id and person_id not in all_contacts:
+                if location_type_tag:
+                    c["_location_type"] = location_type_tag
+                all_contacts[person_id] = c
+
+        assert "_location_type" not in all_contacts["p1"]

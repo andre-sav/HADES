@@ -1,12 +1,23 @@
 """
-CSV Export - Export leads with operator metadata.
-Superhuman-inspired: clean, focused, minimal steps.
+CSV Export - Export leads with operator metadata, validation, and tracking.
 """
 
 import streamlit as st
+import streamlit_shadcn_ui as ui
+import pandas as pd
+from datetime import datetime
+
 from turso_db import get_database
 from export import export_leads_to_csv, get_export_summary
-from ui_components import inject_base_styles, page_header
+from ui_components import (
+    inject_base_styles,
+    page_header,
+    status_badge,
+    export_validation_checklist,
+    metric_card,
+    styled_table,
+    COLORS,
+)
 
 st.set_page_config(page_title="Export", page_icon="📤", layout="wide")
 
@@ -40,8 +51,59 @@ intent_leads = st.session_state.get("intent_export_leads", [])
 geo_leads = st.session_state.get("geo_export_leads", [])
 geo_operator = st.session_state.get("geo_operator")
 
+# Initialize export metadata in session state
+if "last_export_metadata" not in st.session_state:
+    st.session_state.last_export_metadata = None
+
+# =============================================================================
+# EMPTY STATE - Show CTAs when no leads available
+# =============================================================================
 if not intent_leads and not geo_leads:
-    st.info("No leads available. Run a search from Intent or Geography first.")
+    # Empty state with clear guidance
+    st.markdown("")
+    col_l, col_c, col_r = st.columns([1, 2, 1])
+    with col_c:
+        st.markdown(
+            f"""<div style="text-align:center; padding: 2rem 0;">
+                <div style="font-size: 2.5rem; margin-bottom: 0.5rem; opacity: 0.5;">📤</div>
+                <h3 style="margin-bottom: 0.25rem;">No leads staged for export</h3>
+                <p style="color: {COLORS['text_muted']}; margin-bottom: 1.5rem;">
+                    Run a workflow to find and stage leads, then return here to download your VanillaSoft CSV.
+                </p>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.page_link("pages/1_Intent_Workflow.py", label="Run Intent Search", icon="🎯", use_container_width=True)
+    with col2:
+        st.page_link("pages/2_Geography_Workflow.py", label="Run Geography Search", icon="📍", use_container_width=True)
+
+    # Show recent runs for context
+    queries = db.get_recent_queries(limit=5)
+    if queries:
+        st.markdown("---")
+        st.caption("Recent runs")
+        table_data = []
+        for q in queries:
+            exported = q.get("leads_exported", 0) or 0
+            table_data.append({
+                "time": q.get("created_at", "")[:16] if q.get("created_at") else "",
+                "workflow": q["workflow_type"].title(),
+                "leads": q.get("leads_returned", 0) or 0,
+                "status": "Exported" if exported > 0 else "Not exported",
+            })
+        styled_table(
+            rows=table_data,
+            columns=[
+                {"key": "time", "label": "Time"},
+                {"key": "workflow", "label": "Workflow"},
+                {"key": "leads", "label": "Leads", "align": "right", "mono": True},
+                {"key": "status", "label": "Status", "pill": {"Exported": "success", "Not exported": "muted"}},
+            ],
+        )
+
     st.stop()
 
 
@@ -56,8 +118,9 @@ if geo_leads:
 
 if len(sources) > 1:
     source_labels = [s[1] for s in sources]
-    selected_label = st.radio("Source", source_labels, horizontal=True, label_visibility="collapsed")
-    workflow_type = sources[source_labels.index(selected_label)][0]
+    _src_tab = ui.tabs(options=source_labels, default_value=source_labels[0], key="export_source_tabs")
+    _src_idx = source_labels.index(_src_tab) if _src_tab in source_labels else 0
+    workflow_type = sources[_src_idx][0]
 else:
     workflow_type = sources[0][0]
     st.caption(sources[0][1])
@@ -72,13 +135,29 @@ summary = get_export_summary(leads_to_export)
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    st.metric("Leads", summary["total"])
+    metric_card("Leads", summary["total"])
 with col2:
     high = summary["by_priority"].get("High", 0)
-    st.metric("High priority", high)
+    metric_card("High Priority", high)
 with col3:
     top_state = list(summary["by_state"].keys())[0] if summary["by_state"] else "—"
-    st.metric("Top state", top_state)
+    metric_card("Top State", top_state)
+
+
+# =============================================================================
+# PRE-EXPORT VALIDATION
+# =============================================================================
+st.markdown("---")
+st.caption("Export validation")
+checks = export_validation_checklist(leads_to_export)
+
+# Show warning summary if any checks failed
+error_checks = [c for c in checks if c.get("status") == "error"]
+warning_checks = [c for c in checks if c.get("status") == "warning"]
+if error_checks:
+    st.warning(f"{len(error_checks)} validation check(s) below threshold. Review before exporting.")
+elif warning_checks:
+    st.caption(f"{len(warning_checks)} check(s) with warnings — leads are still exportable.")
 
 
 # =============================================================================
@@ -128,7 +207,7 @@ else:
 
 
 # =============================================================================
-# EXPORT
+# EXPORT + MARK EXPORTED
 # =============================================================================
 st.markdown("---")
 
@@ -139,7 +218,18 @@ csv_content, filename = export_leads_to_csv(
     workflow_type=workflow_type,
 )
 
-col1, col2 = st.columns([2, 1])
+# Post-export display (if already exported)
+if st.session_state.last_export_metadata:
+    meta = st.session_state.last_export_metadata
+    op_name = meta.get("operator") or ""
+    op_display = f" for {op_name}" if op_name else ""
+    ts = meta.get("timestamp", "")[:16] if meta.get("timestamp") else ""
+
+    st.success(f"Exported: {meta.get('filename', '')} · {meta.get('count', 0)} leads{op_display} · {ts}")
+
+
+# Download and mark exported buttons
+col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
     st.caption(f"Ready: {len(leads_to_export)} leads" + (f" for {selected_operator['operator_name']}" if selected_operator else ""))
@@ -153,3 +243,33 @@ with col2:
         type="primary",
         use_container_width=True,
     )
+
+with col3:
+    _mark_trigger = ui.button(text="Mark as Exported", variant="outline", key="mark_exported_btn")
+    _mark_confirmed = ui.alert_dialog(
+        show=_mark_trigger,
+        title="Mark as Exported",
+        description=f"Mark {len(leads_to_export)} leads as exported? This updates the query log.",
+        confirm_label="Mark Exported",
+        cancel_label="Cancel",
+        key="mark_exported_dialog",
+    )
+    if _mark_confirmed:
+        last_query = db.get_last_query(workflow_type)
+        if last_query:
+            db.update_query_exported(last_query["id"], len(leads_to_export))
+
+        st.session_state.last_export_metadata = {
+            "filename": filename,
+            "count": len(leads_to_export),
+            "timestamp": datetime.now().isoformat(),
+            "operator": selected_operator.get("operator_name") if selected_operator else None,
+        }
+
+        # Set exported flag for action bar state
+        if workflow_type == "intent":
+            st.session_state["intent_exported"] = True
+        else:
+            st.session_state["geo_exported"] = True
+
+        st.rerun()

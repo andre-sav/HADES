@@ -1,0 +1,10 @@
+# HADES Theme Configuration
+# Matches the design system in ui_components.py
+
+[theme]
+base = "dark"
+primaryColor = "#6366f1"             # Indigo-500 (matches COLORS["primary"])
+backgroundColor = "#0a0e14"          # Main background (matches COLORS["bg_primary"])
+secondaryBackgroundColor = "#141922" # Card/sidebar background (matches COLORS["bg_secondary"])
+textColor = "#f0f2f5"               # Primary text (matches COLORS["text_primary"])
+font = "sans serif"

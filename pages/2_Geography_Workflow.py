@@ -3,15 +3,24 @@ Geography Workflow - Find contacts in an operator's service territory.
 Features: Autopilot vs Manual Review modes, visible API parameters, contact selection.
 """
 
+import hashlib
 import json
 import logging
 
 import streamlit as st
+import streamlit_shadcn_ui as ui
 
 # Configure logging
 logger = logging.getLogger(__name__)
 import pandas as pd
 from datetime import datetime
+
+
+def compute_params_hash(params: dict) -> str:
+    """Compute a hash of search parameters for stale detection."""
+    # Sort keys for consistent hashing
+    normalized = json.dumps(params, sort_keys=True, default=str)
+    return hashlib.md5(normalized.encode()).hexdigest()[:12]
 
 from turso_db import get_database
 from zoominfo_client import (
@@ -44,10 +53,22 @@ from expand_search import (
 )
 from ui_components import (
     inject_base_styles,
+    page_header,
     step_indicator,
     status_badge,
+    metric_card,
+    labeled_divider,
+    parameter_group,
+    query_summary_bar,
+    export_quality_warnings,
+    review_controls_bar,
+    score_breakdown,
     paginate_items,
     pagination_controls,
+    workflow_run_state,
+    action_bar,
+    workflow_summary_strip,
+    last_run_indicator,
     COLORS,
 )
 
@@ -109,6 +130,25 @@ defaults = {
     "geo_pending_search_params": None,  # Stored params awaiting confirmation
     # Target contacts expansion
     "geo_expansion_result": None,  # Stores expansion strategy results
+    # Export tracking
+    "geo_exported": False,
+    # Filter persistence (Phase 1 UX improvement)
+    "geo_last_filters": {
+        "radius": 15.0,
+        "accuracy_min": 95,
+        "location_type": "PersonAndHQ",
+        "current_only": True,
+        "exclude_org_exported": True,
+        "management_levels": ["Manager"],
+        "target_contacts": 25,
+        "stop_early": True,
+    },
+    # Query state tracking (Phase 2 UX - stale detection)
+    "geo_params_hash": None,  # Hash of last search params
+    "geo_last_search_params": {},  # Full params for comparison
+    # Review controls (Phase 3 UX)
+    "geo_review_sort": "score",  # score, company_name, contact_count
+    "geo_review_filter": "all",  # all, multi_only, has_mobile, high_accuracy
 }
 for key, default in defaults.items():
     if key not in st.session_state:
@@ -118,18 +158,20 @@ for key, default in defaults.items():
 # =============================================================================
 # HEADER
 # =============================================================================
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.title("Geography")
-    st.caption("Find contacts within an operator's service territory")
-with col2:
-    st.markdown("")  # Add spacing to align with title
-    weekly_usage = cost_tracker.get_weekly_usage_by_workflow()
-    credits = weekly_usage.get("geography", 0)
-    st.markdown(status_badge("info", f"{credits:,} credits"), unsafe_allow_html=True)
-    st.caption("This week")
+weekly_usage = cost_tracker.get_weekly_usage_by_workflow()
+credits = weekly_usage.get("geography", 0)
+page_header(
+    title="Geography",
+    caption="Find contacts within an operator's service territory",
+    right_content=(status_badge("info", f"{credits:,} credits"), "This week"),
+)
 
-st.markdown("---")
+# =============================================================================
+# LAST RUN INDICATOR
+# =============================================================================
+_last_geo = db.get_last_query("geography")
+last_run_indicator(_last_geo)
+
 
 # =============================================================================
 # STEP INDICATOR
@@ -162,13 +204,14 @@ else:
 # =============================================================================
 mode_col1, mode_col2, mode_col3 = st.columns([1, 2, 1])
 with mode_col1:
-    st.session_state.geo_mode = st.radio(
-        "Workflow Mode",
-        ["manual", "autopilot"],
-        format_func=lambda x: "Manual Review" if x == "manual" else "Autopilot",
-        horizontal=True,
-        help="Manual: Review preview, select contacts, then enrich. Autopilot: Auto-select and enrich.",
+    _GEO_MODE_MAP = {"Manual Review": "manual", "Autopilot": "autopilot"}
+    _GEO_MODE_REVERSE = {v: k for k, v in _GEO_MODE_MAP.items()}
+    _geo_mode_tab = ui.tabs(
+        options=list(_GEO_MODE_MAP.keys()),
+        default_value=_GEO_MODE_REVERSE.get(st.session_state.geo_mode, "Manual Review"),
+        key="geo_mode_tabs",
     )
+    st.session_state.geo_mode = _GEO_MODE_MAP.get(_geo_mode_tab, st.session_state.geo_mode)
 
 with mode_col2:
     if st.session_state.geo_mode == "autopilot":
@@ -177,27 +220,71 @@ with mode_col2:
         st.info("**Manual Review**: Search (free preview) → Select contacts (1 per company) → Enrich selected (uses credits) → Export", icon="👤")
 
 with mode_col3:
-    st.session_state.geo_test_mode = st.checkbox(
-        "🧪 Test Mode",
-        value=st.session_state.geo_test_mode,
-        help="Skip actual enrichment API calls - uses mock data. No credits consumed.",
-    )
+    _geo_test_sw = ui.switch(default_checked=st.session_state.geo_test_mode, label="Test Mode", key="geo_test_mode_switch")
+    st.session_state.geo_test_mode = bool(_geo_test_sw) if _geo_test_sw is not None else st.session_state.geo_test_mode
     if st.session_state.geo_test_mode:
         st.caption("⚠️ Using mock data")
 
 
 # =============================================================================
+# ACTION BAR + SUMMARY STRIP (only shown after search)
+# =============================================================================
+_run_state = workflow_run_state("geo")
+
+if _run_state != "idle":
+    _ab_primary = None
+    _ab_primary_key = None
+    _ab_metrics = []
+
+    if _run_state == "enriched" and st.session_state.geo_results:
+        _ab_metrics = [{"label": "Leads", "value": len(st.session_state.geo_results)}]
+        _ab_primary = "Export CSV"
+        _ab_primary_key = "ab_geo_export"
+    elif _run_state == "contacts_found":
+        cbc = st.session_state.geo_contacts_by_company or {}
+        _ab_metrics = [{"label": "Companies", "value": len(cbc)}]
+    elif _run_state == "searched" and st.session_state.geo_preview_contacts:
+        _ab_metrics = [{"label": "Contacts", "value": len(st.session_state.geo_preview_contacts)}]
+    elif _run_state == "exported":
+        _ab_metrics = [{"label": "Status", "value": "Exported"}]
+
+    _ab_primary_clicked, _ = action_bar(
+        _run_state,
+        primary_label=_ab_primary,
+        primary_key=_ab_primary_key,
+        metrics=_ab_metrics,
+    )
+
+    if _ab_primary_clicked and _run_state == "enriched":
+        st.switch_page("pages/4_CSV_Export.py")
+
+    # Summary strip
+    _strip_items = []
+    _strip_items.append({"label": "Mode", "value": "Autopilot" if st.session_state.geo_mode == "autopilot" else "Manual"})
+    if st.session_state.geo_operator:
+        _strip_items.append({"label": "Operator", "value": st.session_state.geo_operator.get("operator_name", "")})
+    if st.session_state.geo_contacts_by_company:
+        _strip_items.append({"label": "Companies", "value": len(st.session_state.geo_contacts_by_company)})
+    if st.session_state.geo_preview_contacts:
+        _strip_items.append({"label": "Contacts", "value": len(st.session_state.geo_preview_contacts)})
+    _strip_items.append({"label": "Credits", "value": credits})
+
+    if len(_strip_items) > 1:
+        workflow_summary_strip(_strip_items)
+
+
+# =============================================================================
 # OPERATOR SELECTION
 # =============================================================================
-st.markdown("---")
-st.subheader("1. Operator")
+labeled_divider("Step 1: Select Operator")
 
-operator_mode = st.radio(
-    "Operator",
-    ["Select existing", "Enter manually"],
-    horizontal=True,
-    label_visibility="collapsed",
+_OP_MODE_MAP = {"Existing Operator": "Select existing", "Enter Manually": "Enter manually"}
+_op_mode_tab = ui.tabs(
+    options=list(_OP_MODE_MAP.keys()),
+    default_value="Existing Operator",
+    key="geo_operator_mode_tabs",
 )
+operator_mode = _OP_MODE_MAP.get(_op_mode_tab, "Select existing")
 
 if operator_mode == "Select existing":
     operators = db.get_operators()
@@ -206,6 +293,7 @@ if operator_mode == "Select existing":
         st.info("No operators saved yet. Use manual entry or add operators in the Operators page.")
         st.session_state.geo_operator = None
     else:
+        st.caption(f"{len(operators):,} operators available — select one to search their service territory")
         operator_options = {
             f"{op['operator_name']}  ·  {op.get('vending_business_name') or 'N/A'}": op
             for op in operators
@@ -284,8 +372,7 @@ else:
 has_operator = st.session_state.geo_operator is not None
 
 if has_operator:
-    st.markdown("---")
-    st.subheader("2. Search Parameters")
+    labeled_divider("Step 2: Configure Search")
 
     default_zip = st.session_state.geo_operator.get("operator_zip", "")
 
@@ -297,13 +384,14 @@ if has_operator:
             default_state = detected_state
 
     # Location mode selector
-    location_mode = st.radio(
-        "Location Search Mode",
-        ["radius", "manual"],
-        format_func=lambda x: "Radius from ZIP (recommended)" if x == "radius" else "Manual ZIP list",
-        horizontal=True,
-        help="Radius: Enter center ZIP + radius. Manual: Paste specific ZIP codes.",
+    _LOC_MODE_MAP = {"Radius Search": "radius", "Manual ZIP List": "manual"}
+    _LOC_MODE_REVERSE = {v: k for k, v in _LOC_MODE_MAP.items()}
+    _loc_mode_tab = ui.tabs(
+        options=list(_LOC_MODE_MAP.keys()),
+        default_value="Radius Search",
+        key="geo_location_mode_tabs",
     )
+    location_mode = _LOC_MODE_MAP.get(_loc_mode_tab, "radius")
 
     if location_mode == "radius":
         # Radius-based search
@@ -324,10 +412,17 @@ if has_operator:
                 15.0: "15 miles (Recommended)",
                 "custom": "Custom...",
             }
+            # Get persisted radius, default to 15.0 if not in options
+            last_radius = st.session_state.geo_last_filters.get("radius", 15.0)
+            radius_options_list = list(RADIUS_OPTIONS.keys())
+            try:
+                default_idx = radius_options_list.index(last_radius) if last_radius in radius_options_list else 2
+            except ValueError:
+                default_idx = 2
             radius_choice = st.selectbox(
                 "Radius",
-                options=list(RADIUS_OPTIONS.keys()),
-                index=2,  # Default 15 mi (Recommended)
+                options=radius_options_list,
+                index=default_idx,
                 format_func=lambda x: RADIUS_OPTIONS[x],
             )
 
@@ -410,6 +505,7 @@ if has_operator:
             calculated_zips = []
 
     # Quality Filters (expandable)
+    last_filters = st.session_state.geo_last_filters
     with st.expander("Quality Filters", expanded=False):
         qf_col1, qf_col2, qf_col3, qf_col4 = st.columns(4)
 
@@ -418,7 +514,7 @@ if has_operator:
                 "Min Accuracy Score",
                 min_value=0,
                 max_value=100,
-                value=95,
+                value=last_filters.get("accuracy_min", 95),
                 help="Minimum contact accuracy score (0-100)",
             )
 
@@ -429,10 +525,14 @@ if has_operator:
                 "Person OR HQ": "PersonOrHQ",
                 "HQ Only": "HQ",
             }
+            # Find index for persisted location type
+            last_loc_type = last_filters.get("location_type", "PersonAndHQ")
+            loc_type_values = list(location_type_options.values())
+            loc_type_idx = loc_type_values.index(last_loc_type) if last_loc_type in loc_type_values else 0
             location_type_display = st.selectbox(
                 "Location Type",
                 options=list(location_type_options.keys()),
-                index=0,
+                index=loc_type_idx,
                 help=(
                     "**Person AND HQ** = Both contact AND company HQ must be in area (local businesses, direct authority)\n\n"
                     "**Person Only** = Contact works at a site in the area (finds branch offices of national chains)"
@@ -455,18 +555,12 @@ if has_operator:
                 include_person_only = False
 
         with qf_col3:
-            current_only = st.checkbox(
-                "Current employees only",
-                value=True,
-                help="Exclude past employees",
-            )
+            _cur_emp_sw = ui.switch(default_checked=last_filters.get("current_only", True), label="Current Employees Only", key="geo_current_emp_switch")
+            current_only = bool(_cur_emp_sw) if _cur_emp_sw is not None else last_filters.get("current_only", True)
 
         with qf_col4:
-            exclude_org_exported = st.checkbox(
-                "Exclude previously exported",
-                value=True,
-                help="Skip contacts your org has already exported",
-            )
+            _skip_sw = ui.switch(default_checked=last_filters.get("exclude_org_exported", True), label="Skip Already Exported", key="geo_skip_exported_switch")
+            exclude_org_exported = bool(_skip_sw) if _skip_sw is not None else last_filters.get("exclude_org_exported", True)
 
         # Required phone fields (second row)
         st.markdown("---")
@@ -487,14 +581,13 @@ if has_operator:
             )
 
         with phone_col2:
-            required_fields_operator = st.radio(
-                "Operator",
-                options=["or", "and"],
-                index=0,
-                format_func=lambda x: "OR (any)" if x == "or" else "AND (all)",
-                horizontal=True,
-                help="OR = any field present, AND = all fields required",
+            _PHONE_OP_MAP = {"Any Field (OR)": "or", "All Fields (AND)": "and"}
+            _phone_op_tab = ui.tabs(
+                options=list(_PHONE_OP_MAP.keys()),
+                default_value="Any Field (OR)",
+                key="geo_phone_operator_tabs",
             )
+            required_fields_operator = _PHONE_OP_MAP.get(_phone_op_tab, "or")
 
         # Management Level filter (third row)
         st.markdown("---")
@@ -506,7 +599,7 @@ if has_operator:
             management_levels = st.multiselect(
                 "Management Level",
                 options=MANAGEMENT_LEVELS,
-                default=["Manager"],
+                default=last_filters.get("management_levels", ["Manager"]),
                 help="Filter by job title/role level. Manager targets facility managers and operations managers.",
             )
 
@@ -526,11 +619,11 @@ if has_operator:
 
         col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
-            if st.button("All", use_container_width=True, key="sic_all"):
+            if ui.button(text="All", variant="secondary", key="sic_all_btn"):
                 st.session_state.geo_selected_sics = list(sic_display.keys())
                 st.rerun()
         with col2:
-            if st.button("None", use_container_width=True, key="sic_none"):
+            if ui.button(text="None", variant="secondary", key="sic_none_btn"):
                 st.session_state.geo_selected_sics = []
                 st.rerun()
 
@@ -554,7 +647,7 @@ if has_operator:
             "Target companies",
             min_value=5,
             max_value=100,
-            value=DEFAULT_TARGET_CONTACTS,
+            value=last_filters.get("target_contacts", DEFAULT_TARGET_CONTACTS),
             step=5,
             help="Number of unique companies to find (1 contact per company). System auto-expands if target not met.",
         )
@@ -563,7 +656,7 @@ if has_operator:
         # Default based on workflow mode
         default_stop_early = st.session_state.geo_mode == "autopilot"
         stop_early = st.checkbox(
-            "Stop early if target met",
+            "Stop when target reached (faster)",
             value=default_stop_early,
             help="Stop expanding once target companies reached",
         )
@@ -607,12 +700,58 @@ if has_operator:
         "stop_early": stop_early,
     }
 
+    # Persist filter values for next session (Phase 1 UX)
+    st.session_state.geo_last_filters = {
+        "radius": radius if location_mode == "radius" else 15.0,
+        "accuracy_min": accuracy_min,
+        "location_type": location_type,
+        "current_only": current_only,
+        "exclude_org_exported": exclude_org_exported,
+        "management_levels": management_levels,
+        "target_contacts": target_contacts,
+        "stop_early": stop_early,
+    }
+
+    # Check if we can preview (need ZIP codes, states, and SIC codes)
+    can_preview = bool(zip_codes and states and selected_sic_codes)
+
+    # Compute params hash for stale detection (Phase 2 UX)
+    current_params_hash = compute_params_hash(pending_params)
+
+    # Determine query state
+    if st.session_state.geo_search_executed:
+        # Check if params changed since last search
+        last_hash = st.session_state.geo_params_hash
+        if last_hash and last_hash != current_params_hash:
+            query_state = "stale"
+        else:
+            query_state = "executed"
+    else:
+        query_state = "ready"
+
+    # Display query summary bar
+    summary_params = {
+        "zip_count": len(zip_codes),
+        "radius": radius if location_mode == "radius" else None,
+        "states": states,
+        "accuracy_min": accuracy_min,
+        "target_contacts": target_contacts,
+    }
+
+    if query_state == "executed":
+        result_count = len(st.session_state.geo_contacts_by_company or {})
+        query_summary_bar(summary_params, query_state, result_count=result_count)
+    elif query_state == "stale":
+        query_summary_bar(summary_params, query_state)
+        st.caption("⚠️ Parameters changed since last search. Click Preview to search with new settings.")
+    else:
+        query_summary_bar(summary_params, query_state)
+
     # Preview Request Button
     st.markdown("")
     preview_col1, preview_col2, preview_col3 = st.columns([1, 1, 2])
 
     with preview_col1:
-        can_preview = bool(zip_codes and states and selected_sic_codes)
         if st.button("👁️ Preview Request", type="secondary", use_container_width=True, disabled=not can_preview):
             st.session_state.geo_request_previewed = True
             st.session_state.geo_pending_search_params = pending_params
@@ -620,7 +759,7 @@ if has_operator:
 
     with preview_col2:
         if st.session_state.geo_preview_contacts or st.session_state.geo_request_previewed:
-            if st.button("🔄 Clear / Reset", use_container_width=True):
+            if ui.button(text="Clear / Reset", variant="destructive", key="geo_reset_btn"):
                 st.session_state.geo_preview_contacts = None
                 st.session_state.geo_contacts_by_company = None
                 st.session_state.geo_selected_contacts = {}
@@ -778,6 +917,10 @@ if has_operator:
                         "location_type": search_location_type,
                     }
 
+                    # Store params hash for stale detection (Phase 2 UX)
+                    st.session_state.geo_params_hash = compute_params_hash(sp)
+                    st.session_state.geo_last_search_params = sp
+
                     if st.session_state.geo_mode == "autopilot":
                         st.session_state.geo_selection_confirmed = True
 
@@ -799,8 +942,7 @@ if (
     and st.session_state.geo_contacts_by_company
     and not st.session_state.geo_selection_confirmed
 ):
-    st.markdown("---")
-    st.subheader("3. Review & Select Contacts")
+    labeled_divider("Step 3: Review & Select")
     st.caption("📋 **Preview data** - no credits used yet. Select contacts to enrich.")
 
     contacts_by_company = st.session_state.geo_contacts_by_company
@@ -844,15 +986,39 @@ if (
         # Fallback for old results without expansion data
         st.info(f"Found **{total_contacts}** contacts across **{total_companies}** companies")
 
-    # Filters and pagination controls
-    filter_col1, filter_col2, filter_col3 = st.columns([1, 1, 2])
-    with filter_col1:
-        show_multi_only = st.checkbox(
-            "Multiple contacts only",
-            value=False,
-            help="Focus on companies where you have choices",
+    # Review controls bar (Phase 3 UX) - Sort and filter options
+    sort_col, filter_col, page_col = st.columns([1, 1, 1])
+
+    with sort_col:
+        sort_options = {
+            "score": "Best score",
+            "company_name": "Company A-Z",
+            "contact_count": "Most choices",
+        }
+        sort_value = st.selectbox(
+            "Sort by",
+            options=list(sort_options.keys()),
+            format_func=lambda x: sort_options[x],
+            key="geo_review_sort",
+            label_visibility="collapsed",
         )
-    with filter_col2:
+
+    with filter_col:
+        filter_options = {
+            "all": "All companies",
+            "multi_only": "Multiple contacts",
+            "has_mobile": "Has mobile phone",
+            "high_accuracy": "95+ accuracy",
+        }
+        filter_value = st.selectbox(
+            "Filter",
+            options=list(filter_options.keys()),
+            format_func=lambda x: filter_options[x],
+            key="geo_review_filter",
+            label_visibility="collapsed",
+        )
+
+    with page_col:
         page_size = st.selectbox(
             "Per page",
             options=[5, 10, 20, 50],
@@ -865,9 +1031,27 @@ if (
     company_items = []
     for company_id, data in contacts_by_company.items():
         contacts = data["contacts"]
-        if show_multi_only and len(contacts) == 1:
+
+        # Apply filters
+        if filter_value == "multi_only" and len(contacts) == 1:
             continue
+        if filter_value == "has_mobile":
+            # Check if any contact in company has mobile
+            if not any(c.get("mobilePhone") for c in contacts):
+                continue
+        if filter_value == "high_accuracy":
+            # Check if best contact has 95+ accuracy
+            if contacts and (contacts[0].get("contactAccuracyScore") or 0) < 95:
+                continue
+
         company_items.append((company_id, data))
+
+    # Apply sorting
+    if sort_value == "company_name":
+        company_items.sort(key=lambda x: x[1]["company_name"].lower())
+    elif sort_value == "contact_count":
+        company_items.sort(key=lambda x: len(x[1]["contacts"]), reverse=True)
+    # score is default (already sorted by best contact score)
 
     if not company_items:
         st.info("No companies match the current filter. Uncheck the filter to see all.")
@@ -893,6 +1077,11 @@ if (
                 header_col1, header_col2 = st.columns([4, 1])
                 with header_col1:
                     st.markdown(f"**{company_name}**")
+                    # Show score breakdown for best contact (Phase 3 UX)
+                    if contacts:
+                        best_contact = contacts[0]
+                        breakdown = score_breakdown(best_contact)
+                        st.markdown(f"<small>{breakdown}</small>", unsafe_allow_html=True)
                 with header_col2:
                     contact_badge = status_badge("neutral", f"{len(contacts)} contact{'s' if len(contacts) > 1 else ''}")
                     st.markdown(contact_badge, unsafe_allow_html=True)
@@ -905,6 +1094,7 @@ if (
                     score = contact.get("contactAccuracyScore", 0)
                     phone = contact.get("directPhone", "") or contact.get("phone", "")
                     contact_zip = contact.get("zipCode", "")
+                    location_type = contact.get("_location_type", "")
 
                     # Build structured label
                     label = f"{name}"
@@ -915,6 +1105,10 @@ if (
                         label += f" | ZIP: {contact_zip}"
                     if phone:
                         label += f" | {phone}"
+                    # Show location type demarcation when combined search is enabled
+                    if location_type:
+                        type_label = "HQ+Person" if location_type == "PersonAndHQ" else "Person-only"
+                        label += f" | [{type_label}]"
 
                     # Mark best pick
                     if i == 0:
@@ -955,22 +1149,57 @@ if (
         if total_pages > 1:
             pagination_controls(current_page, total_pages, "geo_company_page")
 
+    # Bulk selection actions (Phase 3 UX)
+    st.markdown("")
+    bulk_col1, bulk_col2, bulk_col3 = st.columns([1, 1, 2])
+
+    with bulk_col1:
+        if ui.button(text="Select all best", variant="secondary", key="geo_select_all_btn"):
+            # Select best (first) contact for each company
+            for company_id, data in contacts_by_company.items():
+                if data["contacts"]:
+                    st.session_state.geo_selected_contacts[company_id] = data["contacts"][0]
+            st.rerun()
+
+    with bulk_col2:
+        if ui.button(text="Clear selections", variant="destructive", key="geo_clear_sel_btn"):
+            st.session_state.geo_selected_contacts = {}
+            st.rerun()
+
+    # Enrich confirmation dialog
+    @st.dialog("Confirm Enrichment")
+    def confirm_geo_enrich(count):
+        st.write(f"This will enrich **{count}** contacts.")
+        st.write(f"**{count}** credits will be consumed.")
+        st.caption("Geography workflow has no weekly cap.")
+        st.markdown("")
+        col_yes, col_no = st.columns(2)
+        with col_yes:
+            if st.button("Confirm", type="primary", use_container_width=True):
+                st.session_state.geo_selection_confirmed = True
+                st.rerun()
+        with col_no:
+            if st.button("Cancel", use_container_width=True):
+                st.rerun()
+
     # Enrich Selected Button
     st.markdown("")
     confirm_col1, confirm_col2, confirm_col3 = st.columns([1, 1, 2])
 
     with confirm_col1:
         selected_count = len(st.session_state.geo_selected_contacts)
-        if st.button(
-            f"💎 Enrich Selected ({selected_count} contacts)",
-            type="primary",
-            use_container_width=True,
-        ):
-            st.session_state.geo_selection_confirmed = True
-            st.rerun()
+        if st.session_state.geo_test_mode:
+            # Test mode: skip dialog
+            if ui.button(text=f"Enrich Selected ({selected_count} contacts)", variant="default", key="geo_enrich_test_btn"):
+                st.session_state.geo_selection_confirmed = True
+                st.rerun()
+        else:
+            if ui.button(text=f"Enrich Selected ({selected_count} contacts)", variant="default", key="geo_enrich_btn"):
+                confirm_geo_enrich(selected_count)
 
     with confirm_col2:
-        st.warning(f"⚡ Will use **{selected_count}** credits")
+        if st.session_state.geo_test_mode:
+            st.caption("🧪 Test mode: no credits used")
 
 
 # =============================================================================
@@ -1033,16 +1262,14 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
 # FINAL RESULTS - After enrichment complete (both modes)
 # =============================================================================
 if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contacts:
-    st.markdown("---")
-
     # Test mode banner
     if st.session_state.geo_test_mode:
         st.warning("🧪 **TEST MODE** - Data shown is from search preview, not actual enrichment. No credits were used.", icon="⚠️")
 
     if st.session_state.geo_mode == "manual":
-        st.subheader("4. Enriched Contacts")
+        labeled_divider("Step 4: Results")
     else:
-        st.subheader("3. Results")
+        labeled_divider("Step 3: Results")
         st.caption("Auto-selected and enriched highest-scored contact per company")
 
     enriched_contacts = st.session_state.geo_enriched_contacts
@@ -1081,119 +1308,135 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         st.session_state.geo_usage_logged = True
 
     # Results summary
+    preview_count = len(st.session_state.geo_preview_contacts or [])
+    companies = len(st.session_state.geo_contacts_by_company or {})
+
     col1, col2, col3 = st.columns([2, 1, 1])
 
     with col1:
-        st.metric("Contacts Enriched", len(enriched_contacts))
+        metric_card("Contacts Enriched", len(enriched_contacts))
 
     with col2:
-        preview_count = len(st.session_state.geo_preview_contacts or [])
-        st.metric("Preview Found", preview_count)
+        metric_card("Preview Found", preview_count)
 
     with col3:
-        companies = len(st.session_state.geo_contacts_by_company or {})
-        st.metric("Companies", companies)
+        metric_card("Companies", companies)
 
-    # Results table
-    display_data = []
-    for lead in scored:
-        display_data.append({
-            "Name": f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(),
-            "Title": lead.get("jobTitle", ""),
-            "Company": lead.get("companyName", "") or lead.get("company", {}).get("name", ""),
-            "City": lead.get("city", "") or lead.get("personCity", ""),
-            "State": lead.get("state", "") or lead.get("personState", ""),
-            "Score": lead.get("_score", 0),
-            "Accuracy": lead.get("contactAccuracyScore", 0),
-            "Priority": lead.get("_priority", ""),
-            "Phone": lead.get("directPhone", "") or lead.get("phone", ""),
-            "Email": lead.get("email", ""),
-        })
+    # Results table + filters (fragment for instant filter response)
+    @st.fragment
+    def geo_results_table(scored_leads):
+        display_data = []
+        for lead in scored_leads:
+            loc_type = lead.get("_location_type", "")
+            loc_type_display = ""
+            if loc_type == "PersonAndHQ":
+                loc_type_display = "HQ+Person"
+            elif loc_type == "Person":
+                loc_type_display = "Person-only"
 
-    df = pd.DataFrame(display_data)
+            display_data.append({
+                "Name": f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(),
+                "Title": lead.get("jobTitle", ""),
+                "Company": lead.get("companyName", "") or lead.get("company", {}).get("name", ""),
+                "City": lead.get("city", "") or lead.get("personCity", ""),
+                "State": lead.get("state", "") or lead.get("personState", ""),
+                "Loc Type": loc_type_display,
+                "Score": lead.get("_score", 0),
+                "Accuracy": lead.get("contactAccuracyScore", 0),
+                "Priority": lead.get("_priority", ""),
+                "Phone": lead.get("directPhone", "") or lead.get("phone", ""),
+                "Email": lead.get("email", ""),
+            })
 
-    # Filters
-    filter_col1, filter_col2 = st.columns([1, 1])
+        df = pd.DataFrame(display_data)
 
-    with filter_col1:
-        priorities = ["High", "Medium", "Low", "Very Low"]
-        priority_filter = st.multiselect(
-            "Priority",
-            priorities,
-            default=["High", "Medium", "Low"],
-            label_visibility="collapsed",
-        )
+        # Filters
+        filter_col1, filter_col2 = st.columns([1, 1])
 
-    with filter_col2:
-        if not df.empty:
-            states = sorted(df["State"].dropna().unique().tolist())
-            if len(states) > 1:
-                state_filter = st.multiselect("State", states, default=states, label_visibility="collapsed")
+        with filter_col1:
+            priorities = ["High", "Medium", "Low", "Very Low"]
+            priority_filter = st.multiselect(
+                "Priority",
+                priorities,
+                default=["High", "Medium", "Low"],
+                label_visibility="collapsed",
+            )
+
+        with filter_col2:
+            if not df.empty:
+                states = sorted(df["State"].dropna().unique().tolist())
+                if len(states) > 1:
+                    state_filter = st.multiselect("State", states, default=states, label_visibility="collapsed")
+                else:
+                    state_filter = states
             else:
-                state_filter = states
+                state_filter = []
+
+        # Apply filters
+        if not df.empty:
+            filtered_df = df[
+                df["Priority"].isin(priority_filter) &
+                df["State"].isin(state_filter)
+            ]
         else:
-            state_filter = []
+            filtered_df = df
 
-    # Apply filters
-    if not df.empty:
-        filtered_df = df[
-            df["Priority"].isin(priority_filter) &
-            df["State"].isin(state_filter)
-        ]
-    else:
-        filtered_df = df
-
-    # Display table
-    st.dataframe(
-        filtered_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Name": st.column_config.TextColumn("Name", width="medium"),
-            "Title": st.column_config.TextColumn("Title", width="medium"),
-            "Company": st.column_config.TextColumn("Company", width="large"),
-            "City": st.column_config.TextColumn("City", width="small"),
-            "State": st.column_config.TextColumn("State", width="small"),
-            "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, width="small"),
-            "Accuracy": st.column_config.NumberColumn("Accuracy", width="small"),
-            "Priority": st.column_config.TextColumn("Priority", width="small"),
-            "Phone": st.column_config.TextColumn("Phone", width="medium"),
-            "Email": st.column_config.TextColumn("Email", width="medium"),
-        },
-    )
-
-    # Export section
-    st.markdown("---")
-
-    col1, col2, col3 = st.columns([2, 1, 1])
-
-    with col1:
-        if st.session_state.geo_operator:
-            op = st.session_state.geo_operator
-            st.caption(f"Export for: **{op.get('operator_name')}** · {op.get('vending_business_name') or 'N/A'}")
-
-    with col2:
-        csv = filtered_df.to_csv(index=False)
-        st.download_button(
-            "📥 Download CSV",
-            data=csv,
-            file_name=f"geo_contacts_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv",
+        # Display table
+        st.dataframe(
+            filtered_df,
             use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Name": st.column_config.TextColumn("Name", width="medium"),
+                "Title": st.column_config.TextColumn("Title", width="medium"),
+                "Company": st.column_config.TextColumn("Company", width="large"),
+                "City": st.column_config.TextColumn("City", width="small"),
+                "State": st.column_config.TextColumn("State", width="small"),
+                "Loc Type": st.column_config.TextColumn("Loc Type", width="small", help="HQ+Person = local HQ, Person-only = branch office"),
+                "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, width="small"),
+                "Accuracy": st.column_config.NumberColumn("Accuracy", width="small"),
+                "Priority": st.column_config.TextColumn("Priority", width="small"),
+                "Phone": st.column_config.TextColumn("Phone", width="medium"),
+                "Email": st.column_config.TextColumn("Email", width="medium"),
+            },
         )
 
-    with col3:
-        st.page_link("pages/4_CSV_Export.py", label="Full Export", icon="📤", use_container_width=True)
+        # Export section
+        st.markdown("---")
 
-    # Store for export page
-    if len(filtered_df) > 0:
-        filtered_indices = filtered_df.index.tolist()
-        st.session_state.geo_export_leads = [scored[i] for i in filtered_indices]
+        export_quality_warnings(scored_leads)
+
+        col1, col2, col3 = st.columns([2, 1, 1])
+
+        with col1:
+            if st.session_state.geo_operator:
+                op = st.session_state.geo_operator
+                st.caption(f"Export for: **{op.get('operator_name')}** · {op.get('vending_business_name') or 'N/A'}")
+
+        with col2:
+            csv = filtered_df.to_csv(index=False)
+            st.download_button(
+                "📥 Download CSV",
+                data=csv,
+                file_name=f"geo_contacts_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+        with col3:
+            st.page_link("pages/4_CSV_Export.py", label="Full Export", icon="📤", use_container_width=True)
+
+        # Store for export page
+        if len(filtered_df) > 0:
+            filtered_indices = filtered_df.index.tolist()
+            st.session_state.geo_export_leads = [scored_leads[i] for i in filtered_indices]
+
+    geo_results_table(scored)
 
     # Option to go back and revise (Manual mode)
     if st.session_state.geo_mode == "manual":
         st.markdown("---")
-        if st.button("← Back to Contact Selection"):
+        if ui.button(text="Back to Contact Selection", variant="outline", key="geo_back_btn"):
             st.session_state.geo_selection_confirmed = False
             st.session_state.geo_enrichment_done = False
             st.session_state.geo_enriched_contacts = None

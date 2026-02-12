@@ -23,6 +23,10 @@ Usage:
 """
 
 import streamlit as st
+try:
+    import streamlit_shadcn_ui as ui
+except ImportError:
+    ui = None  # Not available in test environment
 from typing import Callable, Optional, Literal
 
 # =============================================================================
@@ -34,6 +38,11 @@ COLORS = {
     "primary": "#6366f1",       # Indigo-500
     "primary_light": "#818cf8", # Indigo-400
     "primary_dark": "#4f46e5",  # Indigo-600
+
+    # Accent (gradient endpoint)
+    "accent": "#06b6d4",        # Cyan-500
+    "accent_light": "#22d3ee",  # Cyan-400
+    "accent_dark": "#0891b2",   # Cyan-600
 
     # Semantic colors
     "success": "#22c55e",       # Green-500
@@ -57,14 +66,24 @@ COLORS = {
     "info_bg": "#172554",       # Blue-950
 
     # Neutral colors (for dark mode)
-    "bg_primary": "#0e1117",    # Main background
-    "bg_secondary": "#1a1f2e",  # Card background
-    "bg_tertiary": "#262c3d",   # Elevated surfaces
-    "border": "#333846",        # Borders
-    "border_light": "#444c5e",  # Hover borders
-    "text_primary": "#fafafa",  # Primary text
-    "text_secondary": "#a1a1aa",# Secondary text
-    "text_muted": "#71717a",    # Muted text
+    "bg_primary": "#0a0e14",    # Main background (deeper)
+    "bg_secondary": "#141922",  # Card background
+    "bg_tertiary": "#1e2530",   # Elevated surfaces
+    "border": "#262d3a",        # Borders (subtler)
+    "border_light": "#3a4350",  # Hover borders
+    "text_primary": "#f0f2f5",  # Primary text (slightly softer)
+    "text_secondary": "#8b929e",# Secondary text
+    "text_muted": "#5c6370",    # Muted text
+}
+
+# =============================================================================
+# FONTS
+# =============================================================================
+
+FONTS = {
+    "display": "'Urbanist', sans-serif",
+    "body": "'Urbanist', sans-serif",
+    "mono": "'IBM Plex Mono', monospace",
 }
 
 # =============================================================================
@@ -111,32 +130,443 @@ LAYOUT = {
 def inject_base_styles():
     """
     Inject base CSS styles. Call once at the start of each page.
-    Replaces duplicated CSS across pages with consistent styling.
+    Loads Google Fonts, applies global theme, and styles native Streamlit widgets.
     """
+    # Load Google Fonts via <link> (more reliable than @import in <style>)
+    st.markdown(
+        '<link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">',
+        unsafe_allow_html=True,
+    )
+
     st.markdown(f"""
 <style>
-    /* Base container */
-    .block-container {{
-        padding-top: 3rem;
-        max-width: 1200px;
+    /* ================================================================
+       CSS CUSTOM PROPERTIES
+       ================================================================ */
+    :root {{
+        --font-display: {FONTS['display']};
+        --font-body: {FONTS['body']};
+        --font-mono: {FONTS['mono']};
+        --accent-gradient: linear-gradient(135deg, {COLORS['primary']}, {COLORS['accent']});
+        --accent-gradient-h: linear-gradient(90deg, {COLORS['primary']}, {COLORS['accent']});
+        --card-shadow: 0 1px 3px rgba(0,0,0,0.24), 0 1px 2px rgba(0,0,0,0.16);
+        --card-shadow-hover: 0 4px 14px rgba(0,0,0,0.32), 0 2px 4px rgba(0,0,0,0.2);
+        --radius: 10px;
+        --radius-sm: 6px;
+        --transition: 0.2s ease;
     }}
 
-    /* Metrics styling */
+    /* ================================================================
+       GLOBAL FONT OVERRIDE
+       ================================================================ */
+    html, body, [class*="css"], .stMarkdown, .stText,
+    div[data-testid="stAppViewContainer"],
+    div[data-testid="stHeader"] {{
+        font-family: var(--font-body) !important;
+    }}
+
+    h1, h2, h3, h4, h5, h6,
+    .stTitle, [data-testid="stHeading"] {{
+        font-family: var(--font-display) !important;
+        letter-spacing: -0.025em;
+    }}
+
+    h1 {{
+        font-weight: 800 !important;
+        font-size: 1.75rem !important;
+    }}
+
+    h2 {{
+        font-weight: 700 !important;
+    }}
+
+    h3 {{
+        font-weight: 600 !important;
+    }}
+
+    /* Monospace for data values */
+    div[data-testid="stMetricValue"] > div,
+    .metric-card-value,
+    .summary-item .value,
+    .metric-inline .value {{
+        font-family: var(--font-mono) !important;
+        font-variant-numeric: tabular-nums;
+    }}
+
+    /* ================================================================
+       BASE CONTAINER
+       ================================================================ */
+    .block-container {{
+        padding-top: 1.25rem;
+        max-width: 100%;
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }}
+
+    /* Subtle background vignette for depth */
+    div[data-testid="stAppViewContainer"] {{
+        background:
+            radial-gradient(ellipse at 20% 0%, {COLORS['primary']}06 0%, transparent 50%),
+            radial-gradient(ellipse at 80% 100%, {COLORS['accent']}04 0%, transparent 50%),
+            {COLORS['bg_primary']} !important;
+    }}
+
+    /* ================================================================
+       PAGE LOAD ANIMATION
+       ================================================================ */
+    @keyframes fadeInUp {{
+        from {{ opacity: 0; transform: translateY(6px); }}
+        to {{ opacity: 1; transform: translateY(0); }}
+    }}
+
+    .main .block-container > div {{
+        animation: fadeInUp 0.3s ease-out both;
+    }}
+
+    /* Shimmer animation for skeleton loading */
+    @keyframes shimmer {{
+        0% {{ background-position: 200% 0; }}
+        100% {{ background-position: -200% 0; }}
+    }}
+
+    /* ================================================================
+       NATIVE WIDGET OVERRIDES - BUTTONS
+       ================================================================ */
+    button[data-testid="stBaseButton-primary"] {{
+        background: var(--accent-gradient) !important;
+        border: none !important;
+        font-family: var(--font-body) !important;
+        font-weight: 600 !important;
+        border-radius: 8px !important;
+        letter-spacing: 0.01em;
+        transition: all var(--transition) !important;
+    }}
+
+    button[data-testid="stBaseButton-primary"]:hover {{
+        filter: brightness(1.1) !important;
+        box-shadow: 0 4px 16px {COLORS['primary']}40 !important;
+    }}
+
+    button[data-testid="stBaseButton-primary"]:active {{
+        transform: scale(0.98) !important;
+    }}
+
+    button[data-testid="stBaseButton-secondary"],
+    button[data-testid="stBaseButton-minimal"] {{
+        border: 1px solid {COLORS['border']} !important;
+        border-radius: 8px !important;
+        font-family: var(--font-body) !important;
+        font-weight: 500 !important;
+        transition: all var(--transition) !important;
+    }}
+
+    button[data-testid="stBaseButton-secondary"]:hover,
+    button[data-testid="stBaseButton-minimal"]:hover {{
+        border-color: {COLORS['primary']} !important;
+        color: {COLORS['primary_light']} !important;
+        background: {COLORS['primary']}0a !important;
+    }}
+
+    /* ================================================================
+       NATIVE WIDGET OVERRIDES - INPUTS
+       ================================================================ */
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stNumberInput"] input,
+    div[data-testid="stTextArea"] textarea {{
+        border-radius: 8px !important;
+        border: 1px solid {COLORS['border']} !important;
+        background: {COLORS['bg_primary']} !important;
+        font-family: var(--font-body) !important;
+        transition: border-color var(--transition), box-shadow var(--transition) !important;
+    }}
+
+    div[data-testid="stTextInput"] input:focus,
+    div[data-testid="stNumberInput"] input:focus,
+    div[data-testid="stTextArea"] textarea:focus {{
+        border-color: {COLORS['primary']} !important;
+        box-shadow: 0 0 0 2px {COLORS['primary']}20 !important;
+    }}
+
+    /* Input labels */
+    div[data-testid="stTextInput"] label,
+    div[data-testid="stNumberInput"] label,
+    div[data-testid="stSelectbox"] label,
+    div[data-testid="stMultiSelect"] label,
+    div[data-testid="stTextArea"] label {{
+        font-family: var(--font-body) !important;
+        font-size: 0.8rem !important;
+        font-weight: 500 !important;
+        color: {COLORS['text_secondary']} !important;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }}
+
+    /* Selectbox/Multiselect */
+    div[data-testid="stSelectbox"] > div > div,
+    div[data-testid="stMultiSelect"] > div > div {{
+        border-radius: 8px !important;
+        border-color: {COLORS['border']} !important;
+        transition: border-color var(--transition) !important;
+    }}
+
+    div[data-testid="stSelectbox"] > div > div:hover,
+    div[data-testid="stMultiSelect"] > div > div:hover {{
+        border-color: {COLORS['border_light']} !important;
+    }}
+
+    /* Prevent truncation in multiselect pills */
+    div[data-baseweb="tag"] > span {{
+        max-width: none !important;
+    }}
+    div[data-baseweb="tag"] {{
+        max-width: none !important;
+    }}
+
+    /* ================================================================
+       NATIVE WIDGET OVERRIDES - DATAFRAME
+       ================================================================ */
+    div[data-testid="stDataFrame"] {{
+        border-radius: var(--radius) !important;
+        overflow: hidden;
+        border: 1px solid {COLORS['border']};
+    }}
+
+    /* Glide data grid header cells */
+    div[data-testid="stDataFrame"] [data-testid="glideDataEditor"] {{
+        font-family: var(--font-body) !important;
+    }}
+
+    /* Glide data grid alternating rows and hover */
+    div[data-testid="stDataFrame"] canvas + div {{
+        font-family: var(--font-body) !important;
+    }}
+
+    /* HTML table styling (for st.table and custom HTML tables) */
+    .styled-table {{
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        border-radius: var(--radius);
+        overflow: hidden;
+        border: 1px solid {COLORS['border']};
+        font-family: var(--font-body);
+        font-size: {FONT_SIZES['sm']};
+    }}
+
+    .styled-table thead th {{
+        background: {COLORS['bg_tertiary']};
+        color: {COLORS['text_secondary']};
+        font-size: {FONT_SIZES['xs']};
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 10px 14px;
+        text-align: left;
+        border-bottom: 1px solid {COLORS['border']};
+    }}
+
+    .styled-table tbody tr {{
+        transition: background var(--transition);
+    }}
+
+    .styled-table tbody tr:nth-child(even) {{
+        background: {COLORS['bg_secondary']}80;
+    }}
+
+    .styled-table tbody tr:hover {{
+        background: {COLORS['bg_tertiary']};
+    }}
+
+    .styled-table tbody td {{
+        padding: 10px 14px;
+        border-bottom: 1px solid {COLORS['border']}60;
+        color: {COLORS['text_primary']};
+    }}
+
+    .styled-table tbody td.mono {{
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+    }}
+
+    /* Status pill */
+    .status-pill {{
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 9999px;
+        font-size: {FONT_SIZES['xs']};
+        font-weight: 500;
+        line-height: 1.6;
+    }}
+
+    .status-pill-success {{
+        background: {COLORS['success_bg']};
+        color: {COLORS['success_light']};
+    }}
+
+    .status-pill-muted {{
+        background: {COLORS['bg_tertiary']};
+        color: {COLORS['text_muted']};
+    }}
+
+    .status-pill-info {{
+        background: {COLORS['info_bg']};
+        color: {COLORS['info_light']};
+    }}
+
+    .status-pill-warning {{
+        background: {COLORS['warning_bg']};
+        color: {COLORS['warning_light']};
+    }}
+
+    /* ================================================================
+       NATIVE WIDGET OVERRIDES - EXPANDER
+       ================================================================ */
+    div[data-testid="stExpander"] {{
+        border: 1px solid {COLORS['border']} !important;
+        border-radius: var(--radius) !important;
+        overflow: hidden;
+        background: {COLORS['bg_secondary']};
+        transition: border-color var(--transition);
+    }}
+
+    div[data-testid="stExpander"]:hover {{
+        border-color: {COLORS['border_light']} !important;
+    }}
+
+    div[data-testid="stExpander"] summary {{
+        font-family: var(--font-body) !important;
+        font-weight: 500;
+    }}
+
+    /* ================================================================
+       NATIVE WIDGET OVERRIDES - TABS
+       ================================================================ */
+    div[data-testid="stTabs"] button[data-baseweb="tab"] {{
+        font-family: var(--font-body) !important;
+        font-weight: 500 !important;
+        font-size: 0.875rem !important;
+        letter-spacing: 0.01em;
+        transition: color var(--transition) !important;
+    }}
+
+    /* Active tab indicator */
+    div[data-testid="stTabs"] [aria-selected="true"] {{
+        font-weight: 600 !important;
+    }}
+
+    /* ================================================================
+       NATIVE WIDGET OVERRIDES - SIDEBAR
+       ================================================================ */
+    section[data-testid="stSidebar"] {{
+        background: {COLORS['bg_secondary']} !important;
+        border-right: 1px solid {COLORS['border']} !important;
+    }}
+
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li {{
+        border-radius: 8px;
+    }}
+
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a {{
+        font-family: var(--font-body) !important;
+        font-weight: 500;
+        border-radius: 8px;
+        transition: background var(--transition);
+    }}
+
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover {{
+        background: {COLORS['bg_tertiary']};
+    }}
+
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"] {{
+        background: {COLORS['primary']}15;
+        border-left: 2px solid {COLORS['primary']};
+    }}
+
+    /* Sidebar page icons via CSS */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a span::before {{
+        margin-right: 8px;
+        font-style: normal;
+        opacity: 0.7;
+    }}
+
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(1) a span::before {{ content: "◉"; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(2) a span::before {{ content: "🎯"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(3) a span::before {{ content: "📍"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(4) a span::before {{ content: "👤"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(5) a span::before {{ content: "📤"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(6) a span::before {{ content: "📊"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(7) a span::before {{ content: "📈"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(8) a span::before {{ content: "🧪"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(9) a span::before {{ content: "🔬"; font-size: 0.85em; }}
+
+    /* ================================================================
+       NATIVE WIDGET OVERRIDES - DIVIDER
+       ================================================================ */
+    hr {{
+        border: none !important;
+        height: 1px !important;
+        background: linear-gradient(90deg, transparent, {COLORS['border']}, transparent) !important;
+        margin: 0.75rem 0 !important;
+    }}
+
+    /* ================================================================
+       NATIVE WIDGET OVERRIDES - METRICS
+       ================================================================ */
     div[data-testid="stMetric"] {{
         background: transparent;
     }}
 
-    /* Status badges - WCAG AA compliant colors */
+    div[data-testid="stMetricLabel"] {{
+        font-family: var(--font-body) !important;
+    }}
+
+    /* ================================================================
+       NATIVE WIDGET OVERRIDES - STATUS/SPINNER
+       ================================================================ */
+    div[data-testid="stStatusWidget"] {{
+        border-radius: var(--radius) !important;
+        border: 1px solid {COLORS['border']} !important;
+    }}
+
+    /* ================================================================
+       NATIVE WIDGET OVERRIDES - CAPTION
+       ================================================================ */
+    .stCaption, [data-testid="stCaptionContainer"] {{
+        font-family: var(--font-body) !important;
+        letter-spacing: 0.01em;
+    }}
+
+    /* ================================================================
+       SCROLLBAR
+       ================================================================ */
+    ::-webkit-scrollbar {{
+        width: 6px;
+        height: 6px;
+    }}
+    ::-webkit-scrollbar-track {{
+        background: transparent;
+    }}
+    ::-webkit-scrollbar-thumb {{
+        background: {COLORS['border']};
+        border-radius: 3px;
+    }}
+    ::-webkit-scrollbar-thumb:hover {{
+        background: {COLORS['border_light']};
+    }}
+
+    /* ================================================================
+       STATUS BADGES - WCAG AA compliant
+       ================================================================ */
     .status-badge {{
         display: inline-flex;
         align-items: center;
         gap: {SPACING['xs']};
         padding: {SPACING['xs']} {SPACING['sm']};
         border-radius: 9999px;
+        font-family: var(--font-body);
         font-size: {FONT_SIZES['sm']};
         font-weight: 500;
         line-height: 1;
-        /* Accessibility: minimum touch target */
         min-height: 24px;
     }}
 
@@ -170,12 +600,14 @@ def inject_base_styles():
         border: 1px solid {COLORS['border']};
     }}
 
-    /* Step indicator */
+    /* ================================================================
+       STEP INDICATOR
+       ================================================================ */
     .step-indicator {{
         display: flex;
         align-items: center;
         gap: {SPACING['sm']};
-        margin: {SPACING['md']} 0;
+        margin: {SPACING['sm']} 0;
     }}
 
     .step {{
@@ -185,19 +617,22 @@ def inject_base_styles():
     }}
 
     .step-number {{
-        width: 28px;
-        height: 28px;
+        width: 26px;
+        height: 26px;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: {FONT_SIZES['sm']};
+        font-family: var(--font-mono);
+        font-size: {FONT_SIZES['xs']};
         font-weight: 600;
+        transition: all var(--transition);
     }}
 
     .step-number-active {{
-        background-color: {COLORS['primary']};
+        background: var(--accent-gradient);
         color: white;
+        box-shadow: 0 0 12px {COLORS['primary']}40;
     }}
 
     .step-number-completed {{
@@ -212,12 +647,13 @@ def inject_base_styles():
     }}
 
     .step-label {{
+        font-family: var(--font-body);
         font-size: {FONT_SIZES['sm']};
     }}
 
     .step-label-active {{
         color: {COLORS['text_primary']};
-        font-weight: 500;
+        font-weight: 600;
     }}
 
     .step-label-completed {{
@@ -234,34 +670,63 @@ def inject_base_styles():
         background-color: {COLORS['border']};
         min-width: 20px;
         max-width: 60px;
+        transition: background var(--transition);
     }}
 
     .step-connector-completed {{
-        background-color: {COLORS['success']};
+        background: var(--accent-gradient-h);
     }}
 
-    /* Metric card */
+    /* ================================================================
+       METRIC CARD (custom HTML cards)
+       ================================================================ */
     .metric-card {{
         background: {COLORS['bg_secondary']};
         border: 1px solid {COLORS['border']};
-        border-radius: 8px;
-        padding: {SPACING['md']};
+        border-radius: var(--radius);
+        padding: 0.85rem;
+        position: relative;
+        overflow: hidden;
+        box-shadow: var(--card-shadow);
+        transition: box-shadow var(--transition), border-color var(--transition);
+    }}
+
+    /* Gradient accent line at top of cards */
+    .metric-card::before {{
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: var(--accent-gradient-h);
+        opacity: 0.7;
+    }}
+
+    .metric-card:hover {{
+        box-shadow: var(--card-shadow-hover);
+        border-color: {COLORS['border_light']};
     }}
 
     .metric-card-value {{
-        font-size: {FONT_SIZES['2xl']};
+        font-size: 1.4rem;
         font-weight: 600;
         color: {COLORS['text_primary']};
         margin: 0;
     }}
 
     .metric-card-label {{
-        font-size: {FONT_SIZES['sm']};
-        color: {COLORS['text_secondary']};
-        margin: 0;
+        font-family: var(--font-body);
+        font-size: {FONT_SIZES['xs']};
+        font-weight: 500;
+        color: {COLORS['text_muted']};
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin: 0 0 2px 0;
     }}
 
     .metric-card-delta {{
+        font-family: var(--font-mono);
         font-size: {FONT_SIZES['sm']};
         font-weight: 500;
         margin-left: {SPACING['sm']};
@@ -279,13 +744,21 @@ def inject_base_styles():
         color: {COLORS['text_muted']};
     }}
 
-    /* Company group cards (Geography Workflow) */
+    /* ================================================================
+       COMPANY GROUP CARDS (Geography Workflow)
+       ================================================================ */
     .company-group {{
         border: 1px solid {COLORS['border']};
-        border-radius: 8px;
+        border-radius: var(--radius);
         padding: {SPACING['md']};
         margin-bottom: {SPACING['md']};
         background: {COLORS['bg_secondary']};
+        box-shadow: var(--card-shadow);
+        transition: border-color var(--transition), box-shadow var(--transition);
+    }}
+
+    .company-group:hover {{
+        border-color: {COLORS['border_light']};
     }}
 
     .best-pick {{
@@ -294,24 +767,20 @@ def inject_base_styles():
         padding-left: {SPACING['sm']};
     }}
 
-    /* Prevent truncation in multiselect pills */
-    div[data-baseweb="tag"] > span {{
-        max-width: none !important;
-    }}
-    div[data-baseweb="tag"] {{
-        max-width: none !important;
-    }}
-
-    /* Page header styling */
+    /* ================================================================
+       PAGE HEADER
+       ================================================================ */
     .page-header {{
-        margin-bottom: {SPACING['lg']};
+        margin-bottom: {SPACING['md']};
     }}
 
     .page-header h1 {{
         margin-bottom: {SPACING['xs']};
     }}
 
-    /* Progress indicator styling */
+    /* ================================================================
+       PROGRESS BARS
+       ================================================================ */
     .progress-bar-container {{
         background: {COLORS['bg_tertiary']};
         border-radius: 4px;
@@ -322,11 +791,11 @@ def inject_base_styles():
     .progress-bar-fill {{
         height: 100%;
         border-radius: 4px;
-        transition: width 0.3s ease;
+        transition: width 0.4s ease;
     }}
 
     .progress-bar-success {{
-        background: linear-gradient(90deg, {COLORS['success_dark']}, {COLORS['success']});
+        background: var(--accent-gradient-h);
     }}
 
     .progress-bar-warning {{
@@ -338,26 +807,30 @@ def inject_base_styles():
     }}
 
     .progress-bar-info {{
-        background: linear-gradient(90deg, {COLORS['primary_dark']}, {COLORS['primary']});
+        background: var(--accent-gradient-h);
     }}
 
-    /* Contact card (for pagination) */
+    /* ================================================================
+       CONTACT CARDS (pagination)
+       ================================================================ */
     .contact-card {{
         background: {COLORS['bg_secondary']};
         border: 1px solid {COLORS['border']};
-        border-radius: 8px;
+        border-radius: var(--radius);
         padding: {SPACING['md']};
         margin-bottom: {SPACING['sm']};
-        transition: border-color 0.2s;
+        transition: border-color var(--transition), box-shadow var(--transition);
     }}
 
     .contact-card:hover {{
         border-color: {COLORS['border_light']};
+        box-shadow: var(--card-shadow);
     }}
 
     .contact-card-selected {{
         border-color: {COLORS['primary']};
         background: {COLORS['bg_tertiary']};
+        box-shadow: 0 0 0 1px {COLORS['primary']}30;
     }}
 
     .contact-card-header {{
@@ -378,11 +851,14 @@ def inject_base_styles():
     }}
 
     .contact-card-details {{
-        font-size: {FONT_SIZES['sm']};
+        font-family: var(--font-mono);
+        font-size: {FONT_SIZES['xs']};
         color: {COLORS['text_muted']};
     }}
 
-    /* Pagination controls */
+    /* ================================================================
+       PAGINATION
+       ================================================================ */
     .pagination {{
         display: flex;
         align-items: center;
@@ -392,11 +868,172 @@ def inject_base_styles():
     }}
 
     .pagination-info {{
+        font-family: var(--font-mono);
         font-size: {FONT_SIZES['sm']};
         color: {COLORS['text_secondary']};
     }}
 
-    /* Accessibility: Focus indicators */
+    /* ================================================================
+       TYPOGRAPHY UTILITIES
+       ================================================================ */
+    .section-title {{
+        font-family: var(--font-display);
+        font-size: {FONT_SIZES['xl']};
+        font-weight: 700;
+        color: {COLORS['text_primary']};
+        letter-spacing: -0.02em;
+        margin-bottom: {SPACING['md']};
+    }}
+
+    .subsection-title {{
+        font-family: var(--font-display);
+        font-size: {FONT_SIZES['lg']};
+        font-weight: 600;
+        color: {COLORS['text_primary']};
+        margin-bottom: {SPACING['sm']};
+    }}
+
+    .field-label {{
+        font-family: var(--font-body);
+        font-size: {FONT_SIZES['xs']};
+        font-weight: 500;
+        color: {COLORS['text_muted']};
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: {SPACING['xs']};
+    }}
+
+    /* Spacing utilities */
+    .section-gap {{
+        margin-top: {SPACING['xl']};
+        margin-bottom: {SPACING['lg']};
+    }}
+
+    .subsection-gap {{
+        margin-top: {SPACING['lg']};
+        margin-bottom: {SPACING['md']};
+    }}
+
+    /* ================================================================
+       ACTION BAR
+       ================================================================ */
+    .action-bar {{
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 16px;
+        background: {COLORS['bg_secondary']};
+        border: 1px solid {COLORS['border']};
+        border-radius: var(--radius);
+        margin-bottom: 12px;
+        box-shadow: var(--card-shadow);
+    }}
+
+    .action-bar-left {{
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex: 1;
+    }}
+
+    /* ================================================================
+       SUMMARY STRIP
+       ================================================================ */
+    .summary-strip {{
+        display: flex;
+        gap: 28px;
+        padding: 10px 0;
+        border-bottom: 1px solid {COLORS['border']};
+        margin-bottom: 12px;
+    }}
+
+    .summary-item {{
+        display: flex;
+        flex-direction: column;
+    }}
+
+    .summary-item .label {{
+        font-family: var(--font-body);
+        font-size: 0.65rem;
+        color: {COLORS['text_muted']};
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-weight: 500;
+    }}
+
+    .summary-item .value {{
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: {COLORS['text_primary']};
+    }}
+
+    /* Inline metric (compact horizontal) */
+    .metric-inline {{
+        display: inline-flex;
+        flex-direction: column;
+        padding: 0 12px;
+    }}
+
+    .metric-inline .label {{
+        font-family: var(--font-body);
+        font-size: 0.6rem;
+        color: {COLORS['text_muted']};
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 500;
+    }}
+
+    .metric-inline .value {{
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: {COLORS['text_primary']};
+    }}
+
+    /* ================================================================
+       EXPORT VALIDATION
+       ================================================================ */
+    .validation-grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 8px;
+        margin-bottom: 12px;
+    }}
+
+    .validation-item {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: {COLORS['bg_secondary']};
+        border: 1px solid {COLORS['border']};
+        border-radius: var(--radius-sm);
+        font-family: var(--font-body);
+        font-size: {FONT_SIZES['sm']};
+        transition: border-color var(--transition);
+    }}
+
+    .validation-item:hover {{
+        border-color: {COLORS['border_light']};
+    }}
+
+    .validation-dot {{
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }}
+
+    /* ================================================================
+       SHADCN UI IFRAME
+       ================================================================ */
+    iframe[title*="streamlit_shadcn_ui"] {{
+        border: none !important;
+        color-scheme: dark;
+    }}
+
+    /* ================================================================
+       ACCESSIBILITY
+       ================================================================ */
     button:focus-visible,
     a:focus-visible,
     input:focus-visible,
@@ -406,7 +1043,6 @@ def inject_base_styles():
         outline-offset: 2px;
     }}
 
-    /* Accessibility: Reduced motion preference */
     @media (prefers-reduced-motion: reduce) {{
         *,
         *::before,
@@ -417,18 +1053,17 @@ def inject_base_styles():
         }}
     }}
 
-    /* Accessibility: High contrast mode adjustments */
     @media (prefers-contrast: high) {{
         .status-badge {{
             border-width: 2px;
         }}
         .contact-card,
-        .metric-card {{
+        .metric-card,
+        .company-group {{
             border-width: 2px;
         }}
     }}
 
-    /* Screen reader only text */
     .sr-only {{
         position: absolute;
         width: 1px;
@@ -454,9 +1089,10 @@ def page_header(
     action_label: Optional[str] = None,
     action_callback: Optional[Callable] = None,
     action_icon: Optional[str] = None,
+    right_content: Optional[tuple[str, str]] = None,
 ) -> None:
     """
-    Render a consistent page header with optional action button.
+    Render a consistent page header with optional action button or right content.
 
     Args:
         title: The page title
@@ -464,6 +1100,8 @@ def page_header(
         action_label: Optional button label (e.g., "Refresh")
         action_callback: Function to call when button clicked
         action_icon: Optional icon for the button
+        right_content: Optional tuple of (badge_html, caption) to display on right side
+                       Example: (status_badge("info", "1,234 credits"), "This week")
     """
     col1, col2 = st.columns(LAYOUT["header"])
 
@@ -479,6 +1117,12 @@ def page_header(
                 use_container_width=True
             ):
                 action_callback()
+        elif right_content:
+            badge_html, right_caption = right_content
+            st.markdown("")  # Add spacing to align with title
+            st.markdown(badge_html, unsafe_allow_html=True)
+            if right_caption:
+                st.caption(right_caption)
 
     st.markdown("---")
 
@@ -695,7 +1339,7 @@ def step_indicator(
 
 def colored_progress_bar(
     percent: float,
-    height: int = 8,
+    height: int = 10,
 ) -> None:
     """
     Render a colored progress bar that changes color based on value.
@@ -873,7 +1517,7 @@ def labeled_divider(label: str) -> None:
     """
     st.markdown(
         f'''
-        <div style="display: flex; align-items: center; margin: {SPACING['lg']} 0;">
+        <div style="display: flex; align-items: center; margin: {SPACING['md']} 0;">
             <div style="flex: 1; height: 1px; background: {COLORS['border']};"></div>
             <span style="padding: 0 {SPACING['md']}; color: {COLORS['text_muted']}; font-size: {FONT_SIZES['sm']};">{label}</span>
             <div style="flex: 1; height: 1px; background: {COLORS['border']};"></div>
@@ -881,3 +1525,722 @@ def labeled_divider(label: str) -> None:
         ''',
         unsafe_allow_html=True
     )
+
+
+# =============================================================================
+# PARAMETER GROUP (Phase 2 - Collapsible Filter Sections)
+# =============================================================================
+
+def parameter_group(
+    title: str,
+    summary: str,
+    expanded: bool = False,
+    key: Optional[str] = None,
+) -> "streamlit.expander":
+    """
+    Create a collapsible parameter group with a summary line.
+
+    Wraps st.expander with consistent styling and a summary display.
+
+    Args:
+        title: Group title (e.g., "Location", "Contact Requirements")
+        summary: Brief summary of current settings (e.g., "15mi from 75201 (42 ZIPs, TX)")
+        expanded: Whether the group starts expanded
+        key: Optional unique key for the expander widget
+
+    Returns:
+        A Streamlit expander context manager
+
+    Usage:
+        with parameter_group("Location", "15mi from 75201", expanded=False):
+            # Your widgets here
+            center_zip = st.text_input("Center ZIP", ...)
+    """
+    # Format the label with summary
+    label = f"**{title}** · {summary}" if summary else f"**{title}**"
+    return st.expander(label, expanded=expanded)
+
+
+# =============================================================================
+# QUERY SUMMARY BAR (Phase 2 - Query State Display)
+# =============================================================================
+
+QueryState = Literal["ready", "stale", "loading", "executed"]
+
+def query_summary_bar(
+    params: dict,
+    state: QueryState,
+    result_count: Optional[int] = None,
+) -> None:
+    """
+    Display a query summary bar showing current parameters and state.
+
+    Args:
+        params: Dict with keys like 'zip_count', 'radius', 'states', 'accuracy_min', etc.
+        state: Query state - "ready" (green), "stale" (amber), "loading" (blue), "executed" (green check)
+        result_count: Number of results (shown when state is "executed")
+
+    Usage:
+        query_summary_bar(
+            params={"zip_count": 42, "radius": 15, "states": ["TX"], "accuracy_min": 95},
+            state="ready"
+        )
+    """
+    # Build summary text
+    parts = []
+    if params.get("radius"):
+        parts.append(f"{params['radius']}mi radius")
+    if params.get("zip_count"):
+        parts.append(f"{params['zip_count']} ZIPs")
+    if params.get("states"):
+        states = params["states"]
+        if isinstance(states, list):
+            parts.append(", ".join(states[:3]) + ("..." if len(states) > 3 else ""))
+        else:
+            parts.append(str(states))
+    if params.get("accuracy_min"):
+        parts.append(f"{params['accuracy_min']}+ accuracy")
+    if params.get("target_contacts"):
+        parts.append(f"target: {params['target_contacts']}")
+
+    summary_text = " · ".join(parts) if parts else "Configure search parameters"
+
+    # State-specific styling
+    state_config = {
+        "ready": {
+            "color": COLORS["success"],
+            "bg": COLORS["success_bg"],
+            "border": COLORS["success_dark"],
+            "icon": "✓",
+            "label": "Ready to search",
+        },
+        "stale": {
+            "color": COLORS["warning"],
+            "bg": COLORS["warning_bg"],
+            "border": COLORS["warning_dark"],
+            "icon": "⚠",
+            "label": "Parameters changed",
+        },
+        "loading": {
+            "color": COLORS["info"],
+            "bg": COLORS["info_bg"],
+            "border": COLORS["info_dark"],
+            "icon": "⏳",
+            "label": "Searching...",
+        },
+        "executed": {
+            "color": COLORS["success"],
+            "bg": COLORS["success_bg"],
+            "border": COLORS["success_dark"],
+            "icon": "✓",
+            "label": f"Found {result_count} results" if result_count else "Search complete",
+        },
+    }
+
+    config = state_config.get(state, state_config["ready"])
+
+    html = f'''
+    <div style="
+        display: flex;
+        align-items: center;
+        gap: {SPACING['md']};
+        padding: {SPACING['sm']} {SPACING['md']};
+        background: {config['bg']};
+        border: 1px solid {config['border']};
+        border-radius: 6px;
+        margin: {SPACING['sm']} 0;
+    ">
+        <span style="color: {config['color']}; font-size: 1.1em;">{config['icon']}</span>
+        <span style="color: {COLORS['text_secondary']}; font-size: {FONT_SIZES['sm']};">
+            {summary_text}
+        </span>
+        <span style="margin-left: auto; color: {config['color']}; font-size: {FONT_SIZES['xs']}; font-weight: 500;">
+            {config['label']}
+        </span>
+    </div>
+    '''
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# =============================================================================
+# EXPORT QUALITY WARNINGS (Phase 2)
+# =============================================================================
+
+def export_quality_warnings(leads: list[dict]) -> None:
+    """
+    Display quality warnings before export.
+
+    Analyzes leads for potential issues and shows warnings.
+
+    Args:
+        leads: List of lead dictionaries to analyze
+
+    Warnings shown:
+        - Contacts missing mobile phone
+        - Person-only (branch) contacts
+        - Below accuracy threshold
+    """
+    if not leads:
+        return
+
+    warnings = []
+
+    # Count contacts missing mobile phone
+    missing_mobile = sum(1 for l in leads if not l.get("mobilePhone"))
+    if missing_mobile > 0:
+        pct = (missing_mobile / len(leads)) * 100
+        warnings.append(f"📱 **{missing_mobile}** contacts ({pct:.0f}%) missing mobile phone")
+
+    # Count person-only (branch office) contacts
+    person_only = sum(1 for l in leads if l.get("_location_type") == "Person")
+    if person_only > 0:
+        pct = (person_only / len(leads)) * 100
+        warnings.append(f"🏢 **{person_only}** contacts ({pct:.0f}%) are branch office only (Person-only)")
+
+    # Count below accuracy threshold (< 90)
+    low_accuracy = sum(1 for l in leads if (l.get("contactAccuracyScore") or 0) < 90)
+    if low_accuracy > 0:
+        pct = (low_accuracy / len(leads)) * 100
+        warnings.append(f"📊 **{low_accuracy}** contacts ({pct:.0f}%) have accuracy below 90")
+
+    if warnings:
+        with st.expander("⚠️ Quality Notes", expanded=False):
+            for w in warnings:
+                st.markdown(w)
+            st.caption("These contacts are still included in the export. Review if quality is a concern.")
+
+
+# =============================================================================
+# SKELETON LOADING CARD (Phase 4)
+# =============================================================================
+
+def skeleton_card(height: int = 100, count: int = 3) -> None:
+    """
+    Display skeleton loading placeholders.
+
+    Args:
+        height: Height of each skeleton card in pixels
+        count: Number of skeleton cards to show
+    """
+    for i in range(count):
+        st.markdown(
+            f'''
+            <div style="
+                background: linear-gradient(90deg, {COLORS['bg_secondary']} 0%, {COLORS['bg_tertiary']} 50%, {COLORS['bg_secondary']} 100%);
+                background-size: 200% 100%;
+                animation: shimmer 1.5s infinite;
+                border-radius: 8px;
+                height: {height}px;
+                margin-bottom: {SPACING['sm']};
+            "></div>
+            ''',
+            unsafe_allow_html=True
+        )
+
+    # Shimmer keyframe is defined in inject_base_styles()
+
+
+# =============================================================================
+# REVIEW CONTROLS BAR (Phase 3)
+# =============================================================================
+
+def review_controls_bar(
+    sort_key: str = "geo_review_sort",
+    filter_key: str = "geo_review_filter",
+) -> tuple[str, str]:
+    """
+    Display sort and filter controls for review section.
+
+    Args:
+        sort_key: Session state key for sort selection
+        filter_key: Session state key for filter selection
+
+    Returns:
+        Tuple of (sort_value, filter_value)
+    """
+    col1, col2, col3 = st.columns([1, 1, 2])
+
+    with col1:
+        sort_options = {
+            "score": "Best score",
+            "company_name": "Company A-Z",
+            "contact_count": "Most choices",
+        }
+        sort_value = st.selectbox(
+            "Sort by",
+            options=list(sort_options.keys()),
+            format_func=lambda x: sort_options[x],
+            key=sort_key,
+            label_visibility="collapsed",
+        )
+
+    with col2:
+        filter_options = {
+            "all": "All companies",
+            "multi_only": "Multiple contacts",
+            "has_mobile": "Has mobile phone",
+            "high_accuracy": "95+ accuracy",
+        }
+        filter_value = st.selectbox(
+            "Filter",
+            options=list(filter_options.keys()),
+            format_func=lambda x: filter_options[x],
+            key=filter_key,
+            label_visibility="collapsed",
+        )
+
+    return sort_value, filter_value
+
+
+# =============================================================================
+# SCORE BREAKDOWN (Phase 3)
+# =============================================================================
+
+def score_breakdown(contact: dict) -> str:
+    """
+    Generate a score breakdown explanation for a contact.
+
+    Args:
+        contact: Contact dictionary with scoring fields
+
+    Returns:
+        HTML string showing score breakdown
+    """
+    parts = []
+
+    # Accuracy score contribution
+    accuracy = contact.get("contactAccuracyScore", 0)
+    if accuracy >= 95:
+        parts.append(f"<span style='color:{COLORS['success']}'>Accuracy {accuracy} (+20)</span>")
+    elif accuracy >= 85:
+        parts.append(f"<span style='color:{COLORS['warning']}'>Accuracy {accuracy} (+10)</span>")
+    else:
+        parts.append(f"<span style='color:{COLORS['text_muted']}'>Accuracy {accuracy}</span>")
+
+    # Mobile phone bonus
+    if contact.get("mobilePhone"):
+        parts.append(f"<span style='color:{COLORS['success']}'>Mobile ✓ (+15)</span>")
+    else:
+        parts.append(f"<span style='color:{COLORS['text_muted']}'>No mobile</span>")
+
+    # Location type
+    loc_type = contact.get("_location_type", "")
+    if loc_type == "PersonAndHQ":
+        parts.append(f"<span style='color:{COLORS['success']}'>HQ+Person (+10)</span>")
+    elif loc_type == "Person":
+        parts.append(f"<span style='color:{COLORS['warning']}'>Branch only (+5)</span>")
+
+    return " · ".join(parts)
+
+
+# =============================================================================
+# COMPANY CARD GROUP (Phase 3)
+# =============================================================================
+
+def company_card_header(
+    company_name: str,
+    contact_count: int,
+    best_contact_name: str,
+    is_expanded: bool = False,
+) -> str:
+    """
+    Generate HTML for a company card header.
+
+    Args:
+        company_name: Name of the company
+        contact_count: Number of contacts available
+        best_contact_name: Name of the best contact
+        is_expanded: Whether the card is expanded
+
+    Returns:
+        HTML string for the header
+    """
+    badge_color = COLORS["success"] if contact_count == 1 else COLORS["info"]
+    badge_text = f"{contact_count} contact{'s' if contact_count > 1 else ''}"
+
+    return f'''
+    <div style="
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: {SPACING['sm']} {SPACING['md']};
+        background: {COLORS['bg_secondary']};
+        border: 1px solid {COLORS['border']};
+        border-radius: 8px;
+        margin-bottom: {SPACING['xs']};
+    ">
+        <div>
+            <span style="font-weight: 600; color: {COLORS['text_primary']};">{company_name}</span>
+            <span style="color: {COLORS['text_muted']}; font-size: {FONT_SIZES['sm']}; margin-left: {SPACING['sm']};">
+                Best: {best_contact_name}
+            </span>
+        </div>
+        <span style="
+            background: {badge_color}20;
+            color: {badge_color};
+            padding: {SPACING['xs']} {SPACING['sm']};
+            border-radius: 9999px;
+            font-size: {FONT_SIZES['xs']};
+            font-weight: 500;
+        ">{badge_text}</span>
+    </div>
+    '''
+
+
+# =============================================================================
+# WORKFLOW RUN STATE (UX Overhaul)
+# =============================================================================
+
+# State to pill color mapping
+_STATE_COLORS: dict[str, StatusType] = {
+    "idle": "neutral",
+    "searched": "info",
+    "selecting": "info",
+    "contacts_found": "warning",
+    "enriched": "success",
+    "exported": "success",
+}
+
+
+def workflow_run_state(prefix: str) -> str:
+    """
+    Derive the current workflow run state from session state.
+
+    Args:
+        prefix: Session state prefix - "intent" or "geo"
+
+    Returns:
+        One of: "idle", "searched", "selecting", "contacts_found", "enriched", "exported"
+    """
+    ss = st.session_state
+
+    if ss.get(f"{prefix}_exported"):
+        return "exported"
+    if ss.get(f"{prefix}_enrichment_done"):
+        return "enriched"
+    if ss.get(f"{prefix}_contacts_by_company"):
+        return "contacts_found"
+
+    # Check for manual mode selecting state
+    if prefix == "intent":
+        if ss.get("intent_companies") and ss.get("intent_mode") == "manual" and not ss.get("intent_companies_confirmed"):
+            return "selecting"
+    elif prefix == "geo":
+        if ss.get("geo_preview_contacts") and ss.get("geo_mode") == "manual" and not ss.get("geo_selection_confirmed"):
+            return "selecting"
+
+    if ss.get(f"{prefix}_search_executed"):
+        return "searched"
+
+    # Check for companies/contacts existing (intent has intent_companies, geo has geo_preview_contacts)
+    if prefix == "intent" and ss.get("intent_companies"):
+        return "searched"
+    if prefix == "geo" and ss.get("geo_preview_contacts"):
+        return "searched"
+
+    return "idle"
+
+
+# =============================================================================
+# ACTION BAR (UX Overhaul)
+# =============================================================================
+
+def action_bar(
+    run_state: str,
+    primary_label: Optional[str] = None,
+    primary_key: Optional[str] = None,
+    secondary_label: Optional[str] = None,
+    secondary_key: Optional[str] = None,
+    metrics: Optional[list[dict]] = None,
+) -> tuple[bool, bool]:
+    """
+    Render a sticky action bar with state pill, metrics, and up to 2 action buttons.
+
+    Args:
+        run_state: Current workflow state (from workflow_run_state)
+        primary_label: Label for primary action button
+        primary_key: Unique key for primary button
+        secondary_label: Label for secondary action button
+        secondary_key: Unique key for secondary button
+        metrics: Optional inline metrics [{label, value}]
+
+    Returns:
+        Tuple of (primary_clicked, secondary_clicked)
+    """
+    pill_color = _STATE_COLORS.get(run_state, "neutral")
+    state_display = run_state.replace("_", " ").title()
+    pill_html = status_badge(pill_color, state_display)
+
+    # Build inline metrics HTML
+    metrics_html = ""
+    if metrics:
+        for m in metrics:
+            metrics_html += (
+                f'<div class="metric-inline">'
+                f'<span class="label">{m["label"]}</span>'
+                f'<span class="value">{m["value"]}</span>'
+                f'</div>'
+            )
+
+    # Render the bar: left side is HTML (pill + metrics), right side is Streamlit buttons
+    if primary_label or secondary_label:
+        # Calculate columns: left for pill+metrics, right for buttons
+        btn_count = (1 if primary_label else 0) + (1 if secondary_label else 0)
+        left_col, *btn_cols = st.columns([3] + [1] * btn_count)
+    else:
+        left_col = st.columns(1)[0]
+        btn_cols = []
+
+    with left_col:
+        st.markdown(
+            f'<div class="action-bar"><div class="action-bar-left">{pill_html}{metrics_html}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    primary_clicked = False
+    secondary_clicked = False
+
+    col_idx = 0
+    if secondary_label and btn_cols:
+        with btn_cols[col_idx]:
+            secondary_clicked = bool(ui.button(
+                text=secondary_label,
+                variant="outline",
+                key=secondary_key or f"action_bar_secondary_{run_state}",
+            ))
+        col_idx += 1
+
+    if primary_label and col_idx < len(btn_cols):
+        with btn_cols[col_idx]:
+            primary_clicked = st.button(
+                primary_label,
+                type="primary",
+                key=primary_key or f"action_bar_primary_{run_state}",
+                use_container_width=True,
+            )
+
+    return primary_clicked, secondary_clicked
+
+
+# =============================================================================
+# SUMMARY STRIP (UX Overhaul)
+# =============================================================================
+
+def workflow_summary_strip(items: list[dict]) -> None:
+    """
+    Render a compact horizontal row of key metrics.
+
+    Args:
+        items: List of {label: str, value: str|int} dicts (3-6 items)
+    """
+    if not items:
+        return
+
+    parts = []
+    for item in items:
+        val = item.get("value", "")
+        if isinstance(val, int):
+            val = f"{val:,}"
+        parts.append(
+            f'<div class="summary-item">'
+            f'<span class="label">{item["label"]}</span>'
+            f'<span class="value">{val}</span>'
+            f'</div>'
+        )
+
+    html = f'<div class="summary-strip">{"".join(parts)}</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# =============================================================================
+# LAST RUN INDICATOR (UX Overhaul)
+# =============================================================================
+
+def last_run_indicator(last_query: dict | None) -> None:
+    """
+    Render a small inline indicator showing last run info.
+
+    Args:
+        last_query: Dict from get_last_query() with created_at, leads_returned, workflow_type.
+                    None if no previous runs.
+    """
+    if not last_query:
+        return
+
+    from datetime import datetime
+
+    created_at = last_query.get("created_at", "")
+    leads = last_query.get("leads_returned", 0)
+    workflow = last_query.get("workflow_type", "").title()
+
+    # Compute time delta
+    time_display = ""
+    if created_at:
+        try:
+            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            delta = datetime.now() - dt.replace(tzinfo=None)
+            if delta.days > 0:
+                time_display = f"{delta.days}d ago"
+            elif delta.seconds >= 3600:
+                time_display = f"{delta.seconds // 3600}h ago"
+            elif delta.seconds >= 60:
+                time_display = f"{delta.seconds // 60}m ago"
+            else:
+                time_display = "just now"
+        except (ValueError, TypeError):
+            time_display = created_at[:10] if len(created_at) >= 10 else created_at
+
+    parts = []
+    if time_display:
+        parts.append(time_display)
+    if leads:
+        parts.append(f"{leads} leads")
+    if workflow:
+        parts.append(workflow)
+
+    if parts:
+        st.caption(f"Last run: {' · '.join(parts)}")
+
+
+# =============================================================================
+# EXPORT VALIDATION CHECKLIST (UX Overhaul)
+# =============================================================================
+
+def export_validation_checklist(leads: list[dict]) -> list[dict]:
+    """
+    Run validation checks on leads and render a compact grid.
+
+    Args:
+        leads: List of lead dicts to validate
+
+    Returns:
+        List of check results: [{check, passed, failed, status}]
+    """
+    if not leads:
+        return []
+
+    total = len(leads)
+    checks = []
+
+    # Has phone number
+    has_phone = sum(
+        1 for l in leads
+        if l.get("directPhone") or l.get("phone") or l.get("mobilePhone")
+    )
+    checks.append({
+        "check": "Has phone number",
+        "passed": has_phone,
+        "failed": total - has_phone,
+    })
+
+    # Has email
+    has_email = sum(1 for l in leads if l.get("email"))
+    checks.append({
+        "check": "Has email",
+        "passed": has_email,
+        "failed": total - has_email,
+    })
+
+    # Accuracy >= 85
+    high_accuracy = sum(
+        1 for l in leads if (l.get("contactAccuracyScore") or 0) >= 85
+    )
+    checks.append({
+        "check": "Accuracy >= 85",
+        "passed": high_accuracy,
+        "failed": total - high_accuracy,
+    })
+
+    # No duplicates (by personId)
+    person_ids = [l.get("personId") or l.get("id") for l in leads if l.get("personId") or l.get("id")]
+    unique_count = len(set(person_ids))
+    duplicate_count = len(person_ids) - unique_count
+    checks.append({
+        "check": "No duplicates",
+        "passed": unique_count,
+        "failed": duplicate_count,
+    })
+
+    # Assign status based on thresholds
+    for check in checks:
+        if total > 0:
+            pass_rate = check["passed"] / total
+        else:
+            pass_rate = 1.0
+
+        if pass_rate > 0.9:
+            check["status"] = "success"
+        elif pass_rate > 0.7:
+            check["status"] = "warning"
+        else:
+            check["status"] = "error"
+
+    # Render grid
+    status_colors = {
+        "success": COLORS["success"],
+        "warning": COLORS["warning"],
+        "error": COLORS["error"],
+    }
+
+    items_html = ""
+    for check in checks:
+        color = status_colors.get(check["status"], COLORS["text_muted"])
+        items_html += (
+            f'<div class="validation-item">'
+            f'<div class="validation-dot" style="background:{color};"></div>'
+            f'<span>{check["check"]}</span>'
+            f'<span style="margin-left:auto;color:{COLORS["text_secondary"]};">'
+            f'{check["passed"]}/{check["passed"]+check["failed"]}</span>'
+            f'</div>'
+        )
+
+    st.markdown(f'<div class="validation-grid">{items_html}</div>', unsafe_allow_html=True)
+
+    return checks
+
+
+# =============================================================================
+# STYLED HTML TABLE
+# =============================================================================
+
+def styled_table(
+    rows: list[dict],
+    columns: list[dict],
+) -> None:
+    """
+    Render a themed HTML table with alternating rows, hover, and optional status pills.
+
+    Args:
+        rows: List of row dicts (keys match column 'key')
+        columns: List of column defs: [{key, label, align?, mono?, pill?}]
+                 pill: dict mapping values to pill classes (e.g. {"Exported": "success", "Not exported": "muted"})
+    """
+    if not rows:
+        return
+
+    # Header
+    header_html = "".join(
+        f'<th style="text-align:{c.get("align","left")}">{c["label"]}</th>'
+        for c in columns
+    )
+
+    # Rows
+    body_html = ""
+    for row in rows:
+        cells = ""
+        for c in columns:
+            val = row.get(c["key"], "")
+            td_class = ' class="mono"' if c.get("mono") else ""
+            align = f' style="text-align:{c["align"]}"' if c.get("align") else ""
+
+            if c.get("pill") and val in c["pill"]:
+                pill_cls = c["pill"][val]
+                cell_content = f'<span class="status-pill status-pill-{pill_cls}">{val}</span>'
+            else:
+                cell_content = str(val)
+
+            cells += f"<td{td_class}{align}>{cell_content}</td>"
+        body_html += f"<tr>{cells}</tr>"
+
+    html = f'<table class="styled-table"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>'
+    st.markdown(html, unsafe_allow_html=True)

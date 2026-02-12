@@ -211,3 +211,78 @@ class TestTursoDatabase:
         assert result[0]["name"] == "Dallas Metro"
         assert result[0]["zip_codes"] == ["75201", "75202"]
         assert result[0]["radius_miles"] == 25
+
+    def test_get_last_query_found(self, mock_db):
+        """Test getting last query when one exists."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            (42, "intent", '{"topics": ["Vending"]}', 25, 0, "2026-02-10T14:30:00")
+        ]
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_last_query("intent")
+
+        assert result is not None
+        assert result["id"] == 42
+        assert result["workflow_type"] == "intent"
+        assert result["leads_returned"] == 25
+        assert result["leads_exported"] == 0
+        assert result["created_at"] == "2026-02-10T14:30:00"
+        assert result["query_params"] == {"topics": ["Vending"]}
+
+        # Verify correct SQL was called
+        call_args = mock_conn.execute.call_args[0]
+        assert "WHERE workflow_type = ?" in call_args[0]
+        assert "ORDER BY created_at DESC LIMIT 1" in call_args[0]
+        assert call_args[1] == ("intent",)
+
+    def test_get_last_query_not_found(self, mock_db):
+        """Test getting last query when none exist."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_last_query("geography")
+
+        assert result is None
+
+    def test_get_last_query_null_params(self, mock_db):
+        """Test getting last query when query_params is NULL."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            (1, "geography", None, 10, 5, "2026-02-10T12:00:00")
+        ]
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_last_query("geography")
+
+        assert result is not None
+        assert result["query_params"] == {}
+
+    def test_update_query_exported(self, mock_db):
+        """Test updating exported count for a query."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+
+        db.update_query_exported(42, 25)
+
+        mock_conn.execute.assert_called_once()
+        call_args = mock_conn.execute.call_args[0]
+        assert "UPDATE query_history SET leads_exported = ? WHERE id = ?" in call_args[0]
+        assert call_args[1] == (25, 42)
+        mock_conn.commit.assert_called_once()
+
+    def test_update_query_exported_zero(self, mock_db):
+        """Test updating exported count to zero."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+
+        db.update_query_exported(1, 0)
+
+        call_args = mock_conn.execute.call_args[0]
+        assert call_args[1] == (0, 1)

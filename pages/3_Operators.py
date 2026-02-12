@@ -4,8 +4,9 @@ Superhuman-inspired: clean, focused, inline editing.
 """
 
 import streamlit as st
+import streamlit_shadcn_ui as ui
 from turso_db import get_database
-from ui_components import inject_base_styles, page_header
+from ui_components import inject_base_styles, page_header, metric_card, paginate_items, pagination_controls
 
 st.set_page_config(page_title="Operators", page_icon="👤", layout="wide")
 
@@ -54,8 +55,7 @@ with col1:
     st.caption("Manage operators for lead assignment")
 with col2:
     operators = db.get_operators()
-    st.metric("Total", len(operators), label_visibility="collapsed")
-    st.caption(f"{len(operators)} operators")
+    metric_card("Operators", len(operators))
 
 st.markdown("---")
 
@@ -82,7 +82,7 @@ with st.expander("Sync from Zoho CRM", expanded=False):
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("Sync Changes", use_container_width=True, help="Incremental sync - only fetch modified records"):
+            if ui.button(text="Sync Changes", variant="default", key="op_sync_btn"):
                 with st.spinner("Syncing from Zoho CRM..."):
                     try:
                         from zoho_auth import ZohoAuth
@@ -104,7 +104,16 @@ with st.expander("Sync from Zoho CRM", expanded=False):
                         st.error(f"Sync failed: {e}")
 
         with col2:
-            if st.button("Full Resync", use_container_width=True, help="Fetch all records from Zoho"):
+            _resync_trigger = ui.button(text="Full Resync", variant="destructive", key="op_resync_btn")
+            _resync_confirmed = ui.alert_dialog(
+                show=_resync_trigger,
+                title="Full Resync",
+                description="This will fetch all records from Zoho CRM. This may take a while.",
+                confirm_label="Resync",
+                cancel_label="Cancel",
+                key="op_resync_dialog",
+            )
+            if _resync_confirmed:
                 with st.spinner("Full resync from Zoho CRM..."):
                     try:
                         from zoho_auth import ZohoAuth
@@ -156,7 +165,7 @@ st.markdown("---")
 # ADD BUTTON
 # =============================================================================
 if not st.session_state.operators_adding:
-    if st.button("+ Add operator", use_container_width=False):
+    if ui.button(text="+ Add operator", variant="default", key="op_add_btn"):
         st.session_state.operators_adding = True
         st.rerun()
 
@@ -183,7 +192,7 @@ if st.session_state.operators_adding:
     col1, col2, col3 = st.columns([1, 1, 2])
 
     with col1:
-        if st.button("Save", type="primary", use_container_width=True):
+        if ui.button(text="Save", variant="default", key="op_save_new_btn"):
             if not new_name:
                 st.error("Name required")
             else:
@@ -206,7 +215,7 @@ if st.session_state.operators_adding:
                         st.error(str(e))
 
     with col2:
-        if st.button("Cancel", use_container_width=True):
+        if ui.button(text="Cancel", variant="outline", key="op_cancel_new_btn"):
             st.session_state.operators_adding = False
             st.rerun()
 
@@ -222,7 +231,11 @@ if not filtered_operators:
     else:
         st.caption("No operators yet")
 else:
-    for op in filtered_operators:
+    # Paginate the operator list
+    page_items, current_page, total_pages = paginate_items(filtered_operators, page_size=20, page_key="operators_page")
+    st.caption(f"Showing {(current_page - 1) * 20 + 1}–{min(current_page * 20, len(filtered_operators))} of {len(filtered_operators):,} operators")
+
+    for op in page_items:
         is_editing = st.session_state.operators_editing_id == op["id"]
 
         if is_editing:
@@ -243,7 +256,7 @@ else:
             col1, col2, col3 = st.columns([1, 1, 2])
 
             with col1:
-                if st.button("Save", key=f"save_{op['id']}", type="primary", use_container_width=True):
+                if ui.button(text="Save", variant="default", key=f"op_save_edit_{op['id']}_btn"):
                     if not edit_name:
                         st.error("Name required")
                     else:
@@ -261,7 +274,7 @@ else:
                         st.rerun()
 
             with col2:
-                if st.button("Cancel", key=f"cancel_{op['id']}", use_container_width=True):
+                if ui.button(text="Cancel", variant="outline", key=f"op_cancel_edit_{op['id']}_btn"):
                     st.session_state.operators_editing_id = None
                     st.rerun()
 
@@ -293,12 +306,28 @@ else:
             with col3:
                 btn_col1, btn_col2 = st.columns(2)
                 with btn_col1:
-                    if st.button("Edit", key=f"edit_{op['id']}", use_container_width=True):
+                    if ui.button(text="Edit", variant="secondary", key=f"op_edit_{op['id']}_btn"):
                         st.session_state.operators_editing_id = op["id"]
                         st.rerun()
                 with btn_col2:
-                    if st.button("Delete", key=f"del_{op['id']}", use_container_width=True):
-                        db.delete_operator(op["id"])
-                        st.rerun()
+                    _del_trigger = ui.button(text="Delete", variant="destructive", key=f"op_delete_{op['id']}_btn")
+                    _del_confirmed = ui.alert_dialog(
+                        show=_del_trigger,
+                        title="Delete Operator",
+                        description=f"Delete {op['operator_name']}? This action cannot be undone.",
+                        confirm_label="Delete",
+                        cancel_label="Cancel",
+                        key=f"op_delete_{op['id']}_dialog",
+                    )
+                    if _del_confirmed:
+                        try:
+                            db.delete_operator(op["id"])
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to delete: {e}")
 
         st.markdown("---")
+
+    # Pagination controls at bottom
+    if total_pages > 1:
+        pagination_controls(current_page, total_pages, page_key="operators_page")

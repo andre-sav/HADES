@@ -515,11 +515,13 @@ class ZoomInfoClient:
 
         # Legacy response: data is a flat list of intent records
         raw_data = response.get("data", [])
+        if raw_data:
+            logger.info(f"Intent API raw keys (first item): {list(raw_data[0].keys())}")
         normalized = []
         for item in raw_data:
             # Legacy fields are already in the expected format
-            signal_strength = item.get("intentStrength", item.get("signalStrength", ""))
-            signal_score = item.get("signalScore", 0)
+            signal_strength = item.get("intentStrength") or item.get("signalStrength", "")
+            signal_score = item.get("signalScore") or 0
 
             # If no categorical strength, derive from score
             if not signal_strength and signal_score:
@@ -530,22 +532,40 @@ class ZoomInfoClient:
                 else:
                     signal_strength = "Low"
 
+            # Company info may be nested under "company" object or flat
+            company_obj = item.get("company", {})
+            company_id = (
+                item.get("companyId")
+                or company_obj.get("id")
+                or item.get("id", "")
+            )
+            company_name = (
+                item.get("companyName")
+                or company_obj.get("name")
+                or item.get("name", "")
+            )
+            company_website = (
+                item.get("companyWebsite")
+                or company_obj.get("website")
+                or item.get("website", "")
+            )
+
             normalized.append({
-                "companyId": item.get("companyId", item.get("id", "")),
-                "companyName": item.get("companyName", item.get("name", "")),
-                "companyWebsite": item.get("companyWebsite", item.get("website", "")),
+                "companyId": company_id,
+                "companyName": company_name,
+                "companyWebsite": company_website,
                 "intentStrength": signal_strength,
-                "intentTopic": item.get("intentTopic", item.get("topic", "")),
-                "intentDate": item.get("intentDate", item.get("signalDate", "")),
-                "sicCode": item.get("sicCode", ""),
-                "city": item.get("city", ""),
-                "state": item.get("state", ""),
-                "employees": item.get("employees", item.get("employeeCount", "")),
+                "intentTopic": item.get("intentTopic") or item.get("topic", ""),
+                "intentDate": item.get("intentDate") or item.get("signalDate", ""),
+                "sicCode": item.get("sicCode") or company_obj.get("sicCode", ""),
+                "city": item.get("city") or company_obj.get("city", ""),
+                "state": item.get("state") or company_obj.get("state", ""),
+                "employees": item.get("employees") or item.get("employeeCount") or company_obj.get("employeeCount", ""),
                 "signalScore": signal_score,
                 "audienceStrength": item.get("audienceStrength", ""),
                 "category": item.get("category", ""),
                 "spikesInDateRange": item.get("spikesInDateRange", 0),
-                "hasOtherTopicConsumption": item.get("hasOtherTopicConsumption", False),
+                "hasOtherTopicConsumption": item.get("hasOtherTopicConsumption", company_obj.get("hasOtherTopicConsumption", False)),
                 "recommendedContacts": item.get("recommendedContacts", []),
             })
 
@@ -559,6 +579,8 @@ class ZoomInfoClient:
                 "currentPage": params.page,
                 "totalPages": (total + params.page_size - 1) // params.page_size if total > 0 else 1,
             },
+            "_raw_keys": list(raw_data[0].keys()) if raw_data else [],
+            "_raw_sample": raw_data[0] if raw_data else {},
         }
         logger.info(f"Intent Search complete: {len(result['data'])} results on page {params.page}, {result['pagination']['totalResults']} total")
         return result
@@ -621,11 +643,18 @@ class ZoomInfoClient:
         logger.info(f"Intent Search (all pages): topics={params.topics}, max_pages={max_pages}")
         all_leads = []
         current_page = 1
+        raw_keys = []
+        raw_sample = {}
 
         while current_page <= max_pages:
             params.page = current_page
             result = self.search_intent(params)
             all_leads.extend(result["data"])
+
+            # Capture raw API keys from first page for debugging
+            if current_page == 1:
+                raw_keys = result.get("_raw_keys", [])
+                raw_sample = result.get("_raw_sample", {})
 
             if progress_callback:
                 progress_callback(current_page, result["pagination"]["totalPages"])
@@ -636,6 +665,9 @@ class ZoomInfoClient:
             current_page += 1
 
         logger.info(f"Intent Search (all pages) complete: {len(all_leads)} total leads from {current_page} pages")
+        # Attach debug info to help diagnose field mapping issues
+        self._last_intent_raw_keys = raw_keys
+        self._last_intent_raw_sample = raw_sample
         return all_leads
 
     def search_companies_all_pages(

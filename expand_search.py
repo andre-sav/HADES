@@ -230,14 +230,25 @@ def expand_search(
 
         return client.search_contacts_all_pages(params, max_pages=5)
 
-    def process_contacts(contacts: list) -> tuple[int, int]:
-        """Add contacts to tracking dicts, return (new_contacts, new_companies)."""
+    def process_contacts(contacts: list, location_type_tag: str = None) -> tuple[int, int]:
+        """Add contacts to tracking dicts, return (new_contacts, new_companies).
+
+        Args:
+            contacts: List of contact dicts from API
+            location_type_tag: Optional tag to add as _location_type field.
+                When combined search is enabled, contacts get tagged:
+                - "PersonAndHQ" = Contact's location AND company HQ match
+                - "Person" = Only contact's location matches (branch office)
+        """
         new_contacts = 0
         new_companies = 0
         for c in contacts:
             person_id = c.get("id") or c.get("personId")
             company_id = get_company_id(c)
             if person_id and person_id not in all_contacts:
+                # Tag with location type if provided (for combined search demarcation)
+                if location_type_tag:
+                    c["_location_type"] = location_type_tag
                 all_contacts[person_id] = c
                 new_contacts += 1
                 if company_id and company_id not in unique_companies:
@@ -263,7 +274,9 @@ def expand_search(
         )
         searches_performed += 1
 
-        new_contacts, new_companies = process_contacts(contacts)
+        # Tag contacts with location type when combined search is enabled
+        location_tag = "PersonAndHQ" if include_person_only else None
+        new_contacts, new_companies = process_contacts(contacts, location_type_tag=location_tag)
         log_progress(f"Found **{len(contacts)}** contacts → **{len(unique_companies)}** companies ({new_companies} new)")
 
         # Combined search: If include_person_only is enabled, run Person-only search and merge
@@ -281,7 +294,10 @@ def expand_search(
                 )
                 searches_performed += 1
 
-                person_new_contacts, person_new_companies = process_contacts(person_only_contacts)
+                # Tag Person-only contacts (only new ones not already in PersonAndHQ results)
+                person_new_contacts, person_new_companies = process_contacts(
+                    person_only_contacts, location_type_tag="Person"
+                )
                 log_progress(
                     f"Person-only found **{len(person_only_contacts)}** contacts → "
                     f"**+{person_new_companies}** new companies (total: {len(unique_companies)})"
@@ -391,8 +407,30 @@ def expand_search(
             )
             searches_performed += 1
 
-            new_contacts, new_companies = process_contacts(contacts)
+            # Tag contacts with location type when combined search is enabled
+            exp_location_tag = "PersonAndHQ" if include_person_only else None
+            new_contacts, new_companies = process_contacts(contacts, location_type_tag=exp_location_tag)
             log_progress(f"Found {len(contacts)} contacts → **{len(unique_companies)}** companies (+{new_companies} new)")
+
+            # Combined search: Run Person-only search during expansion too
+            if include_person_only and fixed_params["location_type"] == "PersonAndHQ":
+                time.sleep(0.5)  # Rate limit
+                try:
+                    person_only_contacts = do_search(
+                        current_params["radius"],
+                        current_params["accuracy_min"],
+                        current_params["management_levels"],
+                        current_params["employee_max"],
+                        location_type_override="Person",
+                    )
+                    searches_performed += 1
+                    person_new_contacts, person_new_companies = process_contacts(
+                        person_only_contacts, location_type_tag="Person"
+                    )
+                    if person_new_companies > 0:
+                        log_progress(f"Person-only expansion: +{person_new_companies} new companies")
+                except Exception as e:
+                    logger.warning(f"Person-only expansion search failed: {e}")
 
         except Exception as e:
             log_progress(f"Search failed: {e}")

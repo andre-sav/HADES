@@ -1,7 +1,7 @@
 """
 Intent Workflow - Full pipeline: Find intent companies → Select → Find contacts → Export.
 
-Pipeline: Intent Search → Select Companies → Contact Search by companyId → Enrich → Score → Export
+Pipeline: Intent Search → Select Companies → Resolve company IDs → Contact Search (ICP filters) → Enrich → Score → Export
 Dual mode: Autopilot (auto-select) and Manual Review (user selects companies + contacts).
 """
 
@@ -258,7 +258,7 @@ with col1:
     selected_topics = st.multiselect(
         "Topics",
         options=available_topics,
-        default=["Vending"] if "Vending" in available_topics else [],
+        default=["Vending Machines"] if "Vending Machines" in available_topics else [],
         placeholder="Select intent topics...",
     )
 
@@ -274,10 +274,33 @@ with col2:
 with st.expander("Filters", expanded=False):
     filter_col1, filter_col2 = st.columns(2)
     with filter_col1:
+        st.caption("**Intent Search filters:**")
         st.caption(f"Minimum employees: {get_employee_minimum():,}")
         st.caption(f"Maximum employees: {get_employee_maximum():,}")
-    with filter_col2:
         st.caption(f"SIC codes: {len(get_sic_codes())} industries")
+    with filter_col2:
+        st.caption("**Contact Search filters:**")
+        intent_mgmt_levels = st.multiselect(
+            "Management level",
+            options=["Manager", "Director", "VP Level Exec", "C Level Exec"],
+            default=["Manager"],
+            key="intent_mgmt_levels",
+        )
+        intent_accuracy_min = st.number_input(
+            "Accuracy minimum",
+            min_value=0,
+            max_value=100,
+            value=95,
+            step=5,
+            key="intent_accuracy_min",
+        )
+        intent_phone_fields = st.multiselect(
+            "Required phone fields",
+            options=["mobilePhone", "directPhone", "phone"],
+            default=["mobilePhone", "directPhone", "phone"],
+            key="intent_phone_fields",
+            help="Contact must have at least one selected phone type",
+        )
 
 # Target companies input
 target_col1, target_col2, target_col3 = st.columns([1, 1, 2])
@@ -353,6 +376,8 @@ if search_clicked:
             st.session_state["_intent_api_response_summary"] = {
                 "total_results": len(leads),
                 "sample": leads[:3] if leads else [],
+                "raw_keys": getattr(client, "_last_intent_raw_keys", []),
+                "raw_sample": getattr(client, "_last_intent_raw_sample", {}),
             }
 
             if not leads:
@@ -381,11 +406,11 @@ if search_clicked:
                     "removed": removed,
                 }
 
-                # Log intent search usage
+                # Log intent search usage (search is free — credits only on enrich)
                 cost_tracker.log_usage(
                     workflow_type="intent",
                     query_params=st.session_state.intent_query_params,
-                    credits_used=len(leads),
+                    credits_used=0,
                     leads_returned=len(deduped),
                 )
                 db.log_query(
@@ -497,9 +522,18 @@ if _has_debug:
                     else:
                         st.markdown(f"**{total}** results returned")
 
+                    raw_keys = resp.get("raw_keys", [])
+                    if raw_keys:
+                        st.caption(f"Raw API fields: {', '.join(raw_keys)}")
+
+                    raw_sample = resp.get("raw_sample", {})
+                    if raw_sample:
+                        st.caption("Raw API response (first item):")
+                        st.code(json.dumps(raw_sample, indent=2, default=str), language="json")
+
                     sample = resp.get("sample", [])
                     if sample:
-                        st.caption(f"Sample (first {len(sample)}):")
+                        st.caption(f"Normalized sample (first {len(sample)}):")
                         clean = [{k: v for k, v in item.items() if not k.startswith("_") and v not in ("", None, [], {})} for item in sample]
                         st.code(json.dumps(clean, indent=2, default=str), language="json")
 
@@ -546,14 +580,12 @@ if (
         display_data.append({
             "Select": str(lead.get("companyId", "")) in st.session_state.intent_selected_companies,
             "Company": lead.get("companyName", ""),
-            "City": lead.get("city", ""),
-            "State": lead.get("state", ""),
-            "Employees": lead.get("employees", ""),
             "Score": lead.get("_score", 0),
             "Priority": lead.get("_priority", ""),
             "Freshness": lead.get("_freshness_label", ""),
             "Signal": lead.get("intentStrength", ""),
             "Topic": lead.get("intentTopic", ""),
+            "Age": f"{lead.get('_age_days', '?')}d",
             "_companyId": str(lead.get("companyId", "")),
         })
 
@@ -568,9 +600,13 @@ if (
                 "Select": st.column_config.CheckboxColumn("Select", default=False, width="small"),
                 "Company": st.column_config.TextColumn("Company", width="large"),
                 "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, width="small"),
-                "Employees": st.column_config.NumberColumn("Emp", width="small"),
+                "Priority": st.column_config.TextColumn("Priority", width="small"),
+                "Freshness": st.column_config.TextColumn("Freshness", width="small"),
+                "Signal": st.column_config.TextColumn("Signal", width="small"),
+                "Topic": st.column_config.TextColumn("Topic", width="medium"),
+                "Age": st.column_config.TextColumn("Age", width="small"),
             },
-            disabled=["Company", "City", "State", "Employees", "Score", "Priority", "Freshness", "Signal", "Topic"],
+            disabled=["Company", "Score", "Priority", "Freshness", "Signal", "Topic", "Age"],
             key="intent_company_editor",
         )
 
@@ -646,56 +682,104 @@ if (
     selected_companies = st.session_state.intent_selected_companies
     company_ids = list(selected_companies.keys())
 
-    st.caption(f"Searching for contacts at **{len(company_ids)}** companies...")
+    st.caption(f"Finding ICP-filtered contacts at **{len(company_ids)}** companies...")
 
-    # If contacts not yet fetched, fetch them
+    # Two-phase contact resolution:
+    # Phase 1: Resolve hashed company IDs → numeric IDs (via cache or enrich)
+    # Phase 2: Contact Search with full ICP filters using numeric IDs
     if st.session_state.intent_contacts_by_company is None:
         with st.status(f"🔍 Finding contacts at {len(company_ids)} companies...", expanded=True) as search_status:
             try:
                 client = get_zoominfo_client()
+                db = get_database()
 
-                # Build params for company ID search
-                params = ContactQueryParams(
-                    company_ids=company_ids,
-                    management_levels=["Manager"],
-                    contact_accuracy_score_min=95,
-                    required_fields=["mobilePhone", "directPhone", "phone"],
-                    required_fields_operator="or",
-                )
+                # Phase 1: Resolve hashed → numeric company IDs
+                st.write("Phase 1: Resolving company IDs...")
+                cached = db.get_company_ids_bulk(company_ids)
+                numeric_map = {}  # hashed_id → numeric_id
 
-                contacts = client.search_contacts_all_pages(params, max_pages=5)
+                # Use cached IDs where available
+                for hid in company_ids:
+                    if hid in cached:
+                        numeric_map[hid] = cached[hid]["numeric_id"]
 
-                if not contacts:
-                    search_status.update(label="⚠️ No contacts found", state="complete")
-                    st.warning("No contacts found at selected companies. Try adjusting filters or selecting more companies.")
+                # Enrich 1 recommended contact per uncached company to get numeric IDs
+                uncached = [hid for hid in company_ids if hid not in numeric_map]
+                if uncached:
+                    st.write(f"Enriching {len(uncached)} contacts to resolve company IDs ({len(cached)} cached)...")
+                    for hid in uncached:
+                        company_lead = selected_companies[hid]
+                        recommended = company_lead.get("recommendedContacts", [])
+                        if not recommended:
+                            continue
+                        # Enrich first recommended contact
+                        pid = recommended[0].get("id")
+                        if not pid:
+                            continue
+                        try:
+                            enriched = client.enrich_contacts_batch(
+                                person_ids=[pid],
+                                output_fields=["id", "companyId", "companyName"],
+                            )
+                            if enriched:
+                                company = enriched[0].get("company", {})
+                                numeric_id = company.get("id") or enriched[0].get("companyId")
+                                company_name = company.get("name") or enriched[0].get("companyName", "")
+                                if numeric_id:
+                                    numeric_map[hid] = int(numeric_id)
+                                    db.save_company_id(hid, int(numeric_id), company_name)
+                        except Exception as e:
+                            st.caption(f"⚠️ Could not resolve {hid[:8]}…: {e}")
+
+                if not numeric_map:
+                    search_status.update(label="⚠️ Could not resolve any company IDs", state="complete")
+                    st.warning("Could not resolve company IDs. No contacts to search.")
                 else:
-                    contacts_by_company = build_contacts_by_company(contacts)
-                    st.session_state.intent_contacts_by_company = contacts_by_company
+                    # Phase 2: Contact Search with ICP filters
+                    st.write(f"Phase 2: Searching {len(numeric_map)} companies with ICP filters...")
+                    numeric_ids = [str(nid) for nid in numeric_map.values()]
 
-                    # Auto-select best contact per company
-                    auto_selected = {}
-                    for cid, data in contacts_by_company.items():
-                        if data["contacts"]:
-                            auto_selected[cid] = data["contacts"][0]
-                    st.session_state.intent_selected_contacts = auto_selected
-
-                    found_companies = len(contacts_by_company)
-                    search_status.update(
-                        label=f"✅ Found {len(contacts)} contacts at {found_companies} companies",
-                        state="complete",
-                        expanded=False,
+                    params = ContactQueryParams(
+                        company_ids=numeric_ids,
+                        management_levels=intent_mgmt_levels or ["Manager"],
+                        contact_accuracy_score_min=intent_accuracy_min,
+                        required_fields=intent_phone_fields or ["mobilePhone", "directPhone", "phone"],
+                        required_fields_operator="or",
                     )
 
-                    if st.session_state.intent_mode == "autopilot":
-                        st.rerun()
+                    contacts = client.search_contacts_all_pages(params, max_pages=5)
+
+                    if not contacts:
+                        search_status.update(label="⚠️ No ICP contacts found", state="complete")
+                        st.warning("No contacts matched ICP filters. Try adjusting filters or selecting more companies.")
                     else:
-                        st.rerun()
+                        contacts_by_company = build_contacts_by_company(contacts)
+                        st.session_state.intent_contacts_by_company = contacts_by_company
+
+                        # Auto-select best contact per company (highest accuracy score)
+                        auto_selected = {}
+                        for cid, data in contacts_by_company.items():
+                            if data["contacts"]:
+                                auto_selected[cid] = data["contacts"][0]
+                        st.session_state.intent_selected_contacts = auto_selected
+
+                        found_companies = len(contacts_by_company)
+                        search_status.update(
+                            label=f"✅ Found {len(contacts)} ICP contacts at {found_companies} companies",
+                            state="complete",
+                            expanded=False,
+                        )
+
+                        if st.session_state.intent_mode == "autopilot":
+                            st.rerun()
+                        else:
+                            st.rerun()
 
             except ZoomInfoError as e:
                 search_status.update(label="❌ API Error", state="error")
                 st.error(e.user_message)
             except Exception as e:
-                search_status.update(label="❌ Search failed", state="error")
+                search_status.update(label="❌ Contact search failed", state="error")
                 st.error(str(e))
 
     # Show contacts for manual selection
@@ -927,14 +1011,14 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
     # Metrics
     col1, col2, col3 = st.columns(3)
     with col1:
-        ui.metric_card(title="Contacts", content=str(len(scored)), description="Enriched", key="mc_intent_contacts")
+        metric_card("Contacts", len(scored))
     with col2:
-        ui.metric_card(title="Companies", content=str(len(st.session_state.intent_selected_companies)), description="Selected", key="mc_intent_companies")
+        metric_card("Companies", len(st.session_state.intent_selected_companies))
     with col3:
         if budget["has_cap"]:
-            ui.metric_card(title="Budget Used", content=str(budget['display']), description="Intent cap", key="mc_intent_budget")
+            metric_card("Budget Used", budget['display'])
         else:
-            ui.metric_card(title="Intent Credits", content=str(budget["current"]), description="No cap", key="mc_intent_credits")
+            metric_card("Intent Credits", budget["current"])
 
     # Results table + filters (fragment for instant filter response)
     @st.fragment

@@ -221,6 +221,68 @@ class TestIntentSearch:
         assert lead["intentDate"] == "2026-02-01T00:00:00"
         assert result["pagination"]["totalResults"] == 1
 
+    def test_search_intent_nested_company(self, client):
+        """Test intent search with nested company object (current API format)."""
+        mock_response = {
+            "data": [
+                {
+                    "company": {
+                        "id": "abc123",
+                        "name": "Nested Co",
+                        "website": "nested.com",
+                        "hasOtherTopicConsumption": True,
+                    },
+                    "topic": "Vending Machines",
+                    "signalScore": 88,
+                    "audienceStrength": "B",
+                    "signalDate": "2026-02-01",
+                    "recommendedContacts": [{"id": 1, "firstName": "Jane"}],
+                }
+            ],
+            "totalResults": 1,
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            params = IntentQueryParams(topics=["Vending Machines"])
+            result = client.search_intent(params)
+
+        lead = result["data"][0]
+        assert lead["companyId"] == "abc123"
+        assert lead["companyName"] == "Nested Co"
+        assert lead["companyWebsite"] == "nested.com"
+        assert lead["intentTopic"] == "Vending Machines"
+        assert lead["signalScore"] == 88
+        assert lead["hasOtherTopicConsumption"] is True
+        assert len(lead["recommendedContacts"]) == 1
+
+    def test_search_intent_null_fields_fallback(self, client):
+        """Test that null legacy fields fall through to alternate field names."""
+        mock_response = {
+            "data": [
+                {
+                    "companyId": "hash123",
+                    "companyName": None,  # null — should not block fallback
+                    "intentDate": None,   # null — should fall through to signalDate
+                    "intentTopic": "",    # empty — should fall through to topic
+                    "signalDate": "2/1/2026 12:00 AM",
+                    "topic": "Vending Machines",
+                    "signalScore": 95,
+                    "company": {"name": "Fallback Corp"},
+                    "recommendedContacts": [],
+                }
+            ],
+            "totalResults": 1,
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            params = IntentQueryParams(topics=["Vending Machines"])
+            result = client.search_intent(params)
+
+        lead = result["data"][0]
+        assert lead["companyName"] == "Fallback Corp"
+        assert lead["intentDate"] == "2/1/2026 12:00 AM"
+        assert lead["intentTopic"] == "Vending Machines"
+
     def test_search_intent_request_format(self, client):
         """Test intent search sends legacy format to /search/intent."""
         mock_response = {"data": [], "totalResults": 0}
