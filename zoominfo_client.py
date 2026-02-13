@@ -1017,7 +1017,7 @@ class ZoomInfoClient:
         logger.info(f"Contact Search by Company: {len(company_ids)} companies")
         params = ContactQueryParams(
             company_ids=company_ids,
-            management_levels=management_levels or ["Manager"],
+            management_levels=management_levels or ["Manager", "Director", "VP Level Exec"],
             contact_accuracy_score_min=accuracy_min,
             required_fields=required_fields,
         )

@@ -62,7 +62,6 @@ class SearchJob:
 # Valid ZoomInfo management levels: Board Member, C Level Exec, VP Level Exec, Director, Manager, Non Manager
 EXPANSION_STEPS = [
     # Phase 1: Expand management levels (stay in territory)
-    {"management_levels": ["Manager", "Director"]},
     {"management_levels": ["Manager", "Director", "VP Level Exec", "C Level Exec"]},
     # Phase 2: Remove employee cap (larger companies)
     {"employee_max": 0},  # Remove 5000 cap (0 = no limit)
@@ -80,7 +79,7 @@ EXPANSION_STEPS = [
 DEFAULT_TARGET_CONTACTS = 25
 DEFAULT_START_RADIUS = 10.0
 DEFAULT_START_ACCURACY = 95
-DEFAULT_START_MANAGEMENT = ["Manager"]
+DEFAULT_START_MANAGEMENT = ["Manager", "Director", "VP Level Exec"]
 DEFAULT_START_EMPLOYEE_MAX = 5000
 
 

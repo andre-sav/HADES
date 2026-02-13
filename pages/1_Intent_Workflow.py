@@ -304,7 +304,7 @@ else:
             intent_mgmt_levels = st.multiselect(
                 "Management level",
                 options=["Manager", "Director", "VP Level Exec", "C Level Exec"],
-                default=["Manager"],
+                default=["Manager", "Director", "VP Level Exec"],
                 key="intent_mgmt_levels",
             )
             intent_accuracy_min = st.number_input(
@@ -766,7 +766,7 @@ if (
 
                     params = ContactQueryParams(
                         company_ids=numeric_ids,
-                        management_levels=intent_mgmt_levels or ["Manager"],
+                        management_levels=intent_mgmt_levels or ["Manager", "Director", "VP Level Exec"],
                         contact_accuracy_score_min=intent_accuracy_min,
                         required_fields=intent_phone_fields or ["mobilePhone", "directPhone", "phone"],
                         required_fields_operator="or",

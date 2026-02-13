@@ -10,9 +10,8 @@ class TestExpansionStepsDefinition:
     """Test expansion step definitions match the design."""
 
     def test_expansion_steps_count(self):
-        """Verify there are exactly 9 expansion steps."""
+        """Verify there are exactly 8 expansion steps."""
         expected_steps = [
-            {"management_levels": ["Manager", "Director"]},
             {"management_levels": ["Manager", "Director", "VP Level Exec", "C Level Exec"]},
             {"employee_max": 0},
             {"accuracy_min": 85},
@@ -22,12 +21,11 @@ class TestExpansionStepsDefinition:
             {"radius": 17.5},
             {"radius": 20.0},
         ]
-        assert len(expected_steps) == 9
+        assert len(expected_steps) == 8
 
     def test_expansion_steps_order_filters_before_radius(self):
         """Verify filter expansion happens before radius (preserve geographic area)."""
         expected_steps = [
-            {"management_levels": ["Manager", "Director"]},
             {"management_levels": ["Manager", "Director", "VP Level Exec", "C Level Exec"]},
             {"employee_max": 0},
             {"accuracy_min": 85},
@@ -37,18 +35,17 @@ class TestExpansionStepsDefinition:
             {"radius": 17.5},
             {"radius": 20.0},
         ]
-        # First two steps should be management levels
+        # First step adds C Level Exec to management levels
         assert "management_levels" in expected_steps[0]
-        assert "management_levels" in expected_steps[1]
         # Then employee and accuracy
-        assert "employee_max" in expected_steps[2]
+        assert "employee_max" in expected_steps[1]
+        assert "accuracy_min" in expected_steps[2]
         assert "accuracy_min" in expected_steps[3]
-        assert "accuracy_min" in expected_steps[4]
-        # Radius is last resort (steps 5-8)
+        # Radius is last resort (steps 4-7)
+        assert "radius" in expected_steps[4]
         assert "radius" in expected_steps[5]
         assert "radius" in expected_steps[6]
         assert "radius" in expected_steps[7]
-        assert "radius" in expected_steps[8]
 
     def test_expansion_steps_radius_values(self):
         """Verify radius expansion values are correct."""
@@ -98,9 +95,9 @@ class TestDefaultValues:
         assert DEFAULT_START_ACCURACY == 95
 
     def test_default_start_management(self):
-        """Default starting management level should be Manager only."""
-        DEFAULT_START_MANAGEMENT = ["Manager"]
-        assert DEFAULT_START_MANAGEMENT == ["Manager"]
+        """Default starting management levels should include Manager, Director, VP."""
+        DEFAULT_START_MANAGEMENT = ["Manager", "Director", "VP Level Exec"]
+        assert DEFAULT_START_MANAGEMENT == ["Manager", "Director", "VP Level Exec"]
 
     def test_default_start_employee_max(self):
         """Default starting employee max should be 5000."""
@@ -277,7 +274,7 @@ class TestExpandSearchLogic:
             "final_params": {
                 "radius": 15.0,
                 "accuracy_min": 95,
-                "management_levels": ["Manager"],
+                "management_levels": ["Manager", "Director", "VP Level Exec"],
                 "employee_max": 5000,
             },
             "searches_performed": 3,
@@ -330,13 +327,13 @@ class TestExpansionStepApplication:
 
     def test_management_step_updates_levels(self):
         """Management step should update management_levels list."""
-        current_params = {"management_levels": ["Manager"]}
-        step = {"management_levels": ["Manager", "Director"]}
+        current_params = {"management_levels": ["Manager", "Director", "VP Level Exec"]}
+        step = {"management_levels": ["Manager", "Director", "VP Level Exec", "C Level Exec"]}
 
         if "management_levels" in step:
             current_params["management_levels"] = list(step["management_levels"])
 
-        assert current_params["management_levels"] == ["Manager", "Director"]
+        assert current_params["management_levels"] == ["Manager", "Director", "VP Level Exec", "C Level Exec"]
 
     def test_employee_step_removes_cap(self):
         """Employee step should set employee_max to 0 (no limit)."""
@@ -353,7 +350,7 @@ class TestExpansionStepApplication:
         current_params = {
             "radius": 10.0,
             "accuracy_min": 95,
-            "management_levels": ["Manager"],
+            "management_levels": ["Manager", "Director", "VP Level Exec"],
             "employee_max": 5000,
         }
 
@@ -365,7 +362,7 @@ class TestExpansionStepApplication:
         # Other params should be unchanged
         assert current_params["radius"] == 12.5
         assert current_params["accuracy_min"] == 95
-        assert current_params["management_levels"] == ["Manager"]
+        assert current_params["management_levels"] == ["Manager", "Director", "VP Level Exec"]
         assert current_params["employee_max"] == 5000
 
 
@@ -497,7 +494,7 @@ class TestCombinedSearchIntegration:
             base_params={
                 "radius": 10.0,
                 "accuracy_min": 95,
-                "management_levels": ["Manager"],
+                "management_levels": ["Manager", "Director", "VP Level Exec"],
                 "employee_max": 5000,
                 "location_type": "PersonAndHQ",
                 "include_person_only": True,
@@ -539,7 +536,7 @@ class TestCombinedSearchIntegration:
             base_params={
                 "radius": 10.0,
                 "accuracy_min": 95,
-                "management_levels": ["Manager"],
+                "management_levels": ["Manager", "Director", "VP Level Exec"],
                 "employee_max": 5000,
                 "location_type": "PersonAndHQ",
                 "include_person_only": True,

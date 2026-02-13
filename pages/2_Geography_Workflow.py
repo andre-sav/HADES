@@ -144,7 +144,7 @@ defaults = {
         "accuracy_min": 95,
         "location_type": "PersonAndHQ",
         "current_only": True,
-        "management_levels": ["Manager"],
+        "management_levels": ["Manager", "Director", "VP Level Exec"],
         "target_contacts": 25,
         "stop_early": True,
     },
@@ -606,7 +606,7 @@ if has_operator:
             management_levels = st.multiselect(
                 "Management Level",
                 options=MANAGEMENT_LEVELS,
-                default=last_filters.get("management_levels", ["Manager"]),
+                default=last_filters.get("management_levels", ["Manager", "Director", "VP Level Exec"]),
                 help="Filter by job title/role level. Manager targets facility managers and operations managers.",
             )
 
