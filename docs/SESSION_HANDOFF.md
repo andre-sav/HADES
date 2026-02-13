@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-12
-**Status:** Data-driven scoring calibration complete, full code review fixes applied, 296 tests passing
+**Date:** 2026-02-13
+**Status:** Intent Workflow 9-issue fix complete, 382 tests passing
 
 ## What's Working
 
@@ -99,12 +99,57 @@ tests/test_zoominfo_client.py  - 2 enrich response format tests
 ```
 
 ### Uncommitted Changes
-21 files modified (+523/-311 lines) plus new untracked files (calibrate_scoring.py, sic_manual_overrides.csv, enrichment data files, screenshots). All changes uncommitted — needs commit.
+21 modified files + untracked files from sessions 6-8. All uncommitted — needs commit.
 
 ### What Needs Doing Next Session
-1. **Commit all changes** — 21 modified files + new files from sessions 6-7
+1. **Commit all changes** — 21 modified files + new files from sessions 6-8
 2. **Live test all pipelines** — Intent, Geography, Enrich, Export end-to-end (beads HADES-1ln, HADES-kyi, HADES-5c7, HADES-kbu)
 3. **Harden API clients** — Edge case tests for messy data (bead HADES-20n)
+4. **Continue brainstorming session** — Morphological Analysis in progress (see `_bmad-output/brainstorming/brainstorming-session-2026-02-13.md`)
+
+---
+
+## Session Summary (2026-02-13, Session 8)
+
+### Intent Workflow Findings Fix (6 of 9 issues, P0-P2)
+
+Implemented fixes for 9 issues found during manual testing of the Intent Workflow (documented in `docs/testing/2026-02-12-intent-workflow-findings.md`). P3 issues deferred.
+
+1. **P0 — Deduplicate contacts by personId** — Added `seen_person_ids` set in `_search_contacts_single_batch()` to filter duplicates during pagination. Added defensive dedup in `build_contacts_by_company()`. Both layers with tests.
+2. **P1 — Use numeric signalScore for intent scoring** — `calculate_intent_score()` now prefers numeric `signalScore` (0-100) over categorical `intentStrength` bucket. Added `audienceStrength` bonus (0-10 pts) and employee scale bonus (0-5 pts) as tiebreakers. 4 new tests.
+3. **P1 — Fix Companies metric in Results** — Shows "4 of 7" (contacts found vs selected) instead of just the selected count.
+4. **P2 — Show zero-contact explanation** — After contact search, shows caption explaining missing companies.
+5. **P2 — Collapse completed steps** — When results showing, Step 1 form + debug panel hidden, replaced with collapsed pipeline summary expander.
+6. **P1 — Hide City/State columns in test mode** — City/State excluded from results table in test mode with explanatory caption.
+
+**Deferred (P3):** #8 Search button stays accessible, #9 Intent signal filtering limited.
+
+### Brainstorming Session Started
+
+Began BMAD brainstorming session on maximizing lead quantity AND quality. AI-recommended techniques: Morphological Analysis → Cross-Pollination → Reverse Brainstorming. Paused during Phase 1 (parameter grid building).
+
+### Key Files Modified (This Session)
+```
+zoominfo_client.py            - personId dedup in _search_contacts_single_batch()
+expand_search.py              - personId dedup in build_contacts_by_company()
+scoring.py                    - Numeric signalScore + audience/employee tiebreakers
+pages/1_Intent_Workflow.py    - Companies metric, zero-contact msg, step collapsing, City/State test mode
+tests/test_zoominfo_client.py - Pagination dedup test
+tests/test_expand_search.py   - build_contacts_by_company dedup test
+tests/test_scoring.py         - 4 new scoring tests (numeric signal, fallback, audience, employee)
+_bmad-output/brainstorming/   - NEW: brainstorming session document
+```
+
+### Test Count
+382 tests passing (up from ~296 in session 7)
+
+---
+
+## Session Summary (2026-02-12, Session 7)
+
+### Data-Driven Scoring Calibration (Plan Implementation)
+
+(Moved from top-level — see below)
 
 ---
 

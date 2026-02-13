@@ -12,7 +12,38 @@ from utils import (
     get_onsite_likelihood_score,
     get_employee_scale_score,
     get_proximity_score,
+    get_authority_score,
+    get_authority_title_keywords,
 )
+
+
+def _calculate_authority_score(contact: dict) -> int:
+    """
+    Calculate authority score based on management level and title keywords.
+
+    Management level base score (from config):
+        C-Level=100, VP=85, Director=75, Manager=60, Non-Manager=30
+
+    Title keyword bonus: +10 for vending-relevant keywords (facilities,
+    operations, vending, food service, etc.), capped at 100.
+
+    Args:
+        contact: Contact dict with 'managementLevel' and 'jobTitle' fields
+
+    Returns:
+        Authority score 0-100
+    """
+    mgmt_level = contact.get("managementLevel", "")
+    base_score = get_authority_score(mgmt_level)
+
+    # Title keyword bonus
+    title = (contact.get("jobTitle") or "").lower()
+    if title:
+        keywords = get_authority_title_keywords()
+        if any(kw in title for kw in keywords):
+            base_score = min(100, base_score + 10)
+
+    return base_score
 
 
 def calculate_intent_score(lead: dict) -> dict:
@@ -37,9 +68,13 @@ def calculate_intent_score(lead: dict) -> dict:
     """
     weights = get_scoring_weights("intent")
 
-    # Signal strength score
-    strength = lead.get("intentStrength", "Low")
-    signal_score = get_signal_strength_score(strength)
+    # Signal strength score — prefer numeric signalScore for differentiation
+    signal_score_raw = lead.get("signalScore")
+    if signal_score_raw and isinstance(signal_score_raw, (int, float)) and signal_score_raw > 0:
+        signal_score = min(100, int(signal_score_raw))
+    else:
+        strength = lead.get("intentStrength", "Low")
+        signal_score = get_signal_strength_score(strength)
 
     # On-site likelihood score
     sic_code = lead.get("sicCode", "")
@@ -65,15 +100,26 @@ def calculate_intent_score(lead: dict) -> dict:
     # Calculate freshness score (base 100 * multiplier)
     freshness_score = int(100 * freshness_multiplier)
 
+    # Audience strength bonus (0-10 points)
+    audience = lead.get("audienceStrength", "")
+    audience_bonus = {"A": 10, "B": 7, "C": 4, "D": 2}.get(audience, 0)
+
+    # Employee scale bonus (0-5 points) — larger companies = more machines
+    employees = lead.get("employees") or 0
+    if isinstance(employees, str):
+        employees = int(employees) if employees.isdigit() else 0
+    employee_bonus = min(5, employees // 200) if employees else 0
+
     # Calculate weighted composite score
     composite = (
         signal_score * weights["signal_strength"]
         + onsite_score * weights["onsite_likelihood"]
         + freshness_score * weights["freshness"]
+        + audience_bonus + employee_bonus
     )
 
     return {
-        "score": round(composite),
+        "score": min(100, round(composite)),
         "signal_score": signal_score,
         "onsite_score": onsite_score,
         "freshness_score": freshness_score,
@@ -126,17 +172,22 @@ def calculate_geography_score(lead: dict, target_zip: str = None) -> dict:
         employee_count = 50
     employee_score = get_employee_scale_score(employee_count)
 
+    # Authority score
+    authority_score = _calculate_authority_score(lead)
+
     # Calculate weighted composite score
     composite = (
-        proximity_score * weights["proximity"]
-        + onsite_score * weights["onsite_likelihood"]
-        + employee_score * weights["employee_scale"]
+        proximity_score * weights.get("proximity", 0.40)
+        + onsite_score * weights.get("onsite_likelihood", 0.25)
+        + authority_score * weights.get("authority", 0.15)
+        + employee_score * weights.get("employee_scale", 0.20)
     )
 
     return {
         "score": round(composite),
         "proximity_score": proximity_score,
         "onsite_score": onsite_score,
+        "authority_score": authority_score,
         "employee_score": employee_score,
         "distance_miles": distance_miles,
     }
@@ -202,6 +253,7 @@ def score_geography_leads(leads: list[dict], target_zip: str = None) -> list[dic
             "_score": score_data["score"],
             "_proximity_score": score_data["proximity_score"],
             "_onsite_score": score_data["onsite_score"],
+            "_authority_score": score_data["authority_score"],
             "_employee_score": score_data["employee_score"],
             "_distance_miles": score_data["distance_miles"],
         }
@@ -229,6 +281,7 @@ def get_score_breakdown_geography(lead: dict) -> str:
         f"Score: {lead.get('_score', 0)} "
         f"(Proximity: {lead.get('_proximity_score', 0)}, "
         f"On-site: {lead.get('_onsite_score', 0)}, "
+        f"Authority: {lead.get('_authority_score', 0)}, "
         f"Size: {lead.get('_employee_score', 0)})"
     )
 
@@ -268,9 +321,10 @@ def score_intent_contacts(
 
     Combines the company's intent score with individual contact quality.
 
-    Weights:
-        - Company intent score: 70%
-        - Contact accuracy: 20%
+    Weights (from config intent_contact):
+        - Company intent score: 60%
+        - Authority: 15%
+        - Contact accuracy: 15%
         - Phone availability: 10%
 
     Args:
@@ -280,6 +334,7 @@ def score_intent_contacts(
     Returns:
         List of contacts with scoring fields added, sorted by score descending.
     """
+    weights = get_scoring_weights("intent_contact")
     scored = []
 
     for contact in contacts:
@@ -314,17 +369,22 @@ def score_intent_contacts(
         else:
             phone_score = 0
 
+        # Authority component (0-100)
+        authority_score = _calculate_authority_score(contact)
+
         # Weighted composite
         composite = (
-            company_intent_score * 0.70
-            + accuracy_score * 0.20
-            + phone_score * 0.10
+            company_intent_score * weights.get("company_intent", 0.60)
+            + authority_score * weights.get("authority", 0.15)
+            + accuracy_score * weights.get("accuracy", 0.15)
+            + phone_score * weights.get("phone", 0.10)
         )
 
         scored_contact = {
             **contact,
             "_score": round(composite),
             "_company_intent_score": company_intent_score,
+            "_authority_score": authority_score,
             "_accuracy_score": accuracy_score,
             "_phone_score": phone_score,
             "_intent_topic": company_data.get("intentTopic", ""),
@@ -340,6 +400,7 @@ def get_score_breakdown_intent_contact(lead: dict) -> str:
     return (
         f"Score: {lead.get('_score', 0)} "
         f"(Intent: {lead.get('_company_intent_score', 0)}, "
+        f"Authority: {lead.get('_authority_score', 0)}, "
         f"Accuracy: {lead.get('_accuracy_score', 0)}, "
         f"Phone: {lead.get('_phone_score', 0)})"
     )

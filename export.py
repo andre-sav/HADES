@@ -9,10 +9,34 @@ from datetime import datetime
 from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT, format_phone
 
 
+def generate_batch_id(db) -> str:
+    """Generate a sequential batch ID for this export: HADES-YYYYMMDD-NNN.
+
+    Uses sync_metadata table to track today's sequence number.
+    """
+    today = datetime.now().strftime("%Y%m%d")
+    seq_key = f"hades_batch_seq_{today}"
+
+    rows = db.execute(
+        "SELECT value FROM sync_metadata WHERE key = ?", (seq_key,)
+    )
+    seq = int(rows[0][0]) + 1 if rows else 1
+
+    db.execute_write(
+        """INSERT INTO sync_metadata (key, value, updated_at)
+           VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP""",
+        (seq_key, str(seq), str(seq)),
+    )
+
+    return f"HADES-{today}-{seq:03d}"
+
+
 def build_vanillasoft_row(
     lead: dict,
     operator: dict | None = None,
     data_source: str = "ZoomInfo",
+    batch_id: str | None = None,
 ) -> dict:
     """
     Build a single VanillaSoft CSV row from a lead and optional operator.
@@ -62,7 +86,10 @@ def build_vanillasoft_row(
     if lead.get("intentStrength"):
         notes_parts.append(f"Signal: {lead['intentStrength']}")
 
-    row["Import Notes"] = " | ".join(notes_parts)
+    notes = " | ".join(notes_parts)
+    if batch_id:
+        notes = f"Batch: {batch_id} | {notes}" if notes else f"Batch: {batch_id}"
+    row["Import Notes"] = notes
 
     # Add operator metadata if provided
     if operator:
@@ -83,7 +110,8 @@ def export_leads_to_csv(
     operator: dict | None = None,
     workflow_type: str = "export",
     data_source: str = "ZoomInfo",
-) -> tuple[str, str]:
+    db=None,
+) -> tuple[str, str, str | None]:
     """
     Export leads to VanillaSoft CSV format.
 
@@ -92,23 +120,26 @@ def export_leads_to_csv(
         operator: Optional operator dict for metadata
         workflow_type: 'intent' or 'geography' for filename
         data_source: Data source name for List Source attribution
+        db: Optional TursoDatabase for batch ID generation
 
     Returns:
-        Tuple of (csv_content, filename)
+        Tuple of (csv_content, filename, batch_id). batch_id is None if db not provided.
     """
+    batch_id = generate_batch_id(db) if db else None
+
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=VANILLASOFT_COLUMNS)
     writer.writeheader()
 
     for lead in leads:
-        row = build_vanillasoft_row(lead, operator, data_source)
+        row = build_vanillasoft_row(lead, operator, data_source, batch_id=batch_id)
         writer.writerow(row)
 
     csv_content = output.getvalue()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     filename = f"{workflow_type}_leads_{timestamp}.csv"
 
-    return csv_content, filename
+    return csv_content, filename, batch_id
 
 
 def get_export_summary(leads: list[dict]) -> dict:

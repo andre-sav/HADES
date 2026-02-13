@@ -6,6 +6,7 @@ Features: Autopilot vs Manual Review modes, visible API parameters, contact sele
 import hashlib
 import json
 import logging
+import threading
 
 import streamlit as st
 import streamlit_shadcn_ui as ui
@@ -32,6 +33,7 @@ from zoominfo_client import (
 )
 from scoring import score_geography_leads, get_priority_label
 from dedup import dedupe_leads
+from export_dedup import apply_export_dedup
 from cost_tracker import CostTracker
 from utils import (
     get_sic_codes,
@@ -40,10 +42,11 @@ from utils import (
     get_employee_maximum,
     get_state_from_zip,
 )
-from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips
+from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, haversine_distance
 from expand_search import (
     expand_search,
     build_contacts_by_company,
+    SearchJob,
     EXPANSION_STEPS,
     DEFAULT_TARGET_CONTACTS,
     DEFAULT_START_RADIUS,
@@ -132,13 +135,15 @@ defaults = {
     "geo_expansion_result": None,  # Stores expansion strategy results
     # Export tracking
     "geo_exported": False,
+    # Cross-session export dedup
+    "geo_include_exported": False,
+    "geo_dedup_result": None,
     # Filter persistence (Phase 1 UX improvement)
     "geo_last_filters": {
         "radius": 15.0,
         "accuracy_min": 95,
         "location_type": "PersonAndHQ",
         "current_only": True,
-        "exclude_org_exported": True,
         "management_levels": ["Manager"],
         "target_contacts": 25,
         "stop_early": True,
@@ -149,6 +154,9 @@ defaults = {
     # Review controls (Phase 3 UX)
     "geo_review_sort": "score",  # score, company_name, contact_count
     "geo_review_filter": "all",  # all, multi_only, has_mobile, high_accuracy
+    # Background search (stop button support)
+    "geo_search_job": None,  # SearchJob instance while thread running
+    "_geo_progress_log": None,  # Shared list for real-time progress from thread
 }
 for key, default in defaults.items():
     if key not in st.session_state:
@@ -559,8 +567,7 @@ if has_operator:
             current_only = bool(_cur_emp_sw) if _cur_emp_sw is not None else last_filters.get("current_only", True)
 
         with qf_col4:
-            _skip_sw = ui.switch(default_checked=last_filters.get("exclude_org_exported", True), label="Skip Already Exported", key="geo_skip_exported_switch")
-            exclude_org_exported = bool(_skip_sw) if _skip_sw is not None else last_filters.get("exclude_org_exported", True)
+            st.caption("Previously exported companies are filtered in search results (last 180 days).")
 
         # Required phone fields (second row)
         st.markdown("---")
@@ -691,7 +698,6 @@ if has_operator:
         "required_fields": required_fields,
         "required_fields_operator": required_fields_operator,
         "accuracy_min": accuracy_min,
-        "exclude_org_exported": exclude_org_exported,
         "management_levels": management_levels,
         "radius": radius if location_mode == "radius" else 0,
         "center_zip": center_zip_clean if location_mode == "radius" else None,
@@ -706,7 +712,6 @@ if has_operator:
         "accuracy_min": accuracy_min,
         "location_type": location_type,
         "current_only": current_only,
-        "exclude_org_exported": exclude_org_exported,
         "management_levels": management_levels,
         "target_contacts": target_contacts,
         "stop_early": stop_early,
@@ -760,6 +765,10 @@ if has_operator:
     with preview_col2:
         if st.session_state.geo_preview_contacts or st.session_state.geo_request_previewed:
             if ui.button(text="Clear / Reset", variant="destructive", key="geo_reset_btn"):
+                # Cancel any running search thread
+                existing_job = st.session_state.get("geo_search_job")
+                if existing_job and not existing_job.done.is_set():
+                    existing_job.cancel.set()
                 st.session_state.geo_preview_contacts = None
                 st.session_state.geo_contacts_by_company = None
                 st.session_state.geo_selected_contacts = {}
@@ -771,6 +780,8 @@ if has_operator:
                 st.session_state.geo_request_previewed = False
                 st.session_state.geo_pending_search_params = None
                 st.session_state.geo_expansion_result = None
+                st.session_state.geo_search_job = None
+                st.session_state._geo_progress_log = None
                 st.rerun()
 
     # --- API Request Preview (after clicking Preview) ---
@@ -823,7 +834,6 @@ if has_operator:
         search_required_fields = sp["required_fields"]
         search_required_fields_operator = sp["required_fields_operator"]
         search_accuracy_min = sp["accuracy_min"]
-        search_exclude_org_exported = sp["exclude_org_exported"]
         search_management_levels = sp["management_levels"]
         search_radius = sp["radius"]
         search_center_zip = sp["center_zip"]
@@ -832,26 +842,33 @@ if has_operator:
         target = sp.get("target_contacts", DEFAULT_TARGET_CONTACTS)
         stop_early_flag = sp.get("stop_early", True)
 
-        # Create status container for real-time progress
-        with st.status(f"🔍 Searching for {target} contacts...", expanded=True) as status:
+        # Cancel any existing search job before starting a new one
+        existing_job = st.session_state.get("geo_search_job")
+        if existing_job and not existing_job.done.is_set():
+            existing_job.cancel.set()
+
+        # Build params and client in main thread (thread-safe: main thread idles during search)
+        client = get_zoominfo_client()
+        base_params = {
+            "radius": search_radius if search_radius else DEFAULT_START_RADIUS,
+            "accuracy_min": search_accuracy_min,
+            "management_levels": search_management_levels if search_management_levels else DEFAULT_START_MANAGEMENT,
+            "employee_max": get_employee_maximum(),
+            "location_type": search_location_type,
+            "include_person_only": search_include_person_only,
+            "current_only": search_current_only,
+            "required_fields": search_required_fields,
+            "required_fields_operator": search_required_fields_operator,
+            "sic_codes": search_sic_codes,
+            "center_zip": search_center_zip,
+        }
+
+        # Launch search in background thread
+        job = SearchJob()
+        progress_log = []  # Shared list — thread appends, fragment reads
+
+        def _run_geo_search():
             try:
-                client = get_zoominfo_client()
-
-                base_params = {
-                    "radius": search_radius if search_radius else DEFAULT_START_RADIUS,
-                    "accuracy_min": search_accuracy_min,
-                    "management_levels": search_management_levels if search_management_levels else DEFAULT_START_MANAGEMENT,
-                    "employee_max": get_employee_maximum(),
-                    "location_type": search_location_type,
-                    "include_person_only": search_include_person_only,
-                    "current_only": search_current_only,
-                    "required_fields": search_required_fields,
-                    "required_fields_operator": search_required_fields_operator,
-                    "exclude_org_exported": search_exclude_org_exported,
-                    "sic_codes": search_sic_codes,
-                    "center_zip": search_center_zip,
-                }
-
                 result = expand_search(
                     client=client,
                     base_params=base_params,
@@ -859,79 +876,131 @@ if has_operator:
                     states=search_states,
                     target=target,
                     stop_early=stop_early_flag,
-                    status_container=status,
+                    status_container=None,
+                    cancelled_fn=job.cancel.is_set,
+                    shared_log=progress_log,
                 )
-
-                st.session_state.geo_expansion_result = result
-
-                if result.get("error"):
-                    status.update(label="❌ Search failed", state="error", expanded=True)
-                    st.error(f"Search failed: {result['error']}")
-                    st.session_state.geo_preview_contacts = None
-                    st.session_state.geo_search_executed = True
-                elif not result["contacts"]:
-                    status.update(label="⚠️ No contacts found", state="complete", expanded=True)
-                    st.warning("No contacts found matching your criteria. Try adjusting filters.")
-                    st.session_state.geo_preview_contacts = None
-                    st.session_state.geo_search_executed = True
-                else:
-                    # Update status with final result
-                    # 'found' is now company count
-                    companies_found = result['found']
-                    contacts_found = result.get('found_contacts', len(result['contacts']))
-                    if result["target_met"]:
-                        status.update(
-                            label=f"✅ Found {companies_found} companies (target: {target}) with {contacts_found} contacts",
-                            state="complete",
-                            expanded=False,
-                        )
-                    else:
-                        status.update(
-                            label=f"⚠️ Found {companies_found} of {target} target companies ({contacts_found} contacts)",
-                            state="complete",
-                            expanded=True,
-                        )
-
-                    st.session_state.geo_preview_contacts = result["contacts"]
-                    st.session_state.geo_search_executed = True
-                    st.session_state.geo_contacts_by_company = result["contacts_by_company"]
-
-                    # Auto-select best contact per company
-                    auto_selected = {}
-                    for company_id, data in result["contacts_by_company"].items():
-                        if data["contacts"]:
-                            auto_selected[company_id] = data["contacts"][0]
-
-                    st.session_state.geo_selected_contacts = auto_selected
-
-                    # Store query params
-                    st.session_state.geo_query_params = {
-                        "zip_codes": search_zip_codes,
-                        "zip_count": len(search_zip_codes),
-                        "radius_miles": result["final_params"]["radius"],
-                        "center_zip": search_center_zip,
-                        "location_mode": sp.get("location_mode"),
-                        "states": search_states,
-                        "sic_codes_count": len(search_sic_codes),
-                        "accuracy_min": result["final_params"]["accuracy_min"],
-                        "location_type": search_location_type,
-                    }
-
-                    # Store params hash for stale detection (Phase 2 UX)
-                    st.session_state.geo_params_hash = compute_params_hash(sp)
-                    st.session_state.geo_last_search_params = sp
-
-                    if st.session_state.geo_mode == "autopilot":
-                        st.session_state.geo_selection_confirmed = True
-
-                    st.rerun()
-
-            except ZoomInfoError as e:
-                status.update(label="❌ API Error", state="error", expanded=True)
-                st.error(e.user_message)
+                job.result = result
             except Exception as e:
-                status.update(label="❌ Search failed", state="error", expanded=True)
-                st.error(f"Search failed: {str(e)}")
+                job.error = str(e)
+            job.done.set()
+
+        job.thread = threading.Thread(target=_run_geo_search, daemon=True)
+        job.thread.start()
+
+        st.session_state.geo_search_job = job
+        st.session_state._geo_progress_log = progress_log
+        st.rerun()
+
+
+    # -------------------------------------------------------------------------
+    # Helper: store geo search results into session state
+    # -------------------------------------------------------------------------
+    def _store_geo_results(result: dict, sp: dict):
+        """Process expand_search result and populate session state."""
+        st.session_state.geo_expansion_result = result
+
+        if result.get("error"):
+            st.error(f"Search failed: {result['error']}")
+            st.session_state.geo_preview_contacts = None
+            st.session_state.geo_search_executed = True
+        elif not result["contacts"]:
+            st.warning("No contacts found matching your criteria. Try adjusting filters.")
+            st.session_state.geo_preview_contacts = None
+            st.session_state.geo_search_executed = True
+        else:
+            if result.get("stopped"):
+                st.warning(f"Search stopped — showing {result['found']} companies ({result.get('found_contacts', 0)} contacts) found so far.")
+
+            st.session_state.geo_preview_contacts = result["contacts"]
+            st.session_state.geo_search_executed = True
+
+            # Cross-session export dedup: filter previously exported companies
+            include_exported = st.session_state.get("geo_include_exported", False)
+            dedup_result = apply_export_dedup(
+                result["contacts"], db, days_back=180, include_exported=include_exported,
+            )
+            st.session_state.geo_dedup_result = dedup_result
+
+            # Rebuild contacts_by_company from filtered contacts
+            if dedup_result["filtered_count"] > 0 and not include_exported:
+                filtered_contacts = dedup_result["contacts"]
+                contacts_by_company = build_contacts_by_company(filtered_contacts)
+            else:
+                contacts_by_company = result["contacts_by_company"]
+
+            st.session_state.geo_contacts_by_company = contacts_by_company
+
+            # Auto-select best contact per company
+            auto_selected = {}
+            for company_id, data in contacts_by_company.items():
+                if data["contacts"]:
+                    auto_selected[company_id] = data["contacts"][0]
+            st.session_state.geo_selected_contacts = auto_selected
+
+            # Store query params
+            st.session_state.geo_query_params = {
+                "zip_codes": sp["zip_codes"],
+                "zip_count": len(sp["zip_codes"]),
+                "radius_miles": result["final_params"]["radius"],
+                "center_zip": sp.get("center_zip"),
+                "location_mode": sp.get("location_mode"),
+                "states": sp["states"],
+                "sic_codes_count": len(sp.get("selected_sic_codes", [])),
+                "accuracy_min": result["final_params"]["accuracy_min"],
+                "location_type": sp.get("location_type"),
+            }
+
+            # Store params hash for stale detection
+            st.session_state.geo_params_hash = compute_params_hash(sp)
+            st.session_state.geo_last_search_params = sp
+
+            if st.session_state.geo_mode == "autopilot":
+                st.session_state.geo_selection_confirmed = True
+
+
+    # -------------------------------------------------------------------------
+    # Fragment poller: shows progress + stop button while search runs
+    # -------------------------------------------------------------------------
+    geo_job = st.session_state.get("geo_search_job")
+    if geo_job is not None:
+        geo_active = not geo_job.done.is_set()
+
+        @st.fragment(run_every=0.5 if geo_active else None)
+        def _geo_search_monitor():
+            job = st.session_state.get("geo_search_job")
+            if job is None:
+                return
+
+            log = st.session_state.get("_geo_progress_log") or []
+
+            if job.done.is_set():
+                # Thread finished — store results and trigger full page rerun
+                sp = st.session_state.get("geo_pending_search_params") or {}
+                if job.error:
+                    st.error(f"Search failed: {job.error}")
+                elif job.result:
+                    _store_geo_results(job.result, sp)
+                # Clean up job state
+                st.session_state.geo_search_job = None
+                st.session_state._geo_progress_log = None
+                st.rerun()
+                return
+
+            # Show progress while running
+            with st.container(border=True):
+                if log:
+                    for msg in log:
+                        st.markdown(f"<small>{msg}</small>", unsafe_allow_html=True)
+                else:
+                    st.caption("Starting search...")
+
+            # Stop button
+            if st.button("Stop Search", type="secondary", key="geo_stop_btn"):
+                job.cancel.set()
+                st.toast("Stopping after current API call...")
+
+        _geo_search_monitor()
 
 
 # =============================================================================
@@ -944,6 +1013,31 @@ if (
 ):
     labeled_divider("Step 3: Review & Select")
     st.caption("📋 **Preview data** - no credits used yet. Select contacts to enrich.")
+
+    # Cross-session export dedup banner
+    _geo_dedup = st.session_state.get("geo_dedup_result")
+    if _geo_dedup and _geo_dedup["filtered_count"] > 0:
+        _dedup_col1, _dedup_col2 = st.columns([3, 1])
+        with _dedup_col1:
+            if st.session_state.get("geo_include_exported"):
+                st.info(f"Showing all results — {_geo_dedup['filtered_count']} previously exported companies marked (last {_geo_dedup['days_back']} days)")
+            else:
+                st.info(f"Filtered {_geo_dedup['filtered_count']} previously exported companies (last {_geo_dedup['days_back']} days)")
+        with _dedup_col2:
+            _prev_val = st.session_state.get("geo_include_exported", False)
+            _new_val = st.checkbox(
+                "Include previously exported",
+                value=_prev_val,
+                key="geo_include_exported_cb",
+            )
+            if _new_val != _prev_val:
+                st.session_state.geo_include_exported = _new_val
+                # Re-store results with new include_exported setting
+                _exp_result = st.session_state.get("geo_expansion_result")
+                _sp = st.session_state.get("geo_pending_search_params") or {}
+                if _exp_result:
+                    _store_geo_results(_exp_result, _sp)
+                st.rerun()
 
     contacts_by_company = st.session_state.geo_contacts_by_company
     total_contacts = sum(len(d["contacts"]) for d in contacts_by_company.values())
@@ -1082,6 +1176,24 @@ if (
                         best_contact = contacts[0]
                         breakdown = score_breakdown(best_contact)
                         st.markdown(f"<small>{breakdown}</small>", unsafe_allow_html=True)
+                        # Company context line: city/state, website, phone
+                        ctx_parts = []
+                        city = best_contact.get("companyCity", "")
+                        state = best_contact.get("companyState", "")
+                        if city and state:
+                            ctx_parts.append(f"{city}, {state}")
+                        elif city or state:
+                            ctx_parts.append(city or state)
+                        website = best_contact.get("companyWebsite", "")
+                        if website:
+                            # Strip protocol for cleaner display
+                            display_url = website.replace("https://", "").replace("http://", "").rstrip("/")
+                            ctx_parts.append(display_url)
+                        co_phone = best_contact.get("companyPhone", "")
+                        if co_phone:
+                            ctx_parts.append(co_phone)
+                        if ctx_parts:
+                            st.markdown(f"<small style='color:#888'>{' · '.join(ctx_parts)}</small>", unsafe_allow_html=True)
                 with header_col2:
                     contact_badge = status_badge("neutral", f"{len(contacts)} contact{'s' if len(contacts) > 1 else ''}")
                     st.markdown(contact_badge, unsafe_allow_html=True)
@@ -1096,11 +1208,18 @@ if (
                     contact_zip = contact.get("zipCode", "")
                     location_type = contact.get("_location_type", "")
 
+                    mgmt_level = contact.get("managementLevel", "")
+                    email = contact.get("email", "")
+
                     # Build structured label
                     label = f"{name}"
                     if title:
                         label += f" - {title}"
+                    if mgmt_level and mgmt_level.lower() not in (title or "").lower():
+                        label += f" [{mgmt_level}]"
                     label += f" (Score: {score})"
+                    if email:
+                        label += f" | {email}"
                     if contact_zip:
                         label += f" | ZIP: {contact_zip}"
                     if phone:
@@ -1272,7 +1391,51 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         labeled_divider("Step 3: Results")
         st.caption("Auto-selected and enriched highest-scored contact per company")
 
+    # Cross-session export dedup banner (Results section — shown for both modes)
+    _geo_dedup_r = st.session_state.get("geo_dedup_result")
+    if _geo_dedup_r and _geo_dedup_r["filtered_count"] > 0:
+        if st.session_state.get("geo_include_exported"):
+            st.caption(f"ℹ️ {_geo_dedup_r['filtered_count']} previously exported companies included (override active)")
+        else:
+            st.caption(f"ℹ️ {_geo_dedup_r['filtered_count']} previously exported companies filtered (last {_geo_dedup_r['days_back']} days)")
+
     enriched_contacts = st.session_state.geo_enriched_contacts
+
+    # Merge pre-enrichment metadata (location_type) and compute distance
+    # Enrichment replaces contact objects entirely, losing computed fields
+    pre_enrichment = {}
+    for company_id, contact in st.session_state.geo_selected_contacts.items():
+        pid = str(contact.get("personId") or contact.get("id") or "")
+        if pid:
+            pre_enrichment[pid] = {
+                "_location_type": contact.get("_location_type", ""),
+                "personZip": contact.get("zipCode") or contact.get("personZip") or contact.get("companyZipCode", ""),
+            }
+
+    center_zip = st.session_state.geo_query_params.get("center_zip") or (
+        st.session_state.geo_query_params.get("zip_codes", [""])[0]
+    )
+    centroids = load_zip_centroids()
+
+    for contact in enriched_contacts:
+        pid = str(contact.get("id") or contact.get("personId") or "")
+        pre = pre_enrichment.get(pid, {})
+
+        # Restore _location_type from pre-enrichment data
+        if not contact.get("_location_type") and pre.get("_location_type"):
+            contact["_location_type"] = pre["_location_type"]
+
+        # Compute distance from contact ZIP to center ZIP
+        contact_zip = (
+            contact.get("zipCode")
+            or contact.get("personZip")
+            or contact.get("companyZipCode")
+            or pre.get("personZip", "")
+        )
+        if contact_zip and center_zip and contact_zip in centroids and center_zip in centroids:
+            c_lat, c_lng, _ = centroids[contact_zip]
+            t_lat, t_lng, _ = centroids[center_zip]
+            contact["distance"] = round(haversine_distance(c_lat, c_lng, t_lat, t_lng), 2)
 
     # Score the enriched contacts
     scored = score_geography_leads(

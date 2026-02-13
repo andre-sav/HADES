@@ -1879,6 +1879,16 @@ def score_breakdown(contact: dict) -> str:
     else:
         parts.append(f"<span style='color:{COLORS['text_muted']}'>No mobile</span>")
 
+    # Management level
+    mgmt = contact.get("managementLevel", "")
+    if mgmt:
+        if mgmt in ("VP", "C-Level"):
+            parts.append(f"<span style='color:{COLORS['success']}'>{mgmt}</span>")
+        elif mgmt == "Director":
+            parts.append(f"<span style='color:{COLORS['warning']}'>{mgmt}</span>")
+        else:
+            parts.append(f"<span style='color:{COLORS['text_muted']}'>{mgmt}</span>")
+
     # Location type
     loc_type = contact.get("_location_type", "")
     if loc_type == "PersonAndHQ":

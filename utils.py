@@ -91,6 +91,19 @@ def get_proximity_score(distance_miles: float) -> int:
     return 30
 
 
+def get_authority_score(management_level: str) -> int:
+    """Get authority score for a management level."""
+    config = load_config()
+    scores = config.get("authority_scores", {})
+    return scores.get(management_level, scores.get("default", 40))
+
+
+def get_authority_title_keywords() -> list[str]:
+    """Get title keywords that indicate vending-relevant authority."""
+    config = load_config()
+    return config.get("authority_title_keywords", [])
+
+
 def get_budget_config(workflow_type: str) -> dict:
     """Get budget configuration for a workflow type."""
     config = load_config()

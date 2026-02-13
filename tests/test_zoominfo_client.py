@@ -665,6 +665,41 @@ class TestContactSearch:
         body = call_args[1]["json"]
         assert body["requiredFields"] == "directPhone,email"
 
+    def test_search_contacts_required_fields_no_operator(self, client):
+        """Test requiredFieldsOperator is NOT sent (API rejects it)."""
+        mock_response = {"data": [], "totalResults": 0}
+
+        with patch.object(client, "_request", return_value=mock_response) as mock_req:
+            params = ContactQueryParams(
+                zip_codes=["75201"],
+                radius_miles=25,
+                states=["TX"],
+                required_fields=["mobilePhone", "directPhone", "phone"],
+                required_fields_operator="or",
+            )
+            client.search_contacts(params)
+
+        body = mock_req.call_args[1]["json"]
+        assert body["requiredFields"] == "mobilePhone,directPhone,phone"
+        assert "requiredFieldsOperator" not in body
+
+    def test_search_contacts_no_required_fields(self, client):
+        """Test requiredFields not sent when no required fields specified."""
+        mock_response = {"data": [], "totalResults": 0}
+
+        with patch.object(client, "_request", return_value=mock_response) as mock_req:
+            params = ContactQueryParams(
+                zip_codes=["75201"],
+                radius_miles=25,
+                states=["TX"],
+                required_fields=None,
+            )
+            client.search_contacts(params)
+
+        body = mock_req.call_args[1]["json"]
+        assert "requiredFields" not in body
+        assert "requiredFieldsOperator" not in body
+
     def test_search_contacts_management_level(self, client):
         """Test contact search with management level filter."""
         mock_response = {"data": [], "totalResults": 0}
@@ -1269,3 +1304,35 @@ class TestContactSearchByCompanyId:
         assert body["state"] == "TX"
         assert body["zipCode"] == "75201"
         assert "companyId" not in body
+
+    def test_search_contacts_single_batch_deduplicates_by_person_id(self, client):
+        """Pagination within a single batch should deduplicate by personId."""
+        page1 = {
+            "data": [
+                {"personId": "p1", "firstName": "Alice"},
+                {"personId": "p2", "firstName": "Bob"},
+            ],
+            "totalResults": 3,
+            "pagination": {"totalPages": 2},
+        }
+        page2 = {
+            "data": [
+                {"personId": "p2", "firstName": "Bob"},  # duplicate
+                {"personId": "p3", "firstName": "Carol"},
+            ],
+            "totalResults": 3,
+            "pagination": {"totalPages": 2},
+        }
+        page3 = {
+            "data": [],
+            "totalResults": 3,
+            "pagination": {"totalPages": 2},
+        }
+
+        with patch.object(client, "search_contacts", side_effect=[page1, page2, page3]):
+            params = ContactQueryParams(company_ids=["111"])
+            contacts = client._search_contacts_single_batch(params, max_pages=5)
+
+        assert len(contacts) == 3
+        person_ids = [c["personId"] for c in contacts]
+        assert person_ids == ["p1", "p2", "p3"]

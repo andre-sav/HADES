@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
-from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary
+from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary, generate_batch_id
 from utils import VANILLASOFT_COLUMNS
 
 
@@ -170,7 +170,7 @@ class TestExportLeadsToCsv:
     def test_csv_has_all_columns(self):
         """Test that CSV has all VanillaSoft columns."""
         leads = [{"companyName": "Test Corp"}]
-        csv_content, filename = export_leads_to_csv(leads)
+        csv_content, filename, _ = export_leads_to_csv(leads)
 
         reader = csv.DictReader(io.StringIO(csv_content))
         headers = reader.fieldnames
@@ -183,7 +183,7 @@ class TestExportLeadsToCsv:
             {"companyName": "Acme Corp", "city": "Dallas"},
             {"companyName": "Beta Inc", "city": "Houston"},
         ]
-        csv_content, filename = export_leads_to_csv(leads)
+        csv_content, filename, _ = export_leads_to_csv(leads)
 
         reader = csv.DictReader(io.StringIO(csv_content))
         rows = list(reader)
@@ -197,11 +197,11 @@ class TestExportLeadsToCsv:
         """Test that filename includes workflow type and timestamp."""
         leads = [{"companyName": "Test"}]
 
-        _, filename = export_leads_to_csv(leads, workflow_type="intent")
+        _, filename, _batch = export_leads_to_csv(leads, workflow_type="intent")
         assert filename.startswith("intent_leads_")
         assert filename.endswith(".csv")
 
-        _, filename = export_leads_to_csv(leads, workflow_type="geography")
+        _, filename, _batch = export_leads_to_csv(leads, workflow_type="geography")
         assert filename.startswith("geography_leads_")
 
     def test_operator_added_to_all_rows(self):
@@ -220,7 +220,7 @@ class TestExportLeadsToCsv:
             "team": None,
         }
 
-        csv_content, _ = export_leads_to_csv(leads, operator=operator)
+        csv_content, _, _batch = export_leads_to_csv(leads, operator=operator)
         reader = csv.DictReader(io.StringIO(csv_content))
         rows = list(reader)
 
@@ -229,7 +229,7 @@ class TestExportLeadsToCsv:
 
     def test_empty_leads_list(self):
         """Test export with empty leads list."""
-        csv_content, filename = export_leads_to_csv([])
+        csv_content, filename, _ = export_leads_to_csv([])
 
         reader = csv.DictReader(io.StringIO(csv_content))
         rows = list(reader)
@@ -242,7 +242,7 @@ class TestExportLeadsToCsv:
         from datetime import datetime
 
         leads = [{"companyName": "Test Corp"}]
-        csv_content, _ = export_leads_to_csv(leads, data_source="ZoomInfo")
+        csv_content, _, _batch = export_leads_to_csv(leads, data_source="ZoomInfo")
 
         reader = csv.DictReader(io.StringIO(csv_content))
         rows = list(reader)
@@ -327,3 +327,101 @@ class TestGetExportSummary:
 
         # Should only have top 5 states
         assert len(summary["by_state"]) <= 5
+
+
+class TestGenerateBatchId:
+    """Tests for generate_batch_id function."""
+
+    def test_first_batch_of_day(self):
+        """Test first batch ID generation for a day."""
+        mock_db = MagicMock()
+        mock_db.execute.return_value = []  # No existing seq
+
+        batch_id = generate_batch_id(mock_db)
+
+        assert batch_id.startswith("HADES-")
+        assert batch_id.endswith("-001")
+        mock_db.execute_write.assert_called_once()
+
+    def test_sequential_batch_ids(self):
+        """Test that batch IDs increment correctly."""
+        mock_db = MagicMock()
+        mock_db.execute.return_value = [("3",)]  # Existing seq = 3
+
+        batch_id = generate_batch_id(mock_db)
+
+        assert batch_id.endswith("-004")
+
+    def test_batch_id_format(self):
+        """Test batch ID format: HADES-YYYYMMDD-NNN."""
+        import re
+
+        mock_db = MagicMock()
+        mock_db.execute.return_value = []
+
+        batch_id = generate_batch_id(mock_db)
+
+        assert re.match(r"^HADES-\d{8}-\d{3}$", batch_id)
+
+
+class TestBatchIdInRow:
+    """Tests for batch_id in build_vanillasoft_row."""
+
+    def test_batch_id_in_import_notes(self):
+        """Test that batch_id is prepended to Import Notes."""
+        lead = {"companyName": "Test Co", "_score": 85}
+        row = build_vanillasoft_row(lead, batch_id="HADES-20260212-001")
+
+        assert row["Import Notes"].startswith("Batch: HADES-20260212-001")
+        assert "Score: 85" in row["Import Notes"]
+
+    def test_no_batch_id_when_none(self):
+        """Test that Import Notes are normal when batch_id is None."""
+        lead = {"companyName": "Test Co", "_score": 85}
+        row = build_vanillasoft_row(lead, batch_id=None)
+
+        assert not row["Import Notes"].startswith("Batch:")
+        assert "Score: 85" in row["Import Notes"]
+
+    def test_batch_id_only_when_no_other_notes(self):
+        """Test batch_id alone when no scoring info."""
+        lead = {"companyName": "Test Co"}
+        row = build_vanillasoft_row(lead, batch_id="HADES-20260212-001")
+
+        assert row["Import Notes"] == "Batch: HADES-20260212-001"
+
+
+class TestExportWithBatchId:
+    """Tests for export_leads_to_csv with batch_id."""
+
+    def test_returns_three_values(self):
+        """Test that export returns (csv_content, filename, batch_id)."""
+        leads = [{"companyName": "Test"}]
+        result = export_leads_to_csv(leads)
+
+        assert len(result) == 3
+        csv_content, filename, batch_id = result
+        assert batch_id is None  # No db provided
+
+    def test_batch_id_with_db(self):
+        """Test that batch_id is generated when db is provided."""
+        mock_db = MagicMock()
+        mock_db.execute.return_value = []
+
+        leads = [{"companyName": "Test"}]
+        csv_content, filename, batch_id = export_leads_to_csv(leads, db=mock_db)
+
+        assert batch_id is not None
+        assert batch_id.startswith("HADES-")
+
+    def test_batch_id_in_csv_content(self):
+        """Test that batch_id appears in CSV Import Notes."""
+        mock_db = MagicMock()
+        mock_db.execute.return_value = []
+
+        leads = [{"companyName": "Test", "_score": 90}]
+        csv_content, _, batch_id = export_leads_to_csv(leads, db=mock_db)
+
+        reader = csv.DictReader(io.StringIO(csv_content))
+        rows = list(reader)
+        assert f"Batch: {batch_id}" in rows[0]["Import Notes"]

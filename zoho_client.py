@@ -40,6 +40,19 @@ class ZohoClient:
 
     def __init__(self, auth: ZohoAuth):
         self.auth = auth
+        self._client: Optional[httpx.AsyncClient] = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Lazily create and reuse a single httpx.AsyncClient."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=30.0)
+        return self._client
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     async def _request(
         self,
@@ -51,6 +64,7 @@ class ZohoClient:
         """Make authenticated request with retry/backoff."""
         token = await self.auth.get_access_token()
         url = f"{self.auth.api_domain}/crm/v8/{endpoint}"
+        client = self._get_client()
 
         # Log request details
         logger.info(f"Zoho API Request: {method} {endpoint}")
@@ -63,56 +77,54 @@ class ZohoClient:
             if attempt > 0:
                 logger.info(f"  Retry attempt {attempt + 1}/{MAX_RETRIES + 1}")
 
-            async with httpx.AsyncClient() as client:
-                try:
-                    response = await client.request(
-                        method=method,
-                        url=url,
-                        headers={"Authorization": f"Zoho-oauthtoken {token}"},
-                        params=params,
-                        json=json_body,
-                        timeout=30.0
-                    )
+            try:
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    headers={"Authorization": f"Zoho-oauthtoken {token}"},
+                    params=params,
+                    json=json_body,
+                )
 
-                    # Handle rate limiting
-                    if response.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES:
-                        delay = min(BASE_DELAY_SECONDS * (2 ** attempt), MAX_DELAY_SECONDS)
-                        retry_after = response.headers.get("Retry-After")
-                        if retry_after:
-                            try:
-                                delay = min(float(retry_after), MAX_DELAY_SECONDS)
-                            except ValueError:
-                                pass
-                        logger.warning(f"  Rate limit {response.status_code} on {endpoint}, retrying in {delay:.1f}s")
-                        await asyncio.sleep(delay)
-                        continue
+                # Handle rate limiting
+                if response.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES:
+                    delay = min(BASE_DELAY_SECONDS * (2 ** attempt), MAX_DELAY_SECONDS)
+                    retry_after = response.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = min(float(retry_after), MAX_DELAY_SECONDS)
+                        except ValueError:
+                            pass
+                    logger.warning(f"  Rate limit {response.status_code} on {endpoint}, retrying in {delay:.1f}s")
+                    await asyncio.sleep(delay)
+                    continue
 
-                    response.raise_for_status()
+                response.raise_for_status()
 
-                    if not response.content:
-                        logger.info(f"Zoho API Response: {endpoint} -> HTTP {response.status_code}, empty response")
-                        return {"data": [], "info": {"count": 0}}
+                if not response.content:
+                    logger.info(f"Zoho API Response: {endpoint} -> HTTP {response.status_code}, empty response")
+                    return {"data": [], "info": {"count": 0}}
 
-                    result = response.json()
-                    record_count = len(result.get("data", []))
-                    more_records = result.get("info", {}).get("more_records", False)
-                    logger.info(f"Zoho API Response: {endpoint} -> HTTP {response.status_code}, {record_count} records, more={more_records}")
-                    return result
+                result = response.json()
+                record_count = len(result.get("data", []))
+                more_records = result.get("info", {}).get("more_records", False)
+                logger.info(f"Zoho API Response: {endpoint} -> HTTP {response.status_code}, {record_count} records, more={more_records}")
+                return result
 
-                except httpx.TimeoutException:
-                    if attempt < MAX_RETRIES:
-                        delay = BASE_DELAY_SECONDS * (2 ** attempt)
-                        logger.warning(f"  Timeout on {endpoint}, retrying in {delay:.1f}s")
-                        await asyncio.sleep(delay)
-                        continue
-                    logger.error(f"  Request timeout after {MAX_RETRIES + 1} attempts")
-                    raise ZohoAPIError("Request timeout after retries")
-                except httpx.HTTPStatusError as e:
-                    logger.error(f"  HTTP error {e.response.status_code}: {e.response.text[:200]}")
-                    raise ZohoAPIError(
-                        f"API error: {e.response.status_code} - {e.response.text[:200]}",
-                        status_code=e.response.status_code
-                    )
+            except httpx.TimeoutException:
+                if attempt < MAX_RETRIES:
+                    delay = BASE_DELAY_SECONDS * (2 ** attempt)
+                    logger.warning(f"  Timeout on {endpoint}, retrying in {delay:.1f}s")
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error(f"  Request timeout after {MAX_RETRIES + 1} attempts")
+                raise ZohoAPIError("Request timeout after retries")
+            except httpx.HTTPStatusError as e:
+                logger.error(f"  HTTP error {e.response.status_code}: {e.response.text[:200]}")
+                raise ZohoAPIError(
+                    f"API error: {e.response.status_code} - {e.response.text[:200]}",
+                    status_code=e.response.status_code
+                )
 
         raise ZohoAPIError("Max retries exceeded")
 

@@ -247,88 +247,113 @@ else:
 # =============================================================================
 # STEP 1: SEARCH INTENT COMPANIES
 # =============================================================================
-labeled_divider("Step 1: Search Intent Companies")
+# When results are showing, collapse earlier pipeline steps into a summary
+_results_showing = st.session_state.intent_enrichment_done and st.session_state.intent_enriched_contacts
 
-col1, col2 = st.columns([3, 2])
+# Default variable values — used when form is hidden (results showing)
+selected_topics = []
+signal_strengths = []
+intent_mgmt_levels = ["Manager"]
+intent_accuracy_min = 95
+intent_phone_fields = ["mobilePhone", "directPhone", "phone"]
+target_companies = 25
+search_clicked = False
 
-with col1:
-    topics_config = get_intent_topics()
-    available_topics = topics_config.get("primary", []) + topics_config.get("expansion", [])
+if _results_showing:
+    _qp = st.session_state.get("intent_query_params") or {}
+    _s1_topics = ", ".join(_qp.get("topics", []))
+    _s1_signals = ", ".join(_qp.get("signal_strengths", []))
+    _s1_count = len(st.session_state.intent_companies or [])
+    _sel_count = len(st.session_state.intent_selected_companies)
+    with st.expander(f"Pipeline: {_s1_topics} ({_s1_signals}) — {_s1_count} companies, {_sel_count} selected", expanded=False):
+        st.caption(f"Topics: {_s1_topics} | Signal: {_s1_signals} | Found: {_s1_count} | Selected: {_sel_count}")
+else:
+    labeled_divider("Step 1: Search Intent Companies")
 
-    selected_topics = st.multiselect(
-        "Topics",
-        options=available_topics,
-        default=["Vending Machines"] if "Vending Machines" in available_topics else [],
-        placeholder="Select intent topics...",
-    )
+    col1, col2 = st.columns([3, 2])
 
-with col2:
-    signal_strengths = st.multiselect(
-        "Signal Strength",
-        options=["High", "Medium", "Low"],
-        default=["High"],
-        placeholder="Select signal strengths...",
-    )
+    with col1:
+        topics_config = get_intent_topics()
+        available_topics = topics_config.get("primary", []) + topics_config.get("expansion", [])
 
-# Filters expander
-with st.expander("Filters", expanded=False):
-    filter_col1, filter_col2 = st.columns(2)
-    with filter_col1:
-        st.caption("**Intent Search filters:**")
-        st.caption(f"Minimum employees: {get_employee_minimum():,}")
-        st.caption(f"Maximum employees: {get_employee_maximum():,}")
-        st.caption(f"SIC codes: {len(get_sic_codes())} industries")
-    with filter_col2:
-        st.caption("**Contact Search filters:**")
-        intent_mgmt_levels = st.multiselect(
-            "Management level",
-            options=["Manager", "Director", "VP Level Exec", "C Level Exec"],
-            default=["Manager"],
-            key="intent_mgmt_levels",
+        selected_topics = st.multiselect(
+            "Topics",
+            options=available_topics,
+            default=["Vending Machines"] if "Vending Machines" in available_topics else [],
+            placeholder="Select intent topics...",
         )
-        intent_accuracy_min = st.number_input(
-            "Accuracy minimum",
-            min_value=0,
+
+    with col2:
+        signal_strengths = st.multiselect(
+            "Signal Strength",
+            options=["High", "Medium", "Low"],
+            default=["High"],
+            placeholder="Select signal strengths...",
+        )
+
+    # Filters expander
+    with st.expander("Filters", expanded=False):
+        filter_col1, filter_col2 = st.columns(2)
+        with filter_col1:
+            st.caption("**Intent Search filters:**")
+            st.caption(f"Minimum employees: {get_employee_minimum():,}")
+            st.caption(f"Maximum employees: {get_employee_maximum():,}")
+            st.caption(f"SIC codes: {len(get_sic_codes())} industries")
+        with filter_col2:
+            st.caption("**Contact Search filters:**")
+            intent_mgmt_levels = st.multiselect(
+                "Management level",
+                options=["Manager", "Director", "VP Level Exec", "C Level Exec"],
+                default=["Manager"],
+                key="intent_mgmt_levels",
+            )
+            intent_accuracy_min = st.number_input(
+                "Accuracy minimum",
+                min_value=0,
+                max_value=100,
+                value=95,
+                step=5,
+                key="intent_accuracy_min",
+            )
+            intent_phone_fields = st.multiselect(
+                "Required phone fields",
+                options=["mobilePhone", "directPhone", "phone"],
+                default=["mobilePhone", "directPhone", "phone"],
+                key="intent_phone_fields",
+                help="Contact must have at least one selected phone type",
+            )
+
+    # Target companies input
+    target_col1, target_col2, target_col3 = st.columns([1, 1, 2])
+    with target_col1:
+        target_companies = st.number_input(
+            "Target companies",
+            min_value=5,
             max_value=100,
-            value=95,
+            value=25,
             step=5,
-            key="intent_accuracy_min",
+            help="Number of top companies to select for contact search.",
         )
-        intent_phone_fields = st.multiselect(
-            "Required phone fields",
-            options=["mobilePhone", "directPhone", "phone"],
-            default=["mobilePhone", "directPhone", "phone"],
-            key="intent_phone_fields",
-            help="Contact must have at least one selected phone type",
+    with target_col2:
+        can_query = len(selected_topics) > 0 and len(signal_strengths) > 0
+        search_clicked = st.button(
+            "Search Companies",
+            type="primary",
+            use_container_width=True,
+            disabled=not can_query,
         )
 
-# Target companies input
-target_col1, target_col2, target_col3 = st.columns([1, 1, 2])
-with target_col1:
-    target_companies = st.number_input(
-        "Target companies",
-        min_value=5,
-        max_value=100,
-        value=25,
-        step=5,
-        help="Number of top companies to select for contact search.",
-    )
-with target_col2:
-    can_query = len(selected_topics) > 0 and len(signal_strengths) > 0
-    search_clicked = st.button(
-        "Search Companies",
-        type="primary",
-        use_container_width=True,
-        disabled=not can_query,
-    )
-
-# Reset button
-if st.session_state.intent_search_executed:
-    with target_col3:
-        if ui.button(text="Reset", variant="destructive", key="intent_reset_btn"):
-            for key in defaults:
-                st.session_state[key] = defaults[key]
-            st.rerun()
+    # Reset button
+    if st.session_state.intent_search_executed:
+        with target_col3:
+            if ui.button(text="Reset", variant="destructive", key="intent_reset_btn"):
+                # Cancel any running search thread
+                existing_job = st.session_state.get("intent_search_job")
+                if existing_job and not existing_job.done.is_set():
+                    existing_job.cancel.set()
+                for key in defaults:
+                    st.session_state[key] = defaults[key]
+                st.rerun()
 
 
 # --- Execute Intent Search ---
@@ -444,8 +469,8 @@ if search_clicked:
                 pass
             st.error(str(e))
 
-# --- API Request / Response Debug Panel ---
-_has_debug = (
+# --- API Request / Response Debug Panel (hidden when results showing) ---
+_has_debug = not _results_showing and (
     st.session_state.get("_intent_api_request")
     or st.session_state.get("_intent_api_error")
     or st.session_state.get("_intent_api_exchange")
@@ -793,6 +818,12 @@ if (
 
         st.info(f"**{total_contacts}** contacts across **{len(contacts_by_company)}** companies. Select 1 per company.")
 
+        _selected_co_count = len(st.session_state.intent_selected_companies)
+        _matched_co_count = len(contacts_by_company)
+        if _matched_co_count < _selected_co_count:
+            _missing = _selected_co_count - _matched_co_count
+            st.caption(f"{_missing} compan{'y' if _missing == 1 else 'ies'} had no contacts matching ICP filters (management level, accuracy, phone requirements).")
+
         # Sort and filter controls
         sort_col, page_col = st.columns([1, 1])
         with sort_col:
@@ -1013,7 +1044,13 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
     with col1:
         metric_card("Contacts", len(scored))
     with col2:
-        metric_card("Companies", len(st.session_state.intent_selected_companies))
+        companies_with_contacts = len(set(
+            lead.get("companyId") or lead.get("company", {}).get("id", "")
+            for lead in scored
+            if lead.get("companyId") or lead.get("company", {}).get("id")
+        ))
+        selected_count = len(st.session_state.intent_selected_companies)
+        metric_card("Companies", f"{companies_with_contacts} of {selected_count}")
     with col3:
         if budget["has_cap"]:
             metric_card("Budget Used", budget['display'])
@@ -1023,22 +1060,25 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
     # Results table + filters (fragment for instant filter response)
     @st.fragment
     def intent_results_table(scored_leads):
+        _is_test_mode = st.session_state.get("intent_test_mode", False)
         display_data = []
         for idx, lead in enumerate(scored_leads):
-            display_data.append({
+            row = {
                 "_idx": idx,
                 "Name": f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(),
                 "Title": lead.get("jobTitle", ""),
                 "Company": lead.get("companyName", "") or lead.get("company", {}).get("name", ""),
-                "City": lead.get("city", "") or lead.get("personCity", ""),
-                "State": lead.get("state", "") or lead.get("personState", ""),
                 "Score": lead.get("_score", 0),
                 "Accuracy": lead.get("contactAccuracyScore", 0),
                 "Priority": lead.get("_priority", ""),
                 "Phone": lead.get("directPhone", "") or lead.get("phone", ""),
                 "Email": lead.get("email", ""),
                 "Topic": lead.get("_intent_topic", ""),
-            })
+            }
+            if not _is_test_mode:
+                row["City"] = lead.get("city", "") or lead.get("personCity", "")
+                row["State"] = lead.get("state", "") or lead.get("personState", "")
+            display_data.append(row)
 
         df = pd.DataFrame(display_data)
 
@@ -1053,7 +1093,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
                 label_visibility="collapsed",
             )
         with filter_col2:
-            if not df.empty:
+            if not _is_test_mode and not df.empty and "State" in df.columns:
                 available_states = sorted(df["State"].dropna().unique().tolist())
                 if available_states and len(available_states) > 1:
                     state_filter = st.multiselect(
@@ -1064,34 +1104,39 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
                     state_filter = available_states
             else:
                 state_filter = []
+                if _is_test_mode:
+                    st.caption("City/State data populates after enrichment (disabled in test mode)")
 
         # Apply filters
         if not df.empty:
             mask = df["Priority"].isin(priority_filter)
-            if state_filter:
+            if state_filter and "State" in df.columns:
                 mask = mask & df["State"].isin(state_filter)
             filtered_df = df[mask]
         else:
             filtered_df = df
 
         # Display
+        _col_config = {
+            "Name": st.column_config.TextColumn("Name", width="medium"),
+            "Title": st.column_config.TextColumn("Title", width="medium"),
+            "Company": st.column_config.TextColumn("Company", width="large"),
+            "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, width="small"),
+            "Accuracy": st.column_config.NumberColumn("Accuracy", width="small"),
+            "Priority": st.column_config.TextColumn("Priority", width="small"),
+            "Phone": st.column_config.TextColumn("Phone", width="medium"),
+            "Email": st.column_config.TextColumn("Email", width="medium"),
+            "Topic": st.column_config.TextColumn("Topic", width="small"),
+        }
+        if not _is_test_mode:
+            _col_config["City"] = st.column_config.TextColumn("City", width="small")
+            _col_config["State"] = st.column_config.TextColumn("State", width="small")
+
         st.dataframe(
             filtered_df.drop(columns=["_idx"]),
             use_container_width=True,
             hide_index=True,
-            column_config={
-                "Name": st.column_config.TextColumn("Name", width="medium"),
-                "Title": st.column_config.TextColumn("Title", width="medium"),
-                "Company": st.column_config.TextColumn("Company", width="large"),
-                "City": st.column_config.TextColumn("City", width="small"),
-                "State": st.column_config.TextColumn("State", width="small"),
-                "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, width="small"),
-                "Accuracy": st.column_config.NumberColumn("Accuracy", width="small"),
-                "Priority": st.column_config.TextColumn("Priority", width="small"),
-                "Phone": st.column_config.TextColumn("Phone", width="medium"),
-                "Email": st.column_config.TextColumn("Email", width="medium"),
-                "Topic": st.column_config.TextColumn("Topic", width="small"),
-            },
+            column_config=_col_config,
         )
 
         # Export section

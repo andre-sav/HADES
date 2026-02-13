@@ -43,10 +43,38 @@ scoring:
     onsite_likelihood: 0.25
     freshness: 0.25
 
+  # Intent contact scoring (contacts found at intent companies)
+  intent_contact:
+    company_intent: 0.60
+    authority: 0.15
+    accuracy: 0.15
+    phone: 0.10
+
   geography:
-    proximity: 0.50
-    onsite_likelihood: 0.30
+    proximity: 0.40
+    onsite_likelihood: 0.25
+    authority: 0.15
     employee_scale: 0.20
+
+# Authority Scores by Management Level
+authority_scores:
+  "C Level Exec": 100
+  "VP Level Exec": 85
+  "Director": 75
+  "Manager": 60
+  "Board Member": 50
+  "Non Manager": 30
+  default: 40
+
+# Title keywords that indicate vending-relevant authority (+10 bonus, cap 100)
+authority_title_keywords:
+  - "facilities"
+  - "operations"
+  - "vending"
+  - "food service"
+  - "hospitality"
+  - "building"
+  - "property"
 
 # Intent Signal Strength Scores
 signal_strength_scores:

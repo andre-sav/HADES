@@ -25,14 +25,33 @@ Usage:
 """
 
 import logging
+import queue
+import threading
 import time
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional
 
 from zoominfo_client import ContactQueryParams
 from geo import get_zips_in_radius, get_states_from_zips
 from utils import get_employee_minimum
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SearchJob:
+    """Thread-safe container for background search state.
+
+    Used by UI to launch searches in a daemon thread and poll for progress.
+    All thread→UI communication goes through the queue (explicitly thread-safe).
+    """
+    cancel: threading.Event = field(default_factory=threading.Event)
+    done: threading.Event = field(default_factory=threading.Event)
+    q: queue.Queue = field(default_factory=queue.Queue)
+    thread: threading.Thread | None = None
+    result: dict | None = None
+    error: str | None = None
+
 
 # =============================================================================
 # EXPANSION CONFIGURATION
@@ -69,9 +88,25 @@ DEFAULT_START_EMPLOYEE_MAX = 5000
 # HELPER FUNCTIONS
 # =============================================================================
 
+def _phone_quality_score(contact: dict) -> int:
+    """Score phone availability: mobile (3) > direct (2) > company (1) > none (0)."""
+    score = 0
+    if contact.get("mobilePhone"):
+        score += 3
+    if contact.get("directPhone"):
+        score += 2
+    if contact.get("phone"):
+        score += 1
+    return score
+
+
 def build_contacts_by_company(contacts_list: list) -> dict:
     """
-    Group contacts by company and sort by accuracy score.
+    Group contacts by company and sort by accuracy score, then phone quality.
+
+    Contacts are sorted by (accuracy DESC, phone_quality DESC) so that
+    when two contacts have equal accuracy, the one with better phone
+    availability (mobile > direct > company) ranks first.
 
     Args:
         contacts_list: List of contact dicts from ZoomInfo API
@@ -89,15 +124,23 @@ def build_contacts_by_company(contacts_list: list) -> dict:
                 contacts_by_company[company_id] = {
                     "company_name": company_name,
                     "contacts": [],
+                    "_seen_person_ids": set(),
                 }
+            person_id = contact.get("personId") or contact.get("id")
+            seen = contacts_by_company[company_id]["_seen_person_ids"]
+            if person_id and person_id in seen:
+                continue
+            if person_id:
+                seen.add(person_id)
             contacts_by_company[company_id]["contacts"].append(contact)
 
-    # Sort contacts within each company by accuracy score
+    # Sort contacts within each company by accuracy score, then phone quality
     for company_id, data in contacts_by_company.items():
         data["contacts"].sort(
-            key=lambda c: c.get("contactAccuracyScore", 0),
+            key=lambda c: (c.get("contactAccuracyScore", 0), _phone_quality_score(c)),
             reverse=True,
         )
+        data.pop("_seen_person_ids", None)
 
     return contacts_by_company
 
@@ -119,6 +162,8 @@ def expand_search(
     target: int,
     stop_early: bool,
     status_container: Any = None,
+    cancelled_fn: Callable[[], bool] | None = None,
+    shared_log: list | None = None,
 ) -> dict:
     """
     Search with automatic expansion until target met or steps exhausted.
@@ -140,7 +185,6 @@ def expand_search(
             - current_only: Only current employees
             - required_fields: List of required field names
             - required_fields_operator: "or" or "and"
-            - exclude_org_exported: Skip previously exported contacts
             - sic_codes: List of SIC codes to filter
             - center_zip: Center ZIP for radius recalculation
         zip_codes: List of ZIP codes to search
@@ -148,6 +192,11 @@ def expand_search(
         target: Target number of unique companies (not contacts)
         stop_early: Stop once target reached (vs. run all expansion steps)
         status_container: Optional Streamlit status container for progress updates
+        cancelled_fn: Optional callable returning True when search should stop.
+            Checked between API calls for cooperative cancellation.
+        shared_log: Optional external list for real-time progress messages.
+            When provided, expansion_log messages are appended here too,
+            allowing the UI thread to read progress without st.* calls.
 
     Returns:
         dict with keys:
@@ -161,6 +210,7 @@ def expand_search(
             - contacts: List of all contacts found
             - contacts_by_company: Dict grouping contacts by company
             - expansion_log: List of progress messages
+            - stopped: True if search was cancelled before completion (optional)
             - error: Error message if search failed (optional)
     """
     all_contacts = {}  # personId -> contact (for deduplication)
@@ -170,8 +220,10 @@ def expand_search(
     expansion_log = []  # Track what we did for verbose output
 
     def log_progress(message: str, is_step: bool = False):
-        """Log progress to status container if available."""
+        """Log progress to status container and/or shared_log if available."""
         expansion_log.append(message)
+        if shared_log is not None:
+            shared_log.append(message)
         if status_container:
             status_container.write(f"{'→' if is_step else '  '} {message}")
 
@@ -189,7 +241,6 @@ def expand_search(
         "current_only": base_params.get("current_only", True),
         "required_fields": base_params.get("required_fields"),
         "required_fields_operator": base_params.get("required_fields_operator", "or"),
-        "exclude_org_exported": base_params.get("exclude_org_exported", True),
         "sic_codes": base_params.get("sic_codes", []),
     }
 
@@ -224,7 +275,6 @@ def expand_search(
             required_fields=fixed_params["required_fields"],
             required_fields_operator=fixed_params["required_fields_operator"],
             contact_accuracy_score_min=accuracy_min,
-            exclude_org_exported=fixed_params["exclude_org_exported"],
             management_levels=management_levels if management_levels else None,
         )
 
@@ -281,6 +331,17 @@ def expand_search(
 
         # Combined search: If include_person_only is enabled, run Person-only search and merge
         if include_person_only and fixed_params["location_type"] == "PersonAndHQ":
+            if cancelled_fn and cancelled_fn():
+                log_progress("Search cancelled by user")
+                contacts_list = list(all_contacts.values())
+                return {
+                    "target": target, "found": len(unique_companies),
+                    "found_contacts": len(all_contacts), "target_met": len(unique_companies) >= target,
+                    "steps_applied": 0, "final_params": current_params,
+                    "searches_performed": searches_performed, "contacts": contacts_list,
+                    "contacts_by_company": build_contacts_by_company(contacts_list),
+                    "expansion_log": expansion_log, "stopped": True,
+                }
             time.sleep(0.5)  # Rate limit
             log_progress("**Combined search:** Adding Person-only results for maximum coverage...", is_step=True)
 
@@ -345,6 +406,11 @@ def expand_search(
     # Expansion loop
     total_expansion_steps = len(EXPANSION_STEPS)
     for step_index, step in enumerate(EXPANSION_STEPS):
+        # Check for cancellation before each expansion step
+        if cancelled_fn and cancelled_fn():
+            log_progress("Search cancelled by user")
+            break
+
         # Skip expansion steps that would REDUCE the search scope
         should_skip = False
         skip_reason = None
@@ -394,7 +460,10 @@ def expand_search(
         steps_applied += 1
         log_progress(f"**Expansion {steps_applied}/{total_expansion_steps}:** {', '.join(expansion_desc)}", is_step=True)
 
-        # Rate limit delay
+        # Rate limit delay (check cancel before sleeping)
+        if cancelled_fn and cancelled_fn():
+            log_progress("Search cancelled by user")
+            break
         time.sleep(0.5)
 
         # Search with new parameters
@@ -414,6 +483,9 @@ def expand_search(
 
             # Combined search: Run Person-only search during expansion too
             if include_person_only and fixed_params["location_type"] == "PersonAndHQ":
+                if cancelled_fn and cancelled_fn():
+                    log_progress("Search cancelled by user")
+                    break
                 time.sleep(0.5)  # Rate limit
                 try:
                     person_only_contacts = do_search(
@@ -451,17 +523,20 @@ def expand_search(
             log_progress(f"Still need {remaining} more companies...")
 
     # Build final result
+    was_cancelled = cancelled_fn and cancelled_fn()
     contacts_list = list(all_contacts.values())
     contacts_by_company = build_contacts_by_company(contacts_list)
     company_count = len(contacts_by_company)
 
     # Final summary
-    if company_count >= target:
+    if was_cancelled:
+        log_progress(f"**Stopped:** {company_count} companies ({len(all_contacts)} contacts) — partial results")
+    elif company_count >= target:
         log_progress(f"**Complete:** {company_count} companies (target: {target}) with {len(all_contacts)} total contacts")
     else:
         log_progress(f"**Complete:** {company_count} of {target} target companies ({len(all_contacts)} contacts)")
 
-    return {
+    result = {
         "target": target,
         "found": company_count,
         "found_contacts": len(all_contacts),
@@ -473,3 +548,6 @@ def expand_search(
         "contacts_by_company": contacts_by_company,
         "expansion_log": expansion_log,
     }
+    if was_cancelled:
+        result["stopped"] = True
+    return result

@@ -188,7 +188,10 @@ async def sync_operators(
         logger.info(f"  Last sync: {last_sync}")
 
     client = ZohoClient(auth)
-    zoho_records = await fetch_owner_operators(client, modified_since=last_sync)
+    try:
+        zoho_records = await fetch_owner_operators(client, modified_since=last_sync)
+    finally:
+        await client.close()
 
     if not zoho_records:
         if sync_type == "incremental":
@@ -204,24 +207,29 @@ async def sync_operators(
 
     logger.info(f"Found {len(zoho_records)} {'modified ' if sync_type == 'incremental' else ''}records in Zoho")
 
-    # Get existing operators with zoho_id
-    existing = db.execute(
-        "SELECT id, zoho_id, operator_name FROM operators WHERE zoho_id IS NOT NULL"
+    # Single query: get all operators, split into synced vs unlinked in Python
+    all_operators = db.execute(
+        "SELECT id, zoho_id, operator_name FROM operators"
     )
-    existing_by_zoho_id = {row[1]: {"id": row[0], "name": row[2]} for row in existing}
-
-    # Also check for name matches (for linking existing manual entries)
-    existing_by_name = db.execute(
-        "SELECT id, operator_name FROM operators WHERE zoho_id IS NULL"
-    )
-    unlinked_by_name = {row[1].lower(): row[0] for row in existing_by_name}
+    existing_by_zoho_id = {}
+    unlinked_by_name = {}
+    for row in all_operators:
+        if row[1]:  # has zoho_id
+            existing_by_zoho_id[row[1]] = {"id": row[0], "name": row[2]}
+        else:
+            unlinked_by_name[row[2].lower()] = row[0]
 
     created = updated = skipped = linked = 0
     logger.info(f"Processing {len(zoho_records)} Zoho records...")
     logger.info(f"  Existing synced operators: {len(existing_by_zoho_id)}")
     logger.info(f"  Unlinked manual operators: {len(unlinked_by_name)}")
 
-    for i, record in enumerate(zoho_records):
+    # Collect batch params: same SQL template per group, one commit each
+    update_params = []
+    link_params = []
+    create_params = []
+
+    for record in zoho_records:
         mapped = map_zoho_to_hades(record)
         zoho_id = mapped["zoho_id"]
 
@@ -231,19 +239,7 @@ async def sync_operators(
             continue
 
         if zoho_id in existing_by_zoho_id:
-            # Update existing synced record
-            db.execute_write("""
-                UPDATE operators SET
-                    operator_name = ?,
-                    vending_business_name = ?,
-                    operator_phone = ?,
-                    operator_email = ?,
-                    operator_zip = ?,
-                    operator_website = ?,
-                    synced_at = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE zoho_id = ?
-            """, (
+            update_params.append((
                 mapped["operator_name"],
                 mapped["vending_business_name"],
                 mapped["operator_phone"],
@@ -254,23 +250,10 @@ async def sync_operators(
                 zoho_id,
             ))
             updated += 1
-            logger.debug(f"  Updated: {mapped['operator_name']}")
 
         elif mapped["operator_name"].lower() in unlinked_by_name:
-            # Link existing manual entry to Zoho record
             existing_id = unlinked_by_name[mapped["operator_name"].lower()]
-            db.execute_write("""
-                UPDATE operators SET
-                    zoho_id = ?,
-                    vending_business_name = COALESCE(vending_business_name, ?),
-                    operator_phone = COALESCE(operator_phone, ?),
-                    operator_email = COALESCE(operator_email, ?),
-                    operator_zip = COALESCE(operator_zip, ?),
-                    operator_website = COALESCE(operator_website, ?),
-                    synced_at = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
+            link_params.append((
                 zoho_id,
                 mapped["vending_business_name"],
                 mapped["operator_phone"],
@@ -286,36 +269,57 @@ async def sync_operators(
             del unlinked_by_name[mapped["operator_name"].lower()]
 
         else:
-            # Create new operator
-            try:
-                db.execute_write("""
-                    INSERT INTO operators (
-                        operator_name, vending_business_name, operator_phone,
-                        operator_email, operator_zip, operator_website, zoho_id, synced_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    mapped["operator_name"],
-                    mapped["vending_business_name"],
-                    mapped["operator_phone"],
-                    mapped["operator_email"],
-                    mapped["operator_zip"],
-                    mapped["operator_website"],
-                    zoho_id,
-                    mapped["synced_at"],
-                ))
-                created += 1
-                logger.info(f"  Created: {mapped['operator_name']}")
-            except Exception as e:
-                if "UNIQUE" in str(e) or "unique" in str(e).lower():
-                    # Duplicate name or zoho_id - skip
-                    skipped += 1
-                    logger.warning(f"  Skipped duplicate: {mapped['operator_name']} ({e})")
-                else:
-                    raise  # Re-raise unexpected errors
+            create_params.append((
+                mapped["operator_name"],
+                mapped["vending_business_name"],
+                mapped["operator_phone"],
+                mapped["operator_email"],
+                mapped["operator_zip"],
+                mapped["operator_website"],
+                zoho_id,
+                mapped["synced_at"],
+            ))
+            created += 1
 
-        # Progress log every 50 records
-        if (i + 1) % 50 == 0:
-            logger.info(f"  Progress: {i + 1}/{len(zoho_records)} records processed")
+    # Batch write: 3 commits instead of N
+    if update_params:
+        db.execute_many("""
+            UPDATE operators SET
+                operator_name = ?,
+                vending_business_name = ?,
+                operator_phone = ?,
+                operator_email = ?,
+                operator_zip = ?,
+                operator_website = ?,
+                synced_at = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE zoho_id = ?
+        """, update_params)
+        logger.info(f"  Batch updated {len(update_params)} operators")
+
+    if link_params:
+        db.execute_many("""
+            UPDATE operators SET
+                zoho_id = ?,
+                vending_business_name = COALESCE(vending_business_name, ?),
+                operator_phone = COALESCE(operator_phone, ?),
+                operator_email = COALESCE(operator_email, ?),
+                operator_zip = COALESCE(operator_zip, ?),
+                operator_website = COALESCE(operator_website, ?),
+                synced_at = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, link_params)
+        logger.info(f"  Batch linked {len(link_params)} operators")
+
+    if create_params:
+        db.execute_many("""
+            INSERT INTO operators (
+                operator_name, vending_business_name, operator_phone,
+                operator_email, operator_zip, operator_website, zoho_id, synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, create_params)
+        logger.info(f"  Batch created {len(create_params)} operators")
 
     # Save sync time on success
     set_last_sync_time(db, sync_start_time)
@@ -336,3 +340,111 @@ async def sync_operators(
 def run_sync(db, auth: ZohoAuth, force_full: bool = False) -> Dict[str, int]:
     """Synchronous wrapper for sync_operators."""
     return asyncio.run(sync_operators(db, auth, force_full=force_full))
+
+
+# --- Outcome Sync ---
+
+OUTCOME_SYNC_KEY = "zoho_outcome_last_sync"
+
+
+async def sync_outcomes(
+    db,
+    auth: ZohoAuth,
+) -> Dict[str, int]:
+    """
+    Sync lead outcomes from Zoho Deals back to lead_outcomes table.
+
+    Matches Deals containing HADES batch IDs to lead_outcomes rows.
+    Prerequisite: Zoho CRM must have a custom field storing the HADES batch ID
+    (configured by the team manually in CRM settings).
+
+    Args:
+        db: HADES TursoDatabase instance
+        auth: ZohoAuth instance
+
+    Returns:
+        {"matched": N, "updated": N, "unmatched": N}
+    """
+    client = ZohoClient(auth)
+    try:
+        # Get all unresolved batches (outcomes not yet known)
+        unresolved = db.execute(
+            """SELECT DISTINCT batch_id FROM lead_outcomes
+               WHERE outcome IS NULL
+               ORDER BY exported_at DESC
+               LIMIT 50"""
+        )
+        if not unresolved:
+            logger.info("No unresolved lead outcomes to sync")
+            return {"matched": 0, "updated": 0, "unmatched": 0}
+
+        batch_ids = [r[0] for r in unresolved]
+        logger.info(f"Syncing outcomes for {len(batch_ids)} batches")
+
+        matched = updated = unmatched = 0
+
+        for batch_id in batch_ids:
+            # COQL query for Deals with this batch ID in custom field
+            # Field name TBD by team — using "HADES_Batch_ID" as placeholder
+            query = (
+                f"select Deal_Name, Stage, Closing_Date, HADES_Batch_ID "
+                f"from Deals "
+                f"where HADES_Batch_ID = '{batch_id}'"
+            )
+
+            try:
+                deals = await client.coql_query_all(query)
+            except Exception as e:
+                logger.warning(f"  COQL query failed for batch {batch_id}: {e}")
+                continue
+
+            if not deals:
+                unmatched += 1
+                continue
+
+            matched += 1
+
+            # Match deals to lead_outcomes by company name
+            outcomes = db.get_outcomes_by_batch(batch_id)
+            outcome_names = {o["company_name"].lower(): o for o in outcomes}
+
+            for deal in deals:
+                deal_name = (deal.get("Deal_Name") or "").strip().lower()
+                stage = (deal.get("Stage") or "").strip()
+                closing_date = deal.get("Closing_Date") or ""
+
+                if deal_name in outcome_names:
+                    # Map Zoho stage to outcome
+                    outcome = "delivery" if "delivered" in stage.lower() else "no_delivery"
+                    db.update_lead_outcome(
+                        batch_id=batch_id,
+                        company_name=outcome_names[deal_name]["company_name"],
+                        outcome=outcome,
+                        outcome_at=closing_date,
+                    )
+                    updated += 1
+
+        # Record sync time
+        set_last_sync_time_key(db, OUTCOME_SYNC_KEY, datetime.now(timezone.utc).isoformat())
+
+        result = {"matched": matched, "updated": updated, "unmatched": unmatched}
+        logger.info(f"Outcome sync complete: {result}")
+        return result
+
+    finally:
+        await client.close()
+
+
+def set_last_sync_time_key(db, key: str, timestamp: str) -> None:
+    """Set a sync metadata timestamp by key."""
+    db.execute_write(
+        """INSERT INTO sync_metadata (key, value, updated_at)
+           VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP""",
+        (key, timestamp, timestamp),
+    )
+
+
+def run_outcome_sync(db, auth: ZohoAuth) -> Dict[str, int]:
+    """Synchronous wrapper for sync_outcomes."""
+    return asyncio.run(sync_outcomes(db, auth))

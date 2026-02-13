@@ -286,3 +286,215 @@ class TestTursoDatabase:
 
         call_args = mock_conn.execute.call_args[0]
         assert call_args[1] == (0, 1)
+
+
+class TestLeadOutcomes:
+    """Tests for lead outcome CRUD methods."""
+
+    @pytest.fixture
+    def mock_db(self):
+        mock_conn = MagicMock()
+        db = TursoDatabase(url="libsql://test.turso.io", auth_token="test-token")
+        db._conn = mock_conn
+        return db, mock_conn
+
+    def test_record_lead_outcomes_batch(self, mock_db):
+        """Test batch inserting lead outcomes (13-element tuples with person_id)."""
+        db, mock_conn = mock_db
+
+        params = [
+            ("HADES-20260212-001", "Acme Corp", "123", "person-001", "7011", 150,
+             12.5, "75201", "TX", 85, "geography", "2026-02-12T10:00:00", '{"_score": 85}'),
+            ("HADES-20260212-001", "Beta Inc", "456", None, "8211", 200,
+             5.0, "75202", "TX", 72, "geography", "2026-02-12T10:00:00", None),
+        ]
+        db.record_lead_outcomes_batch(params)
+
+        # Should have called execute for each param tuple + commit
+        assert mock_conn.execute.call_count == 2
+        mock_conn.commit.assert_called_once()
+
+        # Verify the INSERT includes person_id column
+        insert_sql = mock_conn.execute.call_args_list[0][0][0]
+        assert "person_id" in insert_sql
+        # Verify 13 placeholders
+        assert insert_sql.count("?") == 13
+
+    def test_record_lead_outcomes_with_person_id(self, mock_db):
+        """Test that person_id is correctly passed as 4th tuple element."""
+        db, mock_conn = mock_db
+
+        params = [
+            ("HADES-20260212-001", "Acme Corp", "123", "person-abc-123", "7011", 150,
+             12.5, "75201", "TX", 85, "geography", "2026-02-12T10:00:00", None),
+        ]
+        db.record_lead_outcomes_batch(params)
+
+        # Verify the tuple passed to execute includes person_id
+        call_params = mock_conn.execute.call_args_list[0][0][1]
+        assert call_params[3] == "person-abc-123"
+
+    def test_get_outcomes_by_batch(self, mock_db):
+        """Test retrieving outcomes by batch ID."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            (1, "HADES-20260212-001", "Acme Corp", "7011", 150, 85,
+             "geography", "2026-02-12", None, None),
+        ]
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_outcomes_by_batch("HADES-20260212-001")
+
+        assert len(result) == 1
+        assert result[0]["company_name"] == "Acme Corp"
+        assert result[0]["batch_id"] == "HADES-20260212-001"
+        assert result[0]["outcome"] is None
+
+    def test_get_all_outcomes_for_calibration(self, mock_db):
+        """Test UNION query for calibration."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            ("Acme Corp", "7011", 150, "75201", "TX", "delivery", "historical"),
+            ("Beta Inc", "8211", 200, "75202", "TX", "no_delivery", "hades"),
+        ]
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_all_outcomes_for_calibration()
+
+        assert len(result) == 2
+        assert result[0]["source"] == "historical"
+        assert result[1]["source"] == "hades"
+
+    def test_get_historical_count(self, mock_db):
+        """Test counting historical outcomes."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [(42,)]
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_historical_count()
+        assert result == 42
+
+    def test_get_historical_count_empty(self, mock_db):
+        """Test counting with no historical data."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [(0,)]
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_historical_count()
+        assert result == 0
+
+    def test_update_lead_outcome(self, mock_db):
+        """Test updating a lead outcome."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+
+        db.update_lead_outcome(
+            batch_id="HADES-20260212-001",
+            company_name="Acme Corp",
+            outcome="delivery",
+            outcome_at="2026-03-01",
+        )
+
+        mock_conn.execute.assert_called_once()
+        call_args = mock_conn.execute.call_args[0]
+        assert "UPDATE lead_outcomes" in call_args[0]
+        assert call_args[1] == ("delivery", "2026-03-01", "HADES-20260212-001", "Acme Corp")
+
+    def test_get_recent_batches(self, mock_db):
+        """Test getting recent batch summaries."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            ("HADES-20260212-001", "geography", "2026-02-12T10:00:00", 25, 3, 5),
+        ]
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_recent_batches(limit=5)
+
+        assert len(result) == 1
+        assert result[0]["batch_id"] == "HADES-20260212-001"
+        assert result[0]["lead_count"] == 25
+        assert result[0]["deliveries"] == 3
+        assert result[0]["outcomes_known"] == 5
+
+    def test_get_exported_company_ids(self, mock_db):
+        """Test get_exported_company_ids returns correct structure."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            ("123", "Acme Corp", "2026-02-01T10:00:00", "geography"),
+            ("456", "Beta Inc", "2026-01-15T08:00:00", "intent"),
+        ]
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_exported_company_ids(days_back=180)
+
+        assert "123" in result
+        assert result["123"]["company_name"] == "Acme Corp"
+        assert result["123"]["exported_at"] == "2026-02-01T10:00:00"
+        assert result["123"]["workflow_type"] == "geography"
+        assert "456" in result
+        assert result["456"]["company_name"] == "Beta Inc"
+
+        # Verify SQL uses days_back parameter
+        call_args = mock_conn.execute.call_args[0]
+        assert "date('now', ?)" in call_args[0]
+        assert call_args[1] == ("-180 days",)
+
+    def test_get_exported_company_ids_respects_window(self, mock_db):
+        """Test that days_back parameter is passed correctly."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn.execute.return_value = mock_cursor
+
+        db.get_exported_company_ids(days_back=30)
+
+        call_args = mock_conn.execute.call_args[0]
+        assert call_args[1] == ("-30 days",)
+
+    def test_get_exported_company_ids_deduplicates(self, mock_db):
+        """Test that duplicate company_ids keep only first (most recent) entry."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        # Same company_id exported twice — query returns newest first (ORDER BY exported_at DESC)
+        mock_cursor.fetchall.return_value = [
+            ("123", "Acme Corp", "2026-02-01T10:00:00", "geography"),
+            ("123", "Acme Corp", "2026-01-01T10:00:00", "intent"),
+        ]
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_exported_company_ids()
+
+        assert len(result) == 1
+        # Should keep the first (most recent) entry
+        assert result["123"]["exported_at"] == "2026-02-01T10:00:00"
+
+    def test_get_exported_company_ids_empty(self, mock_db):
+        """Test with no exported companies."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn.execute.return_value = mock_cursor
+
+        result = db.get_exported_company_ids()
+
+        assert result == {}
+
+    def test_insert_historical_outcomes_batch(self, mock_db):
+        """Test batch inserting historical outcomes."""
+        db, mock_conn = mock_db
+
+        params = [
+            ("Company A", "7011", 100, "75201", "TX", "delivery",
+             "enriched_locatings.csv", "2026-01-01", "2026-02-12T10:00:00"),
+        ]
+        db.insert_historical_outcomes_batch(params)
+
+        mock_conn.execute.assert_called_once()
+        mock_conn.commit.assert_called_once()

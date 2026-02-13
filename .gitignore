@@ -32,9 +32,13 @@ dist/
 build/
 *.egg-info/
 
-# Large data files (enrichment intermediates)
+# Large data files (source + enrichment intermediates)
+data/HLM_*.csv
 data/enriched_*.csv
 data/nonhlm_*.csv
+
+# BMAD working artifacts
+_bmad-output/
 
 # Screenshots
 /*.png

@@ -904,6 +904,8 @@ class ZoomInfoClient:
             zip_count = len(params.zip_codes) if params.zip_codes else 0
             logger.info(f"Contact Search (batch): {zip_count} ZIP(s), states={params.states}, max_pages={max_pages}")
         all_contacts = []
+        seen_person_ids = set()
+        dupes_removed = 0
         current_page = 1
         actual_page_size = None  # Track what ZoomInfo actually returns per page
         params = replace(params)  # Local copy to avoid mutating caller's params
@@ -914,7 +916,14 @@ class ZoomInfoClient:
             page_results = result["data"]
             results_count = len(page_results)
 
-            all_contacts.extend(page_results)
+            for contact in page_results:
+                pid = contact.get("personId") or contact.get("id")
+                if pid and pid in seen_person_ids:
+                    dupes_removed += 1
+                    continue
+                if pid:
+                    seen_person_ids.add(pid)
+                all_contacts.append(contact)
 
             if progress_callback:
                 progress_callback(current_page, result["pagination"]["totalPages"])
@@ -936,7 +945,7 @@ class ZoomInfoClient:
             # If we got a full page, there might be more - continue to next page
             current_page += 1
 
-        logger.info(f"Contact Search (batch) complete: {len(all_contacts)} contacts from {current_page} pages")
+        logger.info(f"Contact Search (batch) complete: {len(all_contacts)} unique contacts ({dupes_removed} duplicates removed) from {current_page} pages")
         return all_contacts
 
     def _search_contacts_by_company_batched(

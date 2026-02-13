@@ -2,6 +2,7 @@
 CSV Export - Export leads with operator metadata, validation, and tracking.
 """
 
+import json
 import streamlit as st
 import streamlit_shadcn_ui as ui
 import pandas as pd
@@ -204,10 +205,11 @@ else:
 st.markdown("---")
 
 # Generate
-csv_content, filename = export_leads_to_csv(
+csv_content, filename, batch_id = export_leads_to_csv(
     leads_to_export,
     operator=selected_operator,
     workflow_type=workflow_type,
+    db=db,
 )
 
 # Post-export display (if already exported)
@@ -217,7 +219,8 @@ if st.session_state.last_export_metadata:
     op_display = f" for {op_name}" if op_name else ""
     ts = meta.get("timestamp", "")[:16] if meta.get("timestamp") else ""
 
-    st.success(f"Exported: {meta.get('filename', '')} · {meta.get('count', 0)} leads{op_display} · {ts}")
+    batch_display = f" · {meta.get('batch_id')}" if meta.get("batch_id") else ""
+    st.success(f"Exported: {meta.get('filename', '')} · {meta.get('count', 0)} leads{op_display}{batch_display} · {ts}")
 
 
 # Download and mark exported buttons
@@ -251,11 +254,36 @@ with col3:
         if last_query:
             db.update_query_exported(last_query["id"], len(leads_to_export))
 
+        # Record lead outcomes for tracking
+        if batch_id:
+            now_iso = datetime.now().isoformat()
+            outcome_rows = []
+            for lead in leads_to_export:
+                # Collect _-prefixed scoring features as JSON
+                features = {k: v for k, v in lead.items() if k.startswith("_") and v is not None}
+                outcome_rows.append((
+                    batch_id,
+                    lead.get("companyName", ""),
+                    str(lead.get("companyId", "")) if lead.get("companyId") else None,
+                    str(lead.get("personId", "")) if lead.get("personId") else None,
+                    lead.get("sicCode") or lead.get("_sic_code"),
+                    lead.get("employees") or lead.get("numberOfEmployees"),
+                    lead.get("_distance_miles"),
+                    lead.get("zip") or lead.get("zipCode"),
+                    lead.get("state"),
+                    lead.get("_score"),
+                    workflow_type,
+                    now_iso,
+                    json.dumps(features) if features else None,
+                ))
+            db.record_lead_outcomes_batch(outcome_rows)
+
         st.session_state.last_export_metadata = {
             "filename": filename,
             "count": len(leads_to_export),
             "timestamp": datetime.now().isoformat(),
             "operator": selected_operator.get("operator_name") if selected_operator else None,
+            "batch_id": batch_id,
         }
 
         # Set exported flag for action bar state

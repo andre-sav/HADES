@@ -3,6 +3,8 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
+from expand_search import build_contacts_by_company
+
 
 class TestExpansionStepsDefinition:
     """Test expansion step definitions match the design."""
@@ -213,6 +215,24 @@ class TestExpandSearchLogic:
         assert len(contacts_by_company) == 2
         assert len(contacts_by_company["c1"]["contacts"]) == 2
         assert len(contacts_by_company["c2"]["contacts"]) == 1
+
+    def test_build_contacts_by_company_deduplicates(self):
+        """build_contacts_by_company should deduplicate contacts by personId within a company."""
+        contacts_list = [
+            {"personId": "p1", "companyId": "c1", "companyName": "Company A", "contactAccuracyScore": 95},
+            {"personId": "p1", "companyId": "c1", "companyName": "Company A", "contactAccuracyScore": 95},  # duplicate
+            {"personId": "p2", "companyId": "c1", "companyName": "Company A", "contactAccuracyScore": 90},
+            {"personId": "p3", "companyId": "c2", "companyName": "Company B", "contactAccuracyScore": 98},
+            {"personId": "p3", "companyId": "c2", "companyName": "Company B", "contactAccuracyScore": 98},  # duplicate
+        ]
+
+        result = build_contacts_by_company(contacts_list)
+
+        assert len(result["c1"]["contacts"]) == 2  # p1 + p2, not 3
+        assert len(result["c2"]["contacts"]) == 1  # p3, not 2
+        # No internal tracking keys leaked
+        assert "_seen_person_ids" not in result["c1"]
+        assert "_seen_person_ids" not in result["c2"]
 
     def test_contacts_sorted_by_accuracy_within_company(self):
         """Contacts within each company should be sorted by accuracy score descending."""

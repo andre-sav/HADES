@@ -100,8 +100,9 @@ class TestScoringConfig:
     def test_get_geography_scoring_weights(self):
         """Test geography scoring weights."""
         weights = get_scoring_weights("geography")
-        assert weights["proximity"] == 0.50
-        assert weights["onsite_likelihood"] == 0.30
+        assert weights["proximity"] == 0.40
+        assert weights["onsite_likelihood"] == 0.25
+        assert weights["authority"] == 0.15
         assert weights["employee_scale"] == 0.20
         assert sum(weights.values()) == pytest.approx(1.0)
 

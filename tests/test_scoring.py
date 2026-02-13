@@ -16,6 +16,7 @@ from scoring import (
     get_score_breakdown_intent_contact,
     get_priority_label,
     _calculate_age_days,
+    _calculate_authority_score,
 )
 
 
@@ -121,6 +122,85 @@ class TestIntentScoring:
         assert result["score"] == 100
 
 
+    def test_intent_score_uses_numeric_signal_score(self):
+        """Lead with numeric signalScore should use it instead of categorical bucket."""
+        today = date.today().isoformat()
+        lead_high = {
+            "intentStrength": "High",
+            "signalScore": 95,
+            "intentDate": today,
+            "sicCode": "7011",
+        }
+        lead_lower = {
+            "intentStrength": "High",
+            "signalScore": 80,
+            "intentDate": today,
+            "sicCode": "7011",
+        }
+
+        result_high = calculate_intent_score(lead_high)
+        result_lower = calculate_intent_score(lead_lower)
+
+        assert result_high["signal_score"] == 95
+        assert result_lower["signal_score"] == 80
+        assert result_high["score"] > result_lower["score"]
+
+    def test_intent_score_falls_back_to_categorical(self):
+        """Lead without signalScore should use intentStrength bucket."""
+        today = date.today().isoformat()
+        lead = {
+            "intentStrength": "High",
+            "intentDate": today,
+            "sicCode": "7011",
+        }
+
+        result = calculate_intent_score(lead)
+
+        assert result["signal_score"] == 100  # High maps to 100
+
+    def test_intent_score_audience_bonus(self):
+        """audienceStrength A should score higher than D."""
+        today = date.today().isoformat()
+        lead_a = {
+            "intentStrength": "Medium",
+            "intentDate": today,
+            "sicCode": "7011",
+            "audienceStrength": "A",
+        }
+        lead_d = {
+            "intentStrength": "Medium",
+            "intentDate": today,
+            "sicCode": "7011",
+            "audienceStrength": "D",
+        }
+
+        result_a = calculate_intent_score(lead_a)
+        result_d = calculate_intent_score(lead_d)
+
+        assert result_a["score"] > result_d["score"]
+
+    def test_intent_score_employee_bonus(self):
+        """Company with 1000 employees gets higher bonus than 50."""
+        today = date.today().isoformat()
+        lead_large = {
+            "intentStrength": "Medium",
+            "intentDate": today,
+            "sicCode": "7011",
+            "employees": 1000,
+        }
+        lead_small = {
+            "intentStrength": "Medium",
+            "intentDate": today,
+            "sicCode": "7011",
+            "employees": 50,
+        }
+
+        result_large = calculate_intent_score(lead_large)
+        result_small = calculate_intent_score(lead_small)
+
+        assert result_large["score"] > result_small["score"]
+
+
 class TestGeographyScoring:
     """Tests for geography lead scoring."""
 
@@ -134,10 +214,11 @@ class TestGeographyScoring:
 
         result = calculate_geography_score(lead)
 
-        # 100*0.50 + 40*0.30 + 20*0.20 = 66
-        assert result["score"] == 66
+        # proximity=100*0.40 + onsite=40*0.25 + authority=40*0.15 + employee=20*0.20 = 60
+        assert result["score"] == 60
         assert result["proximity_score"] == 100  # Within 5 miles
         assert result["onsite_score"] == 40
+        assert result["authority_score"] == 40  # Default (no management level)
         assert result["employee_score"] == 20   # 500+ (worst bucket)
 
     def test_medium_distance_medium_company(self):
@@ -150,10 +231,11 @@ class TestGeographyScoring:
 
         result = calculate_geography_score(lead)
 
-        # 70*0.50 + 43*0.30 + 80*0.20 = 63.9 -> 64
-        assert result["score"] == 64
+        # proximity=70*0.40 + onsite=43*0.25 + authority=40*0.15 + employee=80*0.20 = 60.75 -> 61
+        assert result["score"] == 61
         assert result["proximity_score"] == 70  # 10-25 miles
         assert result["onsite_score"] == 43
+        assert result["authority_score"] == 40  # Default (no management level)
         assert result["employee_score"] == 80  # 100-500
 
     def test_far_small_company(self):
@@ -166,10 +248,11 @@ class TestGeographyScoring:
 
         result = calculate_geography_score(lead)
 
-        # 30*0.50 + 35*0.30 + 100*0.20 = 45.5 -> 46
-        assert result["score"] == 46
+        # proximity=30*0.40 + onsite=35*0.25 + authority=40*0.15 + employee=100*0.20 = 46.75 -> 47
+        assert result["score"] == 47
         assert result["proximity_score"] == 30  # 50-100 miles
         assert result["onsite_score"] == 35
+        assert result["authority_score"] == 40  # Default (no management level)
         assert result["employee_score"] == 100  # 50-100 (best bucket)
 
     def test_missing_distance(self):
@@ -266,6 +349,7 @@ class TestScoreLeadsList:
         assert "_score" in scored[0]
         assert "_proximity_score" in scored[0]
         assert "_onsite_score" in scored[0]
+        assert "_authority_score" in scored[0]
         assert "_employee_score" in scored[0]
         assert "_distance_miles" in scored[0]
 
@@ -370,18 +454,19 @@ class TestIntentContactScoring:
         }
 
     def test_score_inherits_company_score(self):
-        """Test that company intent score contributes 70% of final score."""
+        """Test that company intent score contributes 60% of final score."""
         contacts = [self._make_contact("C1", accuracy=95, mobile=True)]
         company_scores = self._make_company_scores([("C1", 100)])
 
         scored = score_intent_contacts(contacts, company_scores)
 
         assert len(scored) == 1
-        # Company: 100 * 0.70 = 70
-        # Accuracy (95+): 100 * 0.20 = 20
+        # Company: 100 * 0.60 = 60
+        # Authority: 40 * 0.15 = 6 (default, no management level)
+        # Accuracy (95+): 100 * 0.15 = 15
         # Phone (mobile): 100 * 0.10 = 10
-        # Total: 100
-        assert scored[0]["_score"] == 100
+        # Total: 91
+        assert scored[0]["_score"] == 91
         assert scored[0]["_company_intent_score"] == 100
 
     def test_score_accuracy_tiers(self):
@@ -446,20 +531,23 @@ class TestIntentContactScoring:
         scored = score_intent_contacts(contacts, company_scores)
 
         # Should use default company score of 50
+        # 50*0.60 + 40*0.15 + 100*0.15 + 100*0.10 = 30+6+15+10 = 61
         assert scored[0]["_company_intent_score"] == 50
-        assert scored[0]["_score"] > 0
+        assert scored[0]["_score"] == 61
 
     def test_score_breakdown_format(self):
         """Test human-readable score breakdown."""
         lead = {
             "_score": 85,
             "_company_intent_score": 90,
+            "_authority_score": 75,
             "_accuracy_score": 100,
             "_phone_score": 70,
         }
         breakdown = get_score_breakdown_intent_contact(lead)
         assert "85" in breakdown
         assert "90" in breakdown
+        assert "75" in breakdown
         assert "100" in breakdown
         assert "70" in breakdown
 
@@ -471,3 +559,93 @@ class TestIntentContactScoring:
         scored = score_intent_contacts(contacts, company_scores)
 
         assert scored[0]["_intent_topic"] == "Vending"
+
+    def test_authority_score_differentiates_contacts(self):
+        """Test that contacts at same company score differently by title/level."""
+        company_scores = self._make_company_scores([("C1", 80)])
+
+        director = self._make_contact("C1", accuracy=95, mobile=True)
+        director["managementLevel"] = "Director"
+        director["jobTitle"] = "Director of Facilities"
+
+        manager = self._make_contact("C1", accuracy=95, mobile=True)
+        manager["managementLevel"] = "Manager"
+        manager["jobTitle"] = "IT Manager"
+
+        scored_d = score_intent_contacts([director], company_scores)
+        scored_m = score_intent_contacts([manager], company_scores)
+
+        # Director + "facilities" keyword should score higher than Manager
+        assert scored_d[0]["_authority_score"] > scored_m[0]["_authority_score"]
+        assert scored_d[0]["_score"] > scored_m[0]["_score"]
+
+
+class TestAuthorityScore:
+    """Tests for authority score calculation."""
+
+    def test_c_level(self):
+        """Test C-Level exec gets highest score."""
+        contact = {"managementLevel": "C Level Exec", "jobTitle": "CEO"}
+        assert _calculate_authority_score(contact) == 100
+
+    def test_vp_level(self):
+        """Test VP gets 85."""
+        contact = {"managementLevel": "VP Level Exec", "jobTitle": "VP Operations"}
+        # VP (85) + "operations" keyword (+10) = 95
+        assert _calculate_authority_score(contact) == 95
+
+    def test_director(self):
+        """Test Director gets 75."""
+        contact = {"managementLevel": "Director", "jobTitle": "Director of Marketing"}
+        assert _calculate_authority_score(contact) == 75
+
+    def test_manager(self):
+        """Test Manager gets 60."""
+        contact = {"managementLevel": "Manager", "jobTitle": "Project Manager"}
+        assert _calculate_authority_score(contact) == 60
+
+    def test_non_manager(self):
+        """Test Non Manager gets 30."""
+        contact = {"managementLevel": "Non Manager", "jobTitle": "Analyst"}
+        assert _calculate_authority_score(contact) == 30
+
+    def test_title_keyword_bonus(self):
+        """Test title keyword adds +10 bonus."""
+        contact = {"managementLevel": "Manager", "jobTitle": "Facilities Manager"}
+        # Manager (60) + "facilities" keyword (+10) = 70
+        assert _calculate_authority_score(contact) == 70
+
+    def test_title_keyword_caps_at_100(self):
+        """Test title keyword bonus caps at 100."""
+        contact = {"managementLevel": "C Level Exec", "jobTitle": "Chief Facilities Officer"}
+        # C-Level (100) + keyword bonus = still 100 (capped)
+        assert _calculate_authority_score(contact) == 100
+
+    def test_no_management_level(self):
+        """Test missing management level uses default."""
+        contact = {"jobTitle": "Office Worker"}
+        assert _calculate_authority_score(contact) == 40  # default
+
+    def test_vending_keyword(self):
+        """Test 'vending' keyword in title gives bonus."""
+        contact = {"managementLevel": "Manager", "jobTitle": "Vending Services Manager"}
+        # Manager (60) + "vending" (+10) = 70
+        assert _calculate_authority_score(contact) == 70
+
+    def test_empty_contact(self):
+        """Test empty contact gets default score."""
+        assert _calculate_authority_score({}) == 40
+
+    def test_geography_authority_in_score(self):
+        """Test authority is included in geography scoring output."""
+        lead = {
+            "distance": 5.0,
+            "sicCode": "7011",
+            "employees": 100,
+            "managementLevel": "Director",
+            "jobTitle": "Director of Operations",
+        }
+        result = calculate_geography_score(lead)
+        # Director (75) + "operations" (+10) = 85
+        assert result["authority_score"] == 85
+        assert "authority_score" in result

@@ -79,7 +79,7 @@ with st.expander("Sync from Zoho CRM", expanded=False):
         else:
             st.caption("Never synced - will perform full sync")
 
-        col1, col2 = st.columns(2)
+        col1, col2, _spacer = st.columns([1, 1, 3])
 
         with col1:
             if ui.button(text="Sync Changes", variant="default", key="op_sync_btn"):
@@ -95,10 +95,17 @@ with st.expander("Sync from Zoho CRM", expanded=False):
                         if result['total_zoho'] == 0 and sync_type == 'incremental':
                             st.info("No changes since last sync")
                         else:
-                            st.success(
-                                f"{sync_type.title()} sync: {result['created']} created, "
-                                f"{result['updated']} updated, {result['linked']} linked"
-                            )
+                            msg = f"{sync_type.title()} sync: "
+                            parts = []
+                            if result['created']:
+                                parts.append(f"{result['created']} created")
+                            if result['updated']:
+                                parts.append(f"{result['updated']} updated")
+                            if result['linked']:
+                                parts.append(f"{result['linked']} linked")
+                            if result['skipped']:
+                                parts.append(f"{result['skipped']} skipped")
+                            st.success(msg + ", ".join(parts) if parts else msg + "no changes")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Sync failed: {e}")
@@ -122,10 +129,16 @@ with st.expander("Sync from Zoho CRM", expanded=False):
                         auth = ZohoAuth.from_streamlit_secrets(st.secrets)
                         result = run_sync(db, auth, force_full=True)
 
-                        st.success(
-                            f"Full sync: {result['created']} created, "
-                            f"{result['updated']} updated, {result['linked']} linked"
-                        )
+                        parts = []
+                        if result['created']:
+                            parts.append(f"{result['created']} created")
+                        if result['updated']:
+                            parts.append(f"{result['updated']} updated")
+                        if result['linked']:
+                            parts.append(f"{result['linked']} linked")
+                        if result['skipped']:
+                            parts.append(f"{result['skipped']} skipped")
+                        st.success(f"Full sync: " + (", ".join(parts) if parts else "no changes"))
                         st.rerun()
                     except Exception as e:
                         st.error(f"Sync failed: {e}")
