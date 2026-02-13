@@ -37,6 +37,7 @@ def build_vanillasoft_row(
     operator: dict | None = None,
     data_source: str = "ZoomInfo",
     batch_id: str | None = None,
+    contact_owner: str = "",
 ) -> dict:
     """
     Build a single VanillaSoft CSV row from a lead and optional operator.
@@ -45,6 +46,8 @@ def build_vanillasoft_row(
         lead: Lead data from ZoomInfo (with _score, _lead_source, etc.)
         operator: Optional operator dict with business metadata
         data_source: Data source name for List Source attribution (default: "ZoomInfo")
+        batch_id: Optional batch ID for export tracking
+        contact_owner: Call center agent email for Contact Owner (round-robin assigned)
 
     Returns:
         Dict with VanillaSoft column names as keys
@@ -62,6 +65,8 @@ def build_vanillasoft_row(
         row["Business"] = format_phone(row["Business"])
     if row.get("Mobile"):
         row["Mobile"] = format_phone(row["Mobile"])
+    if row.get("Home"):
+        row["Home"] = format_phone(row["Home"])
 
     # List Source attribution: "{DataSource} {Date}" per VSDP format
     today = datetime.now().strftime("%b %d %Y")  # e.g., "Jan 29 2026"
@@ -70,8 +75,8 @@ def build_vanillasoft_row(
     # Lead Source can hold workflow-specific tag (optional)
     row["Lead Source"] = ""
 
-    # Add priority as call priority
-    row["Call Priority"] = lead.get("_priority", "")
+    # Contact Owner: call center agent email (round-robin assigned by export_leads_to_csv)
+    row["Contact Owner"] = contact_owner
 
     # Build import notes with score info
     notes_parts = []
@@ -100,7 +105,6 @@ def build_vanillasoft_row(
         row["Operator Zip Code"] = operator.get("operator_zip") or ""
         row["Operator Website Address"] = operator.get("operator_website") or ""
         row["Team"] = operator.get("team") or ""
-        row["Contact Owner"] = operator.get("operator_name") or ""
 
     return row
 
@@ -111,6 +115,7 @@ def export_leads_to_csv(
     workflow_type: str = "export",
     data_source: str = "ZoomInfo",
     db=None,
+    agents: list[str] | None = None,
 ) -> tuple[str, str, str | None]:
     """
     Export leads to VanillaSoft CSV format.
@@ -121,6 +126,7 @@ def export_leads_to_csv(
         workflow_type: 'intent' or 'geography' for filename
         data_source: Data source name for List Source attribution
         db: Optional TursoDatabase for batch ID generation
+        agents: Call center agent emails for round-robin Contact Owner assignment
 
     Returns:
         Tuple of (csv_content, filename, batch_id). batch_id is None if db not provided.
@@ -131,8 +137,12 @@ def export_leads_to_csv(
     writer = csv.DictWriter(output, fieldnames=VANILLASOFT_COLUMNS)
     writer.writeheader()
 
-    for lead in leads:
-        row = build_vanillasoft_row(lead, operator, data_source, batch_id=batch_id)
+    for i, lead in enumerate(leads):
+        # Round-robin Contact Owner assignment
+        contact_owner = agents[i % len(agents)] if agents else ""
+        row = build_vanillasoft_row(
+            lead, operator, data_source, batch_id=batch_id, contact_owner=contact_owner
+        )
         writer.writerow(row)
 
     csv_content = output.getvalue()

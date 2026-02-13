@@ -75,11 +75,11 @@ class TestBuildVanillasoftRow:
         row = build_vanillasoft_row(lead)
         assert row["Lead Source"] == ""
 
-    def test_priority_as_call_priority(self):
-        """Test that priority maps to Call Priority."""
+    def test_call_priority_empty(self):
+        """Test that Call Priority is left empty (VanillaSoft handles routing)."""
         lead = {"companyName": "Test Co", "_priority": "High"}
         row = build_vanillasoft_row(lead)
-        assert row["Call Priority"] == "High"
+        assert row["Call Priority"] == ""
 
     def test_import_notes_with_score(self):
         """Test import notes includes score info."""
@@ -126,7 +126,8 @@ class TestBuildVanillasoftRow:
         assert row["Operator Zip Code"] == "75202"
         assert row["Operator Website Address"] == "https://abc.com"
         assert row["Team"] == "North Texas"
-        assert row["Contact Owner"] == "John Smith"
+        # Contact Owner is set by round-robin, not from operator
+        assert row["Contact Owner"] == ""
 
     def test_all_columns_present(self):
         """Test that all VanillaSoft columns are in output."""
@@ -146,6 +147,20 @@ class TestBuildVanillasoftRow:
         row = build_vanillasoft_row(lead)
         assert row["Company"] == "Test"
         assert row["Business"] == ""
+
+    def test_contact_owner_from_parameter(self):
+        """Test that Contact Owner is set from contact_owner param, not operator."""
+        lead = {"companyName": "Test Co"}
+        operator = {"operator_name": "John Smith"}
+        row = build_vanillasoft_row(lead, operator, contact_owner="agent@hlmii.com")
+        assert row["Contact Owner"] == "agent@hlmii.com"
+        assert row["Operator Name"] == "John Smith"
+
+    def test_home_phone_mapping(self):
+        """Test that companyHQPhone maps to Home column."""
+        lead = {"companyName": "Test Co", "companyHQPhone": "2125551234"}
+        row = build_vanillasoft_row(lead)
+        assert row["Home"] == "(212) 555-1234"
 
     def test_operator_with_none_fields(self):
         """Test operator with None fields."""
@@ -249,6 +264,47 @@ class TestExportLeadsToCsv:
 
         today = datetime.now().strftime("%b %d %Y")
         assert rows[0]["List Source"] == f"ZoomInfo {today}"
+
+
+class TestContactOwnerRoundRobin:
+    """Tests for round-robin Contact Owner assignment in export."""
+
+    def test_round_robin_assignment(self):
+        """Test that agents are assigned evenly across leads."""
+        leads = [
+            {"companyName": "A"},
+            {"companyName": "B"},
+            {"companyName": "C"},
+            {"companyName": "D"},
+            {"companyName": "E"},
+        ]
+        agents = ["agent1@hlmii.com", "agent2@hlmii.com"]
+
+        csv_content, _, _ = export_leads_to_csv(leads, agents=agents)
+        reader = csv.DictReader(io.StringIO(csv_content))
+        rows = list(reader)
+
+        assert rows[0]["Contact Owner"] == "agent1@hlmii.com"
+        assert rows[1]["Contact Owner"] == "agent2@hlmii.com"
+        assert rows[2]["Contact Owner"] == "agent1@hlmii.com"
+        assert rows[3]["Contact Owner"] == "agent2@hlmii.com"
+        assert rows[4]["Contact Owner"] == "agent1@hlmii.com"
+
+    def test_no_agents_leaves_empty(self):
+        """Test that Contact Owner is empty when no agents provided."""
+        leads = [{"companyName": "A"}]
+        csv_content, _, _ = export_leads_to_csv(leads, agents=None)
+        reader = csv.DictReader(io.StringIO(csv_content))
+        rows = list(reader)
+        assert rows[0]["Contact Owner"] == ""
+
+    def test_single_agent_all_rows(self):
+        """Test that single agent gets all rows."""
+        leads = [{"companyName": "A"}, {"companyName": "B"}]
+        csv_content, _, _ = export_leads_to_csv(leads, agents=["solo@hlmii.com"])
+        reader = csv.DictReader(io.StringIO(csv_content))
+        rows = list(reader)
+        assert all(row["Contact Owner"] == "solo@hlmii.com" for row in rows)
 
 
 class TestGetExportSummary:

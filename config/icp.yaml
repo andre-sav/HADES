@@ -169,6 +169,15 @@ cache:
   ttl_days: 7
   enabled: true
 
+# Call Center Agents (round-robin Contact Owner assignment)
+# These emails are assigned to records evenly across each export batch
+call_center_agents:
+  - "courtney@hlmii.com"
+  - "caitlyn@hlmii.com"
+  - "caroline@hlmii.com"
+  - "dodie@hlmii.com"
+  - "chelsie@hlmii.com"
+
 # Intent Topics
 intent_topics:
   primary:

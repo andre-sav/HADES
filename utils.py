@@ -35,6 +35,12 @@ def get_scoring_weights(workflow_type: str) -> dict:
     return config.get("scoring", {}).get(workflow_type, {})
 
 
+def get_call_center_agents() -> list[str]:
+    """Get call center agent emails for round-robin Contact Owner assignment."""
+    config = load_config()
+    return config.get("call_center_agents", [])
+
+
 def get_signal_strength_score(strength: str) -> int:
     """Get score for intent signal strength."""
     config = load_config()
@@ -411,6 +417,8 @@ ZOOMINFO_TO_VANILLASOFT = {
     "city": "City",
     "state": "State",
     "zipCode": "ZIP code",
+    # Company HQ phone → Home (per VSDP mapping)
+    "companyHQPhone": "Home",
     # Fallback mappings (some APIs use different names)
     "phone": "Business",           # Fallback for directPhone
     "employees": "Number of Employees",  # Fallback for employeeCount

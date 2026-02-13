@@ -10,6 +10,7 @@ from datetime import datetime
 
 from turso_db import get_database
 from export import export_leads_to_csv, get_export_summary
+from utils import get_call_center_agents
 from ui_components import (
     inject_base_styles,
     page_header,
@@ -205,11 +206,13 @@ else:
 st.markdown("---")
 
 # Generate
+agents = get_call_center_agents()
 csv_content, filename, batch_id = export_leads_to_csv(
     leads_to_export,
     operator=selected_operator,
     workflow_type=workflow_type,
     db=db,
+    agents=agents,
 )
 
 # Post-export display (if already exported)
