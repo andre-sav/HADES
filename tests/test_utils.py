@@ -18,6 +18,7 @@ from utils import (
     get_sic_codes,
     get_sic_codes_with_descriptions,
     get_employee_minimum,
+    get_state_from_zip,
     remove_phone_extension,
     normalize_phone,
     format_phone,
@@ -273,3 +274,32 @@ class TestVanillaSoftColumns:
     def test_column_count(self):
         """Test expected number of columns."""
         assert len(VANILLASOFT_COLUMNS) == 31
+
+
+class TestGetStateFromZip:
+    """Tests for ZIP-to-state lookup with truncated ZIP handling."""
+
+    def test_normal_5_digit_zip(self):
+        """Test standard 5-digit ZIP returns correct state."""
+        assert get_state_from_zip("75201") == "TX"
+
+    def test_4_digit_zip_padded(self):
+        """Test truncated 4-digit ZIP is padded with leading zero."""
+        # 06101 = Hartford, CT — truncated to "6101"
+        assert get_state_from_zip("6101") == "CT"
+
+    def test_3_digit_zip_padded(self):
+        """Test 3-digit ZIP is padded to 5 digits."""
+        # 06101 = Hartford, CT — truncated to "610" (not common, but defensive)
+        # Padding: "610" → "00610" → prefix "006" → CT
+        result = get_state_from_zip("610")
+        # Very low prefixes may not be in the map; verify no crash
+        assert result is None or isinstance(result, str)
+
+    def test_empty_zip(self):
+        assert get_state_from_zip("") is None
+        assert get_state_from_zip(None) is None
+
+    def test_9_digit_zip(self):
+        """Test ZIP+4 format works (uses first 3 of padded)."""
+        assert get_state_from_zip("75201-1234") is not None

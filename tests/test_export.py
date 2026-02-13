@@ -298,6 +298,15 @@ class TestContactOwnerRoundRobin:
         rows = list(reader)
         assert rows[0]["Contact Owner"] == ""
 
+    def test_empty_agents_list_no_crash(self):
+        """Test that empty agents list [] doesn't crash with ZeroDivisionError."""
+        leads = [{"companyName": "A"}, {"companyName": "B"}]
+        csv_content, _, _ = export_leads_to_csv(leads, agents=[])
+        reader = csv.DictReader(io.StringIO(csv_content))
+        rows = list(reader)
+        assert rows[0]["Contact Owner"] == ""
+        assert rows[1]["Contact Owner"] == ""
+
     def test_single_agent_all_rows(self):
         """Test that single agent gets all rows."""
         leads = [{"companyName": "A"}, {"companyName": "B"}]
@@ -391,7 +400,8 @@ class TestGenerateBatchId:
     def test_first_batch_of_day(self):
         """Test first batch ID generation for a day."""
         mock_db = MagicMock()
-        mock_db.execute.return_value = []  # No existing seq
+        # Atomic upsert writes first, then reads back the value
+        mock_db.execute.return_value = [("1",)]
 
         batch_id = generate_batch_id(mock_db)
 
@@ -402,7 +412,8 @@ class TestGenerateBatchId:
     def test_sequential_batch_ids(self):
         """Test that batch IDs increment correctly."""
         mock_db = MagicMock()
-        mock_db.execute.return_value = [("3",)]  # Existing seq = 3
+        # Atomic upsert already incremented; read returns new value
+        mock_db.execute.return_value = [("4",)]
 
         batch_id = generate_batch_id(mock_db)
 
@@ -413,7 +424,7 @@ class TestGenerateBatchId:
         import re
 
         mock_db = MagicMock()
-        mock_db.execute.return_value = []
+        mock_db.execute.return_value = [("1",)]
 
         batch_id = generate_batch_id(mock_db)
 
@@ -462,7 +473,7 @@ class TestExportWithBatchId:
     def test_batch_id_with_db(self):
         """Test that batch_id is generated when db is provided."""
         mock_db = MagicMock()
-        mock_db.execute.return_value = []
+        mock_db.execute.return_value = [("1",)]
 
         leads = [{"companyName": "Test"}]
         csv_content, filename, batch_id = export_leads_to_csv(leads, db=mock_db)
@@ -473,7 +484,7 @@ class TestExportWithBatchId:
     def test_batch_id_in_csv_content(self):
         """Test that batch_id appears in CSV Import Notes."""
         mock_db = MagicMock()
-        mock_db.execute.return_value = []
+        mock_db.execute.return_value = [("1",)]
 
         leads = [{"companyName": "Test", "_score": 90}]
         csv_content, _, batch_id = export_leads_to_csv(leads, db=mock_db)

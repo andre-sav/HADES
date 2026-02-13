@@ -12,22 +12,24 @@ from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT, format_phone
 def generate_batch_id(db) -> str:
     """Generate a sequential batch ID for this export: HADES-YYYYMMDD-NNN.
 
-    Uses sync_metadata table to track today's sequence number.
+    Uses sync_metadata table with atomic upsert to avoid race conditions.
     """
     today = datetime.now().strftime("%Y%m%d")
     seq_key = f"hades_batch_seq_{today}"
 
+    # Atomic upsert: insert 1 or increment existing value in a single statement
+    db.execute_write(
+        """INSERT INTO sync_metadata (key, value, updated_at)
+           VALUES (?, '1', CURRENT_TIMESTAMP)
+           ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT),
+               updated_at = CURRENT_TIMESTAMP""",
+        (seq_key,),
+    )
+
     rows = db.execute(
         "SELECT value FROM sync_metadata WHERE key = ?", (seq_key,)
     )
-    seq = int(rows[0][0]) + 1 if rows else 1
-
-    db.execute_write(
-        """INSERT INTO sync_metadata (key, value, updated_at)
-           VALUES (?, ?, CURRENT_TIMESTAMP)
-           ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP""",
-        (seq_key, str(seq), str(seq)),
-    )
+    seq = int(rows[0][0])
 
     return f"HADES-{today}-{seq:03d}"
 
@@ -138,8 +140,8 @@ def export_leads_to_csv(
     writer.writeheader()
 
     for i, lead in enumerate(leads):
-        # Round-robin Contact Owner assignment
-        contact_owner = agents[i % len(agents)] if agents else ""
+        # Round-robin Contact Owner assignment (guard against empty list)
+        contact_owner = agents[i % len(agents)] if agents and len(agents) > 0 else ""
         row = build_vanillasoft_row(
             lead, operator, data_source, batch_id=batch_id, contact_owner=contact_owner
         )

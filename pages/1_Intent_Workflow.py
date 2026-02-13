@@ -766,7 +766,7 @@ if (
 
                     params = ContactQueryParams(
                         company_ids=numeric_ids,
-                        management_levels=intent_mgmt_levels or ["Manager", "Director", "VP Level Exec"],
+                        management_levels=intent_mgmt_levels if intent_mgmt_levels is not None else ["Manager", "Director", "VP Level Exec"],
                         contact_accuracy_score_min=intent_accuracy_min,
                         required_fields=intent_phone_fields or ["mobilePhone", "directPhone", "phone"],
                         required_fields_operator="or",

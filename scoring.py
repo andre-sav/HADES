@@ -158,7 +158,7 @@ def calculate_geography_score(lead: dict, target_zip: str = None) -> dict:
     else:
         # Default: assume ~15mi (mid-range tier) when distance unknown
         proximity_score = get_proximity_score(15.0)
-        distance_miles = None
+        distance_miles = 15.0
 
     # On-site likelihood score
     sic_code = lead.get("sicCode", "")

@@ -256,7 +256,7 @@ class TestGeographyScoring:
         assert result["employee_score"] == 100  # 50-100 (best bucket)
 
     def test_missing_distance(self):
-        """Test handling of missing distance."""
+        """Test handling of missing distance defaults to 15mi."""
         lead = {
             "sicCode": "7011",
             "employees": 100,
@@ -264,9 +264,10 @@ class TestGeographyScoring:
 
         result = calculate_geography_score(lead)
 
-        # Should use default proximity score
+        # Should use default proximity score (15mi → 70)
         assert result["proximity_score"] == 70
-        assert result["distance_miles"] is None
+        # distance_miles should default to 15.0, not None (avoids "Distance: Nonemi" in export)
+        assert result["distance_miles"] == 15.0
 
     def test_employee_count_variations(self):
         """Test different employee count field names."""

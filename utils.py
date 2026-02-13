@@ -303,7 +303,12 @@ def get_state_from_zip(zip_code: str) -> str | None:
     Returns:
         2-letter state code or None if not found
     """
-    if not zip_code or len(zip_code) < 3:
+    if not zip_code:
+        return None
+
+    # Pad truncated ZIPs (e.g., "501" → "00501" for Vermont)
+    zip_code = str(zip_code).strip().zfill(5)
+    if len(zip_code) < 3:
         return None
 
     prefix = zip_code[:3]

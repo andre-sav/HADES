@@ -203,10 +203,13 @@ elif active_tab == "Calibration Report":
                 if key in st.session_state.cal_selected:
                     selected_updates.append(comp)
 
-            apply_calibration(selected_updates, str(CONFIG_PATH), db=db)
-            st.session_state.cal_selected = set()
-            st.success(f"Applied {len(selected_updates)} score update(s) to icp.yaml")
-            st.rerun()
+            try:
+                apply_calibration(selected_updates, str(CONFIG_PATH), db=db)
+                st.session_state.cal_selected = set()
+                st.success(f"Applied {len(selected_updates)} score update(s) to icp.yaml")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to apply calibration: {e}")
     else:
         st.caption("Select scores above to apply updates")
 
