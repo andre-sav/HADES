@@ -116,7 +116,7 @@ defaults = {
     "geo_operator": None,
     "geo_results": None,
     "geo_query_params": None,
-    "geo_mode": "manual",  # Default to manual for two-step workflow
+    "geo_mode": "autopilot",  # Match Intent workflow default
     "geo_test_mode": False,  # Test mode: skip actual enrichment, use mock data
     # Step 1: Search (preview)
     "geo_preview_contacts": None,  # Preview contacts from search (no credits used)
@@ -212,11 +212,11 @@ else:
 # =============================================================================
 mode_col1, mode_col2, mode_col3 = st.columns([1, 2, 1])
 with mode_col1:
-    _GEO_MODE_MAP = {"Manual Review": "manual", "Autopilot": "autopilot"}
+    _GEO_MODE_MAP = {"Autopilot": "autopilot", "Manual Review": "manual"}
     _GEO_MODE_REVERSE = {v: k for k, v in _GEO_MODE_MAP.items()}
     _geo_mode_tab = ui.tabs(
         options=list(_GEO_MODE_MAP.keys()),
-        default_value=_GEO_MODE_REVERSE.get(st.session_state.geo_mode, "Manual Review"),
+        default_value=_GEO_MODE_REVERSE.get(st.session_state.geo_mode, "Autopilot"),
         key="geo_mode_tabs",
     )
     st.session_state.geo_mode = _GEO_MODE_MAP.get(_geo_mode_tab, st.session_state.geo_mode)
