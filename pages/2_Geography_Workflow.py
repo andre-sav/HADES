@@ -1309,11 +1309,11 @@ if (
         selected_count = len(st.session_state.geo_selected_contacts)
         if st.session_state.geo_test_mode:
             # Test mode: skip dialog
-            if ui.button(text=f"Enrich Selected ({selected_count} contacts)", variant="default", key="geo_enrich_test_btn"):
+            if st.button(f"Enrich Selected ({selected_count} contacts)", type="primary", use_container_width=True, key="geo_enrich_test_btn"):
                 st.session_state.geo_selection_confirmed = True
                 st.rerun()
         else:
-            if ui.button(text=f"Enrich Selected ({selected_count} contacts)", variant="default", key="geo_enrich_btn"):
+            if st.button(f"Enrich Selected ({selected_count} contacts)", type="primary", use_container_width=True, key="geo_enrich_btn"):
                 confirm_geo_enrich(selected_count)
 
     with confirm_col2:
