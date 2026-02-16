@@ -9,6 +9,7 @@ from pathlib import Path
 
 from turso_db import get_database
 from calibration import compute_conversion_rates, compare_to_current, apply_calibration
+from utils import SIC_CODE_DESCRIPTIONS
 from ui_components import (
     inject_base_styles,
     page_header,
@@ -64,29 +65,34 @@ if active_tab == "Current Weights":
     with col1:
         metric_card("Last Calibration", last_cal)
     with col2:
-        sic_count = len(config.get("onsite_likelihood", {}).get("sic_scores", {}))
-        metric_card("SIC Scores", sic_count)
+        all_sics = config.get("hard_filters", {}).get("sic_codes", [])
+        metric_card("ICP SIC Codes", len(all_sics))
     with col3:
         emp_tiers = len(config.get("employee_scale", []))
         metric_card("Employee Tiers", emp_tiers)
 
-    # SIC Scores table
+    # SIC Scores table — show all 25 ICP codes, not just calibrated ones
     st.markdown("---")
     st.caption("On-site Likelihood · SIC Scores")
 
     sic_scores = config.get("onsite_likelihood", {}).get("sic_scores", {})
     sic_default = config.get("onsite_likelihood", {}).get("default", 40)
+    all_sics = config.get("hard_filters", {}).get("sic_codes", [])
 
     sic_rows = []
-    for sic in sorted(sic_scores.keys()):
-        sic_rows.append({"SIC": sic, "Score": sic_scores[sic]})
-    sic_rows.append({"SIC": "default", "Score": sic_default})
+    for sic in sorted(all_sics):
+        score = sic_scores.get(sic, sic_default)
+        source = "calibrated" if sic in sic_scores else "default"
+        desc = SIC_CODE_DESCRIPTIONS.get(sic, "Unknown")
+        sic_rows.append({"SIC": sic, "Industry": desc, "Score": score, "Source": source})
 
     styled_table(
         rows=sic_rows,
         columns=[
             {"key": "SIC", "label": "SIC Code"},
+            {"key": "Industry", "label": "Industry"},
             {"key": "Score", "label": "Score", "align": "right", "mono": True},
+            {"key": "Source", "label": "Source"},
         ],
     )
 
