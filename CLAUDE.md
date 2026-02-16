@@ -9,7 +9,7 @@ Streamlit UI → ZoomInfo API → Scoring Engine → Turso DB → CSV Export
 ```
 
 **Key Components:**
-- **Turso (libsql)** - Cloud SQLite for persistence (operators, cache, usage tracking)
+- **Turso (libsql)** - Cloud SQLite for persistence (operators, cache, usage tracking, staged exports)
 - **ZoomInfo API** - OAuth client with retry logic, rate limiting, Contact Search, Intent Search (v2 JSON:API)
 - **Scoring Engine** - Weighted scoring based on signal strength, proximity, on-site likelihood
 - **Cost Tracker** - Budget controls with weekly caps and alerts
@@ -54,7 +54,7 @@ HADES/
 │   ├── 4_CSV_Export.py           # Export with operator metadata
 │   ├── 5_Usage_Dashboard.py      # Credit usage monitoring
 │   └── 6_Executive_Summary.py    # MTD metrics and trends
-├── tests/                # 288 tests (pytest)
+├── tests/                # 438 tests (pytest)
 └── docs/
     └── stories/          # User stories with acceptance criteria
 ```
@@ -232,6 +232,8 @@ states = get_states_from_zips(zips)
 ## Patterns & Conventions
 
 - `@st.cache_resource` for database/client singletons
+- **Schema is self-creating** — `init_schema()` runs `CREATE TABLE IF NOT EXISTS` on every app start. New tables need no manual SQL or migration scripts.
+- **Streamlit rerun guard** — When persisting data in page scripts, use a session state flag (e.g., `intent_leads_staged`) to prevent duplicate DB inserts on Streamlit reruns.
 - Session state keys prefixed by workflow: `intent_results`, `geo_results`
 - Lead dicts use `_` prefix for computed fields: `_score`, `_priority`, `_lead_source`
 - VanillaSoft export has 31 columns (30 standard + Import Notes)
@@ -243,7 +245,7 @@ states = get_states_from_zips(zips)
 
 ## Status
 
-- **288 tests passing** (all tests green)
+- **438 tests passing** (all tests green)
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
 - ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).
 - ✅ **Target Contacts Expansion** - Implemented 2026-02-03
@@ -265,7 +267,10 @@ When working with Zoho APIs: the CRM module name is "Deals" (not "Potentials"), 
 
 ### ZoomInfo
 
-All search params must be comma-separated strings, not arrays. Assume data is messy — handle truncated ZIPs (4-digit and 9-digit), missing fields, HTML entities in text, and null values with defensive parsing.
+All search params must be comma-separated strings, not arrays. Assume data is messy — handle truncated ZIPs (4-digit and 9-digit), missing fields, HTML entities in text, and null values with defensive parsing. Known messy patterns:
+- **Mixed ID types** — `companyId`/`personId` may be int or string across responses. Always coerce to `str()` before using as dict keys.
+- **Numeric fields as strings** — `contactAccuracyScore` can be `"95%"`, `distance` can be `"5.0 miles"`. Always wrap `float()`/`int()` in try/except with regex fallback.
+- **ZIP+4 variants** — `"75201-1234"`, `"75201 1234"`, `"752011234"` all appear. Split/truncate to 5 digits before lookup.
 
 ## Next Steps
 
@@ -275,4 +280,4 @@ All search params must be comma-separated strings, not arrays. Assume data is me
 4. **Production test UX** - Verify shadcn components, action bar, export validation with real data
 
 ---
-*Last updated: 2026-02-10*
+*Last updated: 2026-02-16*
