@@ -153,8 +153,14 @@ def calculate_geography_score(lead: dict, target_zip: str = None) -> dict:
     # Proximity score
     distance = lead.get("distance")
     if distance is not None:
-        proximity_score = get_proximity_score(float(distance))
-        distance_miles = float(distance)
+        try:
+            distance_miles = float(distance)
+        except (ValueError, TypeError):
+            # Handle non-numeric strings like "5.0 miles"
+            import re
+            nums = re.findall(r"[\d.]+", str(distance))
+            distance_miles = float(nums[0]) if nums else 15.0
+        proximity_score = get_proximity_score(distance_miles)
     else:
         # Default: assume ~15mi (mid-range tier) when distance unknown
         proximity_score = get_proximity_score(15.0)
@@ -347,7 +353,14 @@ def score_intent_contacts(
         company_intent_score = company_data.get("_score", 50)
 
         # Accuracy component (0-100)
-        accuracy = contact.get("contactAccuracyScore", 0) or 0
+        raw_accuracy = contact.get("contactAccuracyScore", 0) or 0
+        try:
+            accuracy = int(raw_accuracy)
+        except (ValueError, TypeError):
+            # Handle strings like "95%" or "N/A"
+            import re
+            nums = re.findall(r"\d+", str(raw_accuracy))
+            accuracy = int(nums[0]) if nums else 0
         if accuracy >= 95:
             accuracy_score = 100
         elif accuracy >= 85:

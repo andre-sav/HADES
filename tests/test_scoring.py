@@ -650,3 +650,111 @@ class TestAuthorityScore:
         # Director (75) + "operations" (+10) = 85
         assert result["authority_score"] == 85
         assert "authority_score" in result
+
+
+class TestMessyDataEdgeCases:
+    """Edge case tests for messy real-world API data."""
+
+    # --- Distance field edge cases ---
+
+    def test_distance_as_string_with_units(self):
+        """Distance like '5.0 miles' should not crash."""
+        lead = {"distance": "5.0 miles", "sicCode": "7011", "employees": 100}
+        result = calculate_geography_score(lead)
+        assert result["distance_miles"] == 5.0
+        assert result["proximity_score"] > 0
+
+    def test_distance_as_string_number(self):
+        """Distance as string '12.5' should parse correctly."""
+        lead = {"distance": "12.5", "sicCode": "7011", "employees": 100}
+        result = calculate_geography_score(lead)
+        assert result["distance_miles"] == 12.5
+
+    def test_distance_as_empty_string(self):
+        """Empty string distance should use default."""
+        lead = {"distance": "", "sicCode": "7011", "employees": 100}
+        result = calculate_geography_score(lead)
+        # Empty string is falsy, so distance is None path
+        assert result["distance_miles"] == 15.0
+
+    def test_distance_as_non_numeric_string(self):
+        """Non-numeric distance like 'N/A' should use default."""
+        lead = {"distance": "N/A", "sicCode": "7011", "employees": 100}
+        result = calculate_geography_score(lead)
+        assert result["distance_miles"] == 15.0
+
+    def test_distance_negative(self):
+        """Negative distance should still calculate (proximity handles it)."""
+        lead = {"distance": -5.0, "sicCode": "7011", "employees": 100}
+        result = calculate_geography_score(lead)
+        assert "proximity_score" in result
+
+    # --- Employee count edge cases ---
+
+    def test_employee_count_with_plus(self):
+        """Employee count '500+' should fall back to default."""
+        lead = {"distance": 5.0, "sicCode": "7011", "employees": "500+"}
+        result = calculate_geography_score(lead)
+        # try/except catches ValueError, defaults to 50
+        assert "employee_score" in result
+
+    def test_employee_count_range_string(self):
+        """Employee count '100-200' should fall back to default."""
+        lead = {"distance": 5.0, "sicCode": "7011", "employees": "100-200"}
+        result = calculate_geography_score(lead)
+        assert "employee_score" in result
+
+    def test_employee_count_html_entity(self):
+        """Employee count with HTML entities should fall back."""
+        lead = {"distance": 5.0, "sicCode": "7011", "employees": "&lt;50"}
+        result = calculate_geography_score(lead)
+        assert "employee_score" in result
+
+    # --- Accuracy score edge cases ---
+
+    def test_accuracy_as_percent_string(self):
+        """Accuracy '95%' should parse to 95."""
+        contact = {"contactAccuracyScore": "95%", "companyId": "1"}
+        company_scores = {"1": {"_score": 80}}
+        results = score_intent_contacts([contact], company_scores)
+        assert len(results) == 1
+        # 95% → 95 → high tier (100)
+        assert results[0]["_accuracy_score"] == 100
+
+    def test_accuracy_as_na_string(self):
+        """Accuracy 'N/A' should default to 0 → low tier."""
+        contact = {"contactAccuracyScore": "N/A", "companyId": "1"}
+        company_scores = {"1": {"_score": 80}}
+        results = score_intent_contacts([contact], company_scores)
+        assert len(results) == 1
+        assert results[0]["_accuracy_score"] == 40  # low tier
+
+    def test_accuracy_none(self):
+        """Accuracy None should default to 0."""
+        contact = {"contactAccuracyScore": None, "companyId": "1"}
+        company_scores = {"1": {"_score": 80}}
+        results = score_intent_contacts([contact], company_scores)
+        assert len(results) == 1
+
+    # --- Date parsing edge cases ---
+
+    def test_truncated_iso_date(self):
+        """Truncated ISO date '2025-02-' should return 999."""
+        assert _calculate_age_days("2025-02-") == 999
+
+    def test_date_with_milliseconds(self):
+        """ISO date with milliseconds should parse."""
+        result = _calculate_age_days("2026-01-15T10:30:00.123Z")
+        assert result >= 0
+
+    def test_date_empty_string(self):
+        """Empty string date returns 999."""
+        assert _calculate_age_days("") == 999
+
+    def test_date_whitespace_only(self):
+        """Whitespace-only date returns 999."""
+        assert _calculate_age_days("   ") == 999
+
+    def test_future_date_clamped(self):
+        """Future date returns 0 (not negative)."""
+        assert _calculate_age_days("2099-01-01") == 0

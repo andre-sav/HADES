@@ -122,6 +122,12 @@ def get_cache_config() -> dict:
     return config.get("cache", {"ttl_days": 7, "enabled": True})
 
 
+def get_automation_config(workflow_type: str) -> dict:
+    """Get automation config for a workflow type ('intent')."""
+    config = load_config()
+    return config.get("automation", {}).get(workflow_type, {})
+
+
 def get_intent_topics() -> dict:
     """Get available intent topics."""
     config = load_config()
@@ -306,12 +312,18 @@ def get_state_from_zip(zip_code: str) -> str | None:
     if not zip_code:
         return None
 
+    # Clean: strip whitespace, take digits only for ZIP+4 variants
+    # Handles: "75201", "75201-1234", "75201 1234", "752011234", "0501"
+    cleaned = str(zip_code).strip().split("-")[0].split(" ")[0]
+    if len(cleaned) > 5:
+        # 9-digit ZIP+4 without separator: take first 5
+        cleaned = cleaned[:5]
     # Pad truncated ZIPs (e.g., "501" → "00501" for Vermont)
-    zip_code = str(zip_code).strip().zfill(5)
-    if len(zip_code) < 3:
+    cleaned = cleaned.zfill(5)
+    if len(cleaned) < 3:
         return None
 
-    prefix = zip_code[:3]
+    prefix = cleaned[:3]
     return ZIP_PREFIX_TO_STATE.get(prefix)
 
 

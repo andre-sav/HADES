@@ -303,3 +303,20 @@ class TestGetStateFromZip:
     def test_9_digit_zip(self):
         """Test ZIP+4 format works (uses first 3 of padded)."""
         assert get_state_from_zip("75201-1234") is not None
+
+    def test_zip_plus4_with_space(self):
+        """Test ZIP+4 with space separator: '75201 1234'."""
+        assert get_state_from_zip("75201 1234") == "TX"
+
+    def test_9_digit_no_separator(self):
+        """Test 9-digit ZIP without separator: '752011234'."""
+        assert get_state_from_zip("752011234") == "TX"
+
+    def test_zip_with_leading_trailing_spaces(self):
+        """Test ZIP with extra whitespace."""
+        assert get_state_from_zip("  75201  ") == "TX"
+
+    def test_zip_integer_input(self):
+        """Test ZIP passed as integer (truncates leading zeros)."""
+        # 6101 as int → should pad to 06101 → CT
+        assert get_state_from_zip(6101) == "CT"

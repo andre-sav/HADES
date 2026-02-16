@@ -116,8 +116,10 @@ def build_contacts_by_company(contacts_list: list) -> dict:
     contacts_by_company = {}
 
     for contact in contacts_list:
-        company_id = contact.get("companyId") or contact.get("company", {}).get("id")
+        raw_cid = contact.get("companyId") or contact.get("company", {}).get("id")
         company_name = contact.get("companyName") or contact.get("company", {}).get("name", "Unknown")
+        # Normalize to string — API may return int or string IDs
+        company_id = str(raw_cid) if raw_cid else None
         if company_id:
             if company_id not in contacts_by_company:
                 contacts_by_company[company_id] = {
@@ -125,7 +127,8 @@ def build_contacts_by_company(contacts_list: list) -> dict:
                     "contacts": [],
                     "_seen_person_ids": set(),
                 }
-            person_id = contact.get("personId") or contact.get("id")
+            raw_pid = contact.get("personId") or contact.get("id")
+            person_id = str(raw_pid) if raw_pid else None
             seen = contacts_by_company[company_id]["_seen_person_ids"]
             if person_id and person_id in seen:
                 continue

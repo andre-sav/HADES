@@ -551,3 +551,47 @@ class TestCombinedSearchIntegration:
         # Should only have 1 unique contact despite appearing in both searches
         assert len(result["contacts"]) == 1
         assert result["contacts"][0]["_location_type"] == "PersonAndHQ"
+
+
+class TestMessyIdEdgeCases:
+    """Edge cases for mixed int/string IDs from ZoomInfo API."""
+
+    def test_mixed_int_string_company_ids(self):
+        """Company ID 123 (int) and '123' (str) should group together."""
+        contacts = [
+            {"personId": "p1", "companyId": 123, "companyName": "Acme", "contactAccuracyScore": 95},
+            {"personId": "p2", "companyId": "123", "companyName": "Acme", "contactAccuracyScore": 90},
+        ]
+        result = build_contacts_by_company(contacts)
+        # Both should be under the same company key
+        assert len(result) == 1
+        company_key = list(result.keys())[0]
+        assert len(result[company_key]["contacts"]) == 2
+
+    def test_mixed_int_string_person_ids(self):
+        """Person ID 456 (int) and '456' (str) should deduplicate."""
+        contacts = [
+            {"personId": 456, "companyId": "c1", "companyName": "Acme", "contactAccuracyScore": 95},
+            {"personId": "456", "companyId": "c1", "companyName": "Acme", "contactAccuracyScore": 90},
+        ]
+        result = build_contacts_by_company(contacts)
+        assert len(result["c1"]["contacts"]) == 1
+
+    def test_none_company_id_skipped(self):
+        """Contacts with None company ID should be skipped."""
+        contacts = [
+            {"personId": "p1", "companyId": None, "companyName": "No ID Corp", "contactAccuracyScore": 95},
+            {"personId": "p2", "companyId": "c1", "companyName": "Valid Corp", "contactAccuracyScore": 90},
+        ]
+        result = build_contacts_by_company(contacts)
+        assert len(result) == 1
+        assert "c1" in result
+
+    def test_nested_company_id_as_int(self):
+        """Nested company.id as integer should still work."""
+        contacts = [
+            {"personId": "p1", "company": {"id": 789, "name": "Nested Corp"}, "contactAccuracyScore": 95},
+            {"personId": "p2", "company": {"id": "789", "name": "Nested Corp"}, "contactAccuracyScore": 90},
+        ]
+        result = build_contacts_by_company(contacts)
+        assert len(result) == 1

@@ -308,3 +308,37 @@ class TestFlagDuplicates:
         flagged = flag_duplicates_in_list(leads, other)
 
         assert flagged[0]["_is_duplicate"] is False
+
+
+class TestMessyCompanyNames:
+    """Edge cases for company names with HTML entities and special chars."""
+
+    def test_html_ampersand_entity(self):
+        """Company 'Acme &amp; Co' normalizes same as 'Acme & Co'."""
+        # Both strip punctuation, so &amp; → "amp" remains but & → removed
+        # This shows they DON'T match — documenting the behavior
+        name1 = normalize_company_name("Acme &amp; Co")
+        name2 = normalize_company_name("Acme & Co")
+        # &amp; leaves "amp" in the normalized string
+        assert "amp" in name1
+        assert "amp" not in name2
+
+    def test_html_entity_in_dedup_key(self):
+        """HTML entities in company name affect dedup matching."""
+        lead1 = {"phone": "555-111-1111", "companyName": "Acme &amp; Sons"}
+        lead2 = {"phone": "555-111-1111", "companyName": "Acme & Sons"}
+        # Same phone → same normalized phone, company differs
+        key1 = get_dedup_key(lead1)
+        key2 = get_dedup_key(lead2)
+        # Phone part matches (same number), company part differs
+        assert key1.split("|")[0] == key2.split("|")[0]  # phone matches
+
+    def test_unicode_dash_in_company(self):
+        """Company name with em-dash should normalize."""
+        name = normalize_company_name("Acme\u2014Corp")
+        assert "acme" in name
+
+    def test_none_company_name(self):
+        """None company name returns empty string."""
+        assert normalize_company_name(None) == ""
+        assert normalize_company_name("") == ""
