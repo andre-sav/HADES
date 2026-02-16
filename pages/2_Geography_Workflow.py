@@ -1595,6 +1595,17 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             filtered_indices = filtered_df["_idx"].tolist()
             st.session_state.geo_export_leads = [scored_leads[i] for i in filtered_indices]
 
+            # Persist to DB for re-export after session loss
+            if not st.session_state.get("geo_leads_staged"):
+                op = st.session_state.get("geo_operator")
+                db.save_staged_export(
+                    "geography",
+                    st.session_state.geo_export_leads,
+                    query_params=st.session_state.get("geo_query_params"),
+                    operator_id=op.get("id") if op else None,
+                )
+                st.session_state.geo_leads_staged = True
+
     geo_results_table(scored)
 
     # Option to go back and revise (Manual mode)

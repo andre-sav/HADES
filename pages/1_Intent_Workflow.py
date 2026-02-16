@@ -1164,6 +1164,15 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
             filtered_indices = filtered_df["_idx"].tolist()
             st.session_state.intent_export_leads = [scored_leads[i] for i in filtered_indices]
 
+            # Persist to DB for re-export after session loss
+            if not st.session_state.get("intent_leads_staged"):
+                db.save_staged_export(
+                    "intent",
+                    st.session_state.intent_export_leads,
+                    query_params=st.session_state.get("intent_query_params"),
+                )
+                st.session_state.intent_leads_staged = True
+
     intent_results_table(scored)
 
     # Back button (manual mode)

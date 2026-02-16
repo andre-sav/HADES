@@ -62,31 +62,20 @@ if "last_export_metadata" not in st.session_state:
 # EMPTY STATE - Show CTAs when no leads available
 # =============================================================================
 if not intent_leads and not geo_leads:
-    empty_state(
-        "No leads staged for export",
-        icon="📤",
-        hint="Run a workflow to find and stage leads, then return here to download your VanillaSoft CSV.",
-    )
+    # Check DB for persisted staged exports
+    staged = db.get_staged_exports(limit=10)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.page_link("pages/1_Intent_Workflow.py", label="Run Intent Search", icon="🎯", use_container_width=True)
-    with col2:
-        st.page_link("pages/2_Geography_Workflow.py", label="Run Geography Search", icon="📍", use_container_width=True)
+    if staged:
+        st.caption("Previous runs available for export")
 
-    # Show recent runs for context
-    queries = db.get_recent_queries(limit=5)
-    if queries:
-        st.markdown("---")
-        st.caption("Recent runs")
         table_data = []
-        for q in queries:
-            exported = q.get("leads_exported", 0) or 0
+        for s in staged:
+            status = "Exported" if s.get("exported_at") else "Staged"
             table_data.append({
-                "time": q.get("created_at", "")[:16] if q.get("created_at") else "",
-                "workflow": q["workflow_type"].title(),
-                "leads": q.get("leads_returned", 0) or 0,
-                "status": "Exported" if exported > 0 else "Not exported",
+                "time": s.get("created_at", "")[:16] if s.get("created_at") else "",
+                "workflow": s["workflow_type"].title(),
+                "leads": s["lead_count"],
+                "status": status,
             })
         styled_table(
             rows=table_data,
@@ -94,9 +83,46 @@ if not intent_leads and not geo_leads:
                 {"key": "time", "label": "Time"},
                 {"key": "workflow", "label": "Workflow"},
                 {"key": "leads", "label": "Leads", "align": "right", "mono": True},
-                {"key": "status", "label": "Status", "pill": {"Exported": "success", "Not exported": "muted"}},
+                {"key": "status", "label": "Status", "pill": {"Exported": "success", "Staged": "muted"}},
             ],
         )
+
+        st.markdown("")
+
+        # Load buttons — one per staged export
+        cols = st.columns(min(len(staged), 3))
+        for i, s in enumerate(staged):
+            with cols[i % 3]:
+                label = f"{s['workflow_type'].title()} · {s['lead_count']} leads"
+                if s.get("exported_at"):
+                    label += " (re-export)"
+                if st.button(label, key=f"load_staged_{s['id']}", use_container_width=True):
+                    export_row = db.get_staged_export(s["id"])
+                    if export_row and export_row["leads"]:
+                        ss_key = "intent_export_leads" if export_row["workflow_type"] == "intent" else "geo_export_leads"
+                        st.session_state[ss_key] = export_row["leads"]
+                        st.session_state["_loaded_staged_id"] = export_row["id"]
+                        # Restore operator if available
+                        if export_row.get("operator_id"):
+                            op = db.get_operator(export_row["operator_id"])
+                            if op:
+                                st.session_state["geo_operator"] = op
+                        st.rerun()
+
+        st.markdown("---")
+
+    else:
+        empty_state(
+            "No leads staged for export",
+            icon="📤",
+            hint="Run a workflow to find and stage leads, then return here to download your VanillaSoft CSV.",
+        )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.page_link("pages/1_Intent_Workflow.py", label="Run Intent Search", icon="🎯", use_container_width=True)
+    with col2:
+        st.page_link("pages/2_Geography_Workflow.py", label="Run Geography Search", icon="📍", use_container_width=True)
 
     st.stop()
 
@@ -280,6 +306,11 @@ with col3:
                     json.dumps(features) if features else None,
                 ))
             db.record_lead_outcomes_batch(outcome_rows)
+
+        # Mark staged export as exported (if loaded from DB)
+        staged_id = st.session_state.get("_loaded_staged_id")
+        if staged_id and batch_id:
+            db.mark_staged_exported(staged_id, batch_id)
 
         st.session_state.last_export_metadata = {
             "filename": filename,
