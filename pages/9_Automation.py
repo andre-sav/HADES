@@ -87,25 +87,23 @@ def _run_card_html(run: dict) -> str:
             f'font-size:{FONT_SIZES["xs"]};">{run["error_message"]}</div>'
         )
 
-    return f"""
-    <div style="display:flex;align-items:center;gap:{SPACING["md"]};
-                padding:{SPACING["sm"]} 0;
-                border-bottom:1px solid {COLORS["border"]}40;">
-        <div style="flex:0 0 90px;">{badge}</div>
-        <div style="flex:1;min-width:0;">
-            <span style="color:{COLORS["text_primary"]};font-weight:500;">{trigger}</span>
-            <span style="color:{COLORS["text_muted"]};font-size:{FONT_SIZES["sm"]};margin-left:{SPACING["sm"]};">{time_str}</span>
-            {error_html}
-        </div>
-        <div style="flex:0 0 auto;text-align:right;font-family:'IBM Plex Mono',monospace;
-                    font-size:{FONT_SIZES["sm"]};font-variant-numeric:tabular-nums;">
-            <span style="color:{COLORS["text_primary"]};">{leads}</span>
-            <span style="color:{COLORS["text_muted"]};"> leads</span>
-            <span style="color:{COLORS["text_muted"]};margin:0 {SPACING["xs"]};">·</span>
-            <span style="color:{COLORS["text_primary"]};">{credits}</span>
-            <span style="color:{COLORS["text_muted"]};"> credits</span>
-        </div>
-    </div>"""
+    return (
+        f'<div style="display:flex;align-items:center;gap:{SPACING["md"]};'
+        f'padding:{SPACING["sm"]} 0;border-bottom:1px solid {COLORS["border"]}40;">'
+        f'<div style="flex:0 0 90px;">{badge}</div>'
+        f'<div style="flex:1;min-width:0;">'
+        f'<span style="color:{COLORS["text_primary"]};font-weight:500;">{trigger}</span>'
+        f'<span style="color:{COLORS["text_muted"]};font-size:{FONT_SIZES["sm"]};margin-left:{SPACING["sm"]};">{time_str}</span>'
+        f'{error_html}</div>'
+        f'<div style="flex:0 0 auto;text-align:right;font-family:\'IBM Plex Mono\',monospace;'
+        f'font-size:{FONT_SIZES["sm"]};font-variant-numeric:tabular-nums;">'
+        f'<span style="color:{COLORS["text_primary"]};">{leads}</span>'
+        f'<span style="color:{COLORS["text_muted"]};"> leads</span>'
+        f'<span style="color:{COLORS["text_muted"]};margin:0 {SPACING["xs"]};">·</span>'
+        f'<span style="color:{COLORS["text_primary"]};">{credits}</span>'
+        f'<span style="color:{COLORS["text_muted"]};"> credits</span>'
+        f'</div></div>'
+    )
 
 
 # --- Data ---

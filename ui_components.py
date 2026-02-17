@@ -1790,31 +1790,19 @@ def narrative_metric(text: str, highlight_value: str | None = None, subtext: str
     else:
         rendered = text
 
-    html = f'''
-    <div style="
-        background: {COLORS['bg_secondary']};
-        border: 1px solid {COLORS['border']};
-        border-left: 3px solid {COLORS['primary']};
-        border-radius: {SPACING['xs']};
-        padding: {SPACING['md']} {SPACING['lg']};
-        margin-bottom: {SPACING['sm']};
-    ">
-        <p style="
-            color: {COLORS['text_primary']};
-            font-size: 1.05rem;
-            line-height: 1.5;
-            margin: 0;
-        ">{rendered}</p>
-    '''
+    html = (
+        f'<div style="background:{COLORS["bg_secondary"]};border:1px solid {COLORS["border"]};'
+        f'border-left:3px solid {COLORS["primary"]};border-radius:{SPACING["xs"]};'
+        f'padding:{SPACING["md"]} {SPACING["lg"]};margin-bottom:{SPACING["sm"]};">'
+        f'<p style="color:{COLORS["text_primary"]};font-size:1.05rem;'
+        f'line-height:1.5;margin:0;">{rendered}</p>'
+    )
 
     if subtext:
-        html += f'''
-        <p style="
-            color: {COLORS['text_secondary']};
-            font-size: 0.85rem;
-            margin: {SPACING['xs']} 0 0 0;
-        ">{subtext}</p>
-        '''
+        html += (
+            f'<p style="color:{COLORS["text_secondary"]};font-size:0.85rem;'
+            f'margin:{SPACING["xs"]} 0 0 0;">{subtext}</p>'
+        )
 
     html += '</div>'
 

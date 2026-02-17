@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-17
-**Status:** All 4 epics implemented (18 stories complete). 509 tests passing. Geography pipeline E2E live test PASSED. 6 bugs fixed this session.
+**Status:** All 4 epics implemented (18 stories complete). 509 tests passing. Both pipelines E2E live tested and PASSED. 7 bugs fixed across sessions 17-18.
 
 ## What's Working
 
@@ -36,6 +36,60 @@
 - **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers" (not "Vending", "Break Room", etc.)
 - **SMTP secrets not configured** — GitHub Actions has 4 required secrets set (Turso + ZoomInfo) but SMTP_USER, SMTP_PASSWORD, EMAIL_RECIPIENTS not set. Pipeline runs but skips email delivery.
 - **managementLevel as list** — ZoomInfo enrich API returns `managementLevel` as a list (e.g. `["Manager"]`) while Contact Search returns a string. Fixed in scoring.py (session 12).
+
+---
+
+## Session Summary (2026-02-17, Session 18)
+
+### Intent Pipeline E2E Live Test + All Pages Verified + Bug Fix
+
+**Intent Pipeline E2E (HADES-kbu — PASSED):**
+- Ran full pipeline via Playwright browser automation
+- Manual Review mode, Vending Machines topic, High signal strength
+- Search: 4 companies found (Dry Harbor, Sagora Senior Living, Huron Valley PACE, Peace Corps)
+- Contact Search: 18 contacts across 3 companies (Dry Harbor had 0 ICP matches)
+- Enrichment: 3 contacts enriched (3 credits used)
+- Results: Jaclyn Dukes (Huron Valley PACE, 79%), Jean Togbe (Peace Corps, 77%), Christal Hoffman (Sagora Senior Living, 76%)
+- Download CSV and Full Export buttons functional
+
+**All Pages Verified:**
+- Operators: 3,041 operators, pagination (20/page, 153 pages), search, Edit/Delete, Add
+- CSV Export: 3 staged exports (Intent 3 leads, Geography 30+35 leads), Load buttons
+- Usage Dashboard: 93 credits this week, Intent 63/500, tabs (Weekly/By Period/Recent Queries)
+- Executive Summary: Narrative metrics, Plotly charts, efficiency table, tabs (Overview/Trends/Budget)
+- Pipeline Health: 4 green indicators (Last Query, Cache, Database, ZoomInfo API), run history
+- Automation: Next run countdown, Run Now button, run history, configuration display
+
+**Bug Found & Fixed (HADES-6s4):**
+7. **HTML rendered as code blocks** — `narrative_metric()` and `_run_card_html()` used indented f-string HTML. Streamlit's markdown parser treated 4+ space-indented lines as `<code>` blocks before `unsafe_allow_html=True` applied. Fix: removed leading whitespace from HTML strings (same root cause as `empty_state` bug from session 12).
+
+### Key Files Modified (Session 18)
+```
+ui_components.py               - narrative_metric() HTML de-indented
+pages/9_Automation.py           - _run_card_html() HTML de-indented
+```
+
+### Uncommitted Changes
+2 code files + beads. Ready to commit.
+
+### Test Count
+509 tests passing (unchanged — rendering-only fix)
+
+### What Needs Doing Next Session
+1. **Build expansion_timeline component** — HADES-5xm (P3)
+2. **Add rapidfuzz fuzzy matching** — HADES-1wk (P3)
+3. **Plan compliance gaps** — HADES-umv (P4, 9 items)
+4. **Zoho CRM dedup check at export** — HADES-iic (P4)
+5. **Configure SMTP secrets** — For GitHub Actions email delivery
+6. **Deploy to Streamlit Community Cloud**
+
+### Beads Status
+```
+HADES-5xm [P3] Story 2.3 gap: build expansion_timeline component
+HADES-1wk [P3] Story 2.6 gap: add rapidfuzz fuzzy matching
+HADES-umv [P4] Plan compliance: missing CTA, error log, PII, doc updates
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+```
 
 ---
 
