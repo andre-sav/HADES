@@ -73,6 +73,7 @@ from ui_components import (
     action_bar,
     workflow_summary_strip,
     last_run_indicator,
+    expansion_timeline,
     COLORS,
 )
 
@@ -1149,24 +1150,23 @@ if (
             badge = status_badge("warning", f"{found_companies}/{exp_result['target']}")
             st.markdown(f"{badge} **{found_companies} of {exp_result['target']} target companies** ({found_contacts} contacts)", unsafe_allow_html=True)
 
-        # Show expansion details
-        if exp_result["steps_applied"] > 0:
-            final = exp_result["final_params"]
-            expansions = []
-            # Display in expansion order: management, employee, accuracy, then radius (last resort)
-            if final["management_levels"] != DEFAULT_START_MANAGEMENT:
-                levels = "/".join(final["management_levels"])
-                expansions.append(f"Management → {levels}")
-            if final["employee_max"] == 0:
-                expansions.append("Employee range → 50+")
-            if final["accuracy_min"] < DEFAULT_START_ACCURACY:
-                expansions.append(f"Accuracy → {final['accuracy_min']}")
-            if final["radius"] > DEFAULT_START_RADIUS:
-                expansions.append(f"Radius → {final['radius']}mi")
-
-            if expansions:
-                st.caption(f"Expansions applied: {', '.join(expansions)}")
-            st.caption(f"Searches performed: {exp_result['searches_performed']}")
+        # Show expansion timeline
+        expansion_steps = exp_result.get("expansion_steps", [])
+        if expansion_steps or exp_result["steps_applied"] > 0:
+            steps_skipped = 0
+            if exp_result["target_met"] and exp_result["steps_applied"] > 0:
+                steps_skipped = len(EXPANSION_STEPS) - exp_result["steps_applied"]
+            with st.expander(
+                f"Expansion details ({exp_result['steps_applied']} steps, "
+                f"{exp_result['searches_performed']} searches)",
+                expanded=True,
+            ):
+                expansion_timeline(
+                    expansion_steps,
+                    target=exp_result["target"],
+                    target_met=exp_result["target_met"],
+                    steps_skipped=steps_skipped,
+                )
         else:
             st.caption("No expansions needed")
     else:
