@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from errors import PipelineError
 from utils import get_budget_config
 
 
-class BudgetExceededError(Exception):
+class BudgetExceededError(PipelineError):
     """Raised when a query would exceed the budget cap."""
 
     def __init__(self, workflow_type: str, current_usage: int, cap: int, requested: int):
@@ -20,9 +21,17 @@ class BudgetExceededError(Exception):
         self.remaining = cap - current_usage
 
         super().__init__(
-            f"{workflow_type} budget would be exceeded. "
-            f"Current: {current_usage}, Cap: {cap}, Requested: {requested}, "
-            f"Remaining: {self.remaining}"
+            message=(
+                f"{workflow_type} budget would be exceeded. "
+                f"Current: {current_usage}, Cap: {cap}, Requested: {requested}, "
+                f"Remaining: {self.remaining}"
+            ),
+            user_message=(
+                f"{workflow_type.title()} weekly budget exceeded. "
+                f"{current_usage} of {cap} credits used this week. "
+                f"This query needs ~{requested} credits. Resets Monday."
+            ),
+            recoverable=False,
         )
 
 

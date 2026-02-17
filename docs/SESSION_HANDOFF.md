@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-17
-**Status:** Intent pipeline live-tested, GitHub repo created, 453 tests passing
+**Status:** Epics 1-3 implemented (12 tasks). 474 tests passing. Ready for live testing + Epic 4 remaining gaps.
 
 ## What's Working
 
@@ -36,6 +36,127 @@
 - **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers" (not "Vending", "Break Room", etc.)
 - **SMTP secrets not configured** — GitHub Actions has 4 required secrets set (Turso + ZoomInfo) but SMTP_USER, SMTP_PASSWORD, EMAIL_RECIPIENTS not set. Pipeline runs but skips email delivery.
 - **managementLevel as list** — ZoomInfo enrich API returns `managementLevel` as a list (e.g. `["Manager"]`) while Contact Search returns a string. Fixed in scoring.py (session 12).
+
+---
+
+## Session Summary (2026-02-17, Session 14)
+
+### Epic 1-3 Implementation (12 Tasks)
+
+Implemented all 6 Epic 1 stories plus 5 quick fixes and 2 medium features from Epics 2-3. Used feature-dev skill with code-explorer and code-architect agents for Epic 1, then gap analysis for remaining epics.
+
+**Epic 1 — Intent Lead Pipeline (6 stories):**
+- **Story 1.1**: PipelineError hierarchy (`errors.py`). ZoomInfoError + BudgetExceededError inherit from it. PII hygiene: bare `except` replaced with `logger.exception()` + generic UI messages. 19 tests.
+- **Story 1.2**: Query preview line (topics, signal threshold, employee range, SIC codes in popover).
+- **Story 1.3**: Lead Source tag format `"ZoomInfo Intent - {topic} - {score} - {age}d"`. Call Priority from `_priority`. Geo source tag `"ZoomInfo Geo - {zip} - {radius}mi"`.
+- **Story 1.4**: Cache-first lookup with SHA-256 hash key, 7-day TTL. "Cached" indicator + "Refresh" button. Cache hits logged with credits=0.
+- **Story 1.5**: Operator page `empty_state()` + success toast after creation.
+- **Story 1.6**: Export filename format `HADES-{type}-YYYYMMDD-HHMMSS.csv`.
+
+**Epic 2-3 Gap Fixes (5 quick + 2 medium):**
+- Budget button disabled when >= 100% (Story 3.1)
+- Header badge thresholds aligned to 50/80/95% (Story 3.2)
+- Cache hits logged to cost_tracker + query_history (Story 3.3)
+- Location templates UI — "Saved Template" tab with selector/save/delete (Story 2.5)
+- First-run welcome message on Geography page (Story 2.1)
+
+### Key Files Created/Modified (Session 14)
+```
+errors.py                      - NEW: PipelineError base class
+tests/test_errors.py           - NEW: 19 tests for error hierarchy
+zoominfo_client.py             - ZoomInfoError inherits PipelineError, PII fixes
+cost_tracker.py                - BudgetExceededError inherits PipelineError
+scoring.py                     - calculate_age_days public, _intent_age_days added
+export.py                      - Lead Source, Call Priority populated, filename format
+pages/1_Intent_Workflow.py     - PipelineError, cache integration, query preview, budget disable
+pages/2_Geography_Workflow.py  - PipelineError, location templates UI, first-run welcome, geo source tag
+pages/3_Operators.py           - empty_state, success toast
+pages/5_Usage_Dashboard.py     - Removed unused import
+pages/7_Pipeline_Test.py       - PipelineError catch
+pages/8_API_Discovery.py       - PipelineError catch
+scripts/run_intent_pipeline.py - PipelineError catch, lead_source format
+tests/test_export.py           - Updated assertions for lead source, call priority, filename
+tests/test_scoring.py          - Updated calculate_age_days references
+CLAUDE.md                      - Test count 451→474, errors.py in file structure
+```
+
+### Uncommitted Changes
+All project code changes above are uncommitted. BMAD tooling updates also uncommitted (`.claude/commands/`, `.gemini/commands/`, `_bmad/` — plugin version changes including testarch/excalidraw removal).
+
+### Remaining Story Gaps (Not Tackled This Session)
+- **Story 2.6**: Cross-workflow dedup UI (logic in dedup.py exists, no UI surface)
+- **Story 4.1**: Usage Dashboard date range filter on query history table
+- **Story 4.2**: `narrative_metric` component (trends exist as Plotly charts, but no narrative text)
+- **Story 4.3**: Pipeline Health page (entirely missing — new page needed)
+
+### Test Count
+474 tests passing (up from 453)
+
+### What Needs Doing Next Session
+1. **Commit all changes** — Project code + BMAD tooling updates
+2. **Live test Geography pipeline** — Needs browser interaction (bead HADES-kyi)
+3. **Live test full UI** — All 4 pipelines through Streamlit (bead HADES-kbu)
+4. **Implement remaining gaps** — Stories 2.6, 4.1, 4.2, 4.3
+5. **Configure SMTP secrets** — For email delivery from GitHub Actions
+
+### Beads Status
+```
+HADES-kyi [P2] Live test Geography pipeline end-to-end
+HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+```
+
+---
+
+## Session Summary (2026-02-17, Session 13)
+
+### Planning Artifacts Complete
+
+Completed two BMAD workflows spanning this session and the prior one (which ran out of context):
+
+**Create Epics and Stories** — 4 epics, 18 stories, 22/22 FR coverage:
+- Epic 1: Intent Lead Pipeline (6 stories) — end-to-end Intent workflow + shared infrastructure (API client, caching, dedup, export, operators)
+- Epic 2: Geography Lead Pipeline (6 stories) — territory search, dual modes (Autopilot/Manual), auto-expansion, saved templates
+- Epic 3: Cost Controls & Budget Management (3 stories) — caps, alerts, usage tracking
+- Epic 4: Dashboards & Executive Reporting (3 stories) — usage dashboard, executive summary, pipeline health
+
+**Implementation Readiness Check** — 6-step adversarial review:
+- Verdict: **READY WITH CONDITIONS**
+- 0 critical, 2 major (both in Epic 4 only), 4 minor issues
+- Major: Story 4.3 error tracking data source undefined, Story 4.2 "Request Territory Query" CTA vague
+- PRD and Architecture are stale relative to UX spec — documentation debt, not planning blockers
+- Epic 1 and Epic 2 are clear to start immediately
+
+**NFR-SEC-003 added to Story 1.1** — No PII in error messages/DB records (user pushed back on vague "log entries" wording; reworded to reference actual error surfaces: `st.error()`, PipelineError, `query_history`).
+
+### Key Files Created/Modified (Session 13)
+```
+_bmad-output/planning-artifacts/epics.md                              - CREATED: 4 epics, 18 stories
+_bmad-output/planning-artifacts/implementation-readiness-report-2026-02-17.md - CREATED: readiness assessment
+```
+
+### Uncommitted Changes
+Planning artifacts above + BMAD tooling update (`.claude/commands/`, `.gemini/commands/`, `_bmad/` — plugin version changes). No project code changes this session.
+
+### Test Count
+453 tests (unchanged — no code changes this session)
+
+### What Needs Doing Next Session
+1. **Begin Epic 1 implementation** — Start with Story 1.1 (ZoomInfo API Client & Intent Data Retrieval). Most infrastructure already exists — story is about formalizing and testing what's built.
+2. **Resolve Epic 4 major issues** — Before implementing Epic 4, clarify Story 4.3 error source and Story 4.2 CTA mechanism
+3. **Live test Geography pipeline** — Still pending (bead HADES-kyi)
+4. **Live test full UI** — All 4 pipelines (bead HADES-kbu)
+
+### Beads Status
+```
+HADES-kyi [P2] Live test Geography pipeline end-to-end
+HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+HADES-1ln [P2] CLOSED — Live pipeline run: 25 intent → 8 scored → 3 exported
+HADES-5c7 [P2] CLOSED — Enrich confirmed working (3/3 contacts enriched)
+HADES-20n [P2] CLOSED — 4 bugs fixed + 28 edge case tests
+HADES-bk3 [P2] CLOSED — Production test UX (visual audit + 10 fixes)
+```
 
 ---
 
@@ -589,7 +710,7 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Test Coverage
 
-- **453 tests passing** (all green, run `python -m pytest tests/ -v`)
+- **474 tests passing** (all green, run `python -m pytest tests/ -v`)
 
 ## API Usage
 
@@ -600,21 +721,23 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Next Steps (Priority Order)
 
-1. **Live test Geography pipeline** — Needs browser interaction (bead HADES-kyi)
-2. **Live test full Streamlit UI** — All 4 pipelines (bead HADES-kbu)
-3. **Configure SMTP secrets** — For email delivery from GitHub Actions
-4. **Zoho CRM dedup check at export** — P4 backlog (bead HADES-iic)
+1. **Commit all changes** — Session 14 project code + BMAD tooling updates
+2. **Live test Geography pipeline** — Needs browser interaction (bead HADES-kyi)
+3. **Live test full Streamlit UI** — All 4 pipelines (bead HADES-kbu)
+4. **Implement remaining gaps** — Stories 2.6, 4.1, 4.2, 4.3
+5. **Configure SMTP secrets** — For email delivery from GitHub Actions
+6. **Zoho CRM dedup check at export** — P4 backlog (bead HADES-iic)
 
 ## Beads Status
 
 ```
-HADES-1ln [P2] Live test Intent pipeline end-to-end
-HADES-5c7 [P2] Live test Contact Enrich with real data
 HADES-kyi [P2] Live test Geography pipeline end-to-end
-HADES-bk3 [P2] CLOSED - Production test UX (visual audit + 10 fixes applied)
-HADES-20n [P2] CLOSED — 4 bugs fixed + 28 edge case tests
 HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
 HADES-iic [P4] Add Zoho CRM dedup check at export time
+HADES-1ln [P2] CLOSED — Live pipeline run: 25 intent → 8 scored → 3 exported
+HADES-5c7 [P2] CLOSED — Enrich confirmed working (3/3 contacts enriched)
+HADES-20n [P2] CLOSED — 4 bugs fixed + 28 edge case tests
+HADES-bk3 [P2] CLOSED — Production test UX (visual audit + 10 fixes)
 ```
 
 ## Chrome Extension Fix
@@ -636,4 +759,4 @@ python calibrate_scoring.py   # Re-run calibration analysis
 ```
 
 ---
-*Last updated: 2026-02-17 (Session 12)*
+*Last updated: 2026-02-17 (Session 14)*

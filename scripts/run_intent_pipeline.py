@@ -35,6 +35,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Prevent Streamlit from auto-launching
 os.environ.setdefault("STREAMLIT_SERVER_HEADLESS", "true")
 
+from errors import PipelineError
 from turso_db import TursoDatabase
 from zoominfo_client import (
     ZoomInfoClient,
@@ -42,7 +43,7 @@ from zoominfo_client import (
     ContactQueryParams,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
-from scoring import score_intent_leads, score_intent_contacts, get_priority_label
+from scoring import score_intent_leads, score_intent_contacts, get_priority_label, calculate_age_days
 from dedup import dedupe_leads
 from export import export_leads_to_csv
 from export_dedup import get_previously_exported, filter_previously_exported
@@ -273,8 +274,10 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             topic = lead.get("_intent_topic", "")
             if not topic:
                 topic = config["topics"][0] if config["topics"] else ""
-            lead["_lead_source"] = f"ZoomInfo Intent · {topic}"
-            lead["_priority"] = get_priority_label(lead.get("_score", 0))
+            score = lead.get("_score", 0)
+            age = lead.get("_intent_age_days", 0)
+            lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
+            lead["_priority"] = get_priority_label(score)
 
         # Export to CSV
         agents = get_call_center_agents()
@@ -339,8 +342,11 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             "summary": summary,
             "error": None,
         }
+    except PipelineError as e:
+        db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, e.user_message)
+        raise
     except Exception as e:
-        db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, str(e))
+        db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, "Unexpected pipeline error")
         raise
 
 

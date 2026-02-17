@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 
 from turso_db import get_database
 from cost_tracker import CostTracker
-from zoominfo_client import get_zoominfo_client, ZoomInfoError
+from zoominfo_client import get_zoominfo_client
 from ui_components import (
     inject_base_styles,
     page_header,

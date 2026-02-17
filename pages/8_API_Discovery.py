@@ -6,7 +6,8 @@ Useful for debugging and finding correct parameter names.
 import json
 import streamlit as st
 
-from zoominfo_client import get_zoominfo_client, ZoomInfoError
+from errors import PipelineError
+from zoominfo_client import get_zoominfo_client
 from ui_components import inject_base_styles, page_header
 
 st.set_page_config(page_title="API Discovery", page_icon="🔬", layout="wide")
@@ -47,7 +48,7 @@ if st.button("🔍 Probe Lookup Endpoints", type="primary"):
                     response = client._request("GET", endpoint)
                     results[endpoint] = {"status": "success", "data": response}
                     st.success(f"✅ {endpoint} - Success!")
-                except ZoomInfoError as e:
+                except PipelineError as e:
                     results[endpoint] = {"status": "error", "message": str(e.message)}
                     st.error(f"❌ {endpoint} - {e.message[:100]}")
                 except Exception as e:
@@ -68,8 +69,10 @@ if st.button("🔍 Probe Lookup Endpoints", type="primary"):
         if success_count == 0:
             st.warning("No lookup endpoints found. The API may require different paths.")
 
+    except PipelineError as e:
+        st.error(f"Failed to connect to ZoomInfo: {e.user_message}")
     except Exception as e:
-        st.error(f"Failed to connect to ZoomInfo: {str(e)}")
+        st.error("Failed to connect to ZoomInfo. Check application logs.")
 
 st.markdown("---")
 
@@ -104,7 +107,7 @@ if st.button("🧪 Test Minimal Search"):
                 response = client._request("POST", "/search/contact", json=minimal_request, params=query_params)
                 st.success("✅ Minimal search succeeded!")
                 st.json(response)
-            except ZoomInfoError as e:
+            except PipelineError as e:
                 st.error(f"❌ Failed: {e.message}")
 
                 # If that failed, try with just zipCode
@@ -122,11 +125,13 @@ if st.button("🧪 Test Minimal Search"):
                     response = client._request("POST", "/search/contact", json=minimal_request_2, params=query_params)
                     st.success("✅ ZIP code search succeeded!")
                     st.json(response)
-                except ZoomInfoError as e2:
-                    st.error(f"❌ Also failed: {e2.message}")
+                except PipelineError as e2:
+                    st.error(f"❌ Also failed: {e2.user_message}")
 
+    except PipelineError as e:
+        st.error(f"Connection error: {e.user_message}")
     except Exception as e:
-        st.error(f"Connection error: {str(e)}")
+        st.error("Connection error. Check application logs.")
 
 st.markdown("---")
 st.caption("💡 Use this page to discover the correct field names for the ZoomInfo API.")

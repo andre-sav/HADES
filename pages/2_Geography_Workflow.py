@@ -24,11 +24,11 @@ def compute_params_hash(params: dict) -> str:
     return hashlib.md5(normalized.encode()).hexdigest()[:12]
 
 from turso_db import get_database
+from errors import PipelineError
 from zoominfo_client import (
     get_zoominfo_client,
     ContactQueryParams,
     ContactEnrichParams,
-    ZoomInfoError,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
 from scoring import score_geography_leads, get_priority_label
@@ -179,6 +179,22 @@ page_header(
 # =============================================================================
 _last_geo = db.get_last_query("geography")
 last_run_indicator(_last_geo)
+
+
+# =============================================================================
+# FIRST-RUN WELCOME (shown once when no prior geography activity)
+# =============================================================================
+if not _last_geo and not st.session_state.get("geo_welcome_dismissed"):
+    st.info(
+        "**Welcome to the Geography Workflow!**\n\n"
+        "Search for contacts in an operator's service territory by ZIP code and radius. "
+        "Geography searches are **unlimited** — no credit cap.\n\n"
+        "**How it works:** Select an operator → Configure location → Search → Review contacts → Export CSV",
+        icon="📍",
+    )
+    if st.button("Got it", key="geo_dismiss_welcome"):
+        st.session_state["geo_welcome_dismissed"] = True
+        st.rerun()
 
 
 # =============================================================================
@@ -392,16 +408,71 @@ if has_operator:
             default_state = detected_state
 
     # Location mode selector
-    _LOC_MODE_MAP = {"Radius Search": "radius", "Manual ZIP List": "manual"}
+    _LOC_MODE_MAP = {"Radius Search": "radius", "Manual ZIP List": "manual", "Saved Template": "template"}
     _LOC_MODE_REVERSE = {v: k for k, v in _LOC_MODE_MAP.items()}
+    _saved_templates = db.get_location_templates()
+    _loc_default = "Radius Search"
     _loc_mode_tab = ui.tabs(
         options=list(_LOC_MODE_MAP.keys()),
-        default_value="Radius Search",
+        default_value=_loc_default,
         key="geo_location_mode_tabs",
     )
     location_mode = _LOC_MODE_MAP.get(_loc_mode_tab, "radius")
 
-    if location_mode == "radius":
+    # --- Saved Template mode ---
+    if location_mode == "template":
+        if not _saved_templates:
+            st.info("No saved templates yet. Configure a search using Radius or Manual ZIP mode, then save it as a template.")
+            zip_codes = []
+            states = []
+            radius = 0
+            center_zip_clean = None
+            is_valid_zip = False
+            calculated_zips = []
+        else:
+            _template_options = {t["name"]: t for t in _saved_templates}
+            _template_col1, _template_col2 = st.columns([3, 1])
+            with _template_col1:
+                _selected_template_name = st.selectbox(
+                    "Template",
+                    options=list(_template_options.keys()),
+                    label_visibility="collapsed",
+                )
+            with _template_col2:
+                _delete_template = ui.button(text="Delete", variant="destructive", key="geo_delete_template_btn")
+
+            if _delete_template and _selected_template_name:
+                _tmpl = _template_options[_selected_template_name]
+                db.delete_location_template(_tmpl["id"])
+                st.toast(f"Deleted template '{_selected_template_name}'")
+                st.rerun()
+
+            _tmpl = _template_options[_selected_template_name]
+            zip_codes = _tmpl["zip_codes"]
+            radius = _tmpl["radius_miles"]
+            center_zip_clean = zip_codes[0] if zip_codes else None
+            is_valid_zip = center_zip_clean is not None
+
+            # Derive states
+            if zip_codes:
+                _centroids = load_zip_centroids()
+                _zip_data = []
+                for z in zip_codes:
+                    if z in _centroids:
+                        _lat, _lng, _st = _centroids[z]
+                        _zip_data.append({"zip": z, "state": _st, "lat": _lat, "lng": _lng})
+                    else:
+                        _zip_data.append({"zip": z, "state": "?"})
+                states = get_states_from_zips(_zip_data)
+                state_counts = get_state_counts_from_zips(_zip_data)
+                state_display = ", ".join(f"{s} ({state_counts[s]})" for s in states)
+                st.success(f"📍 Template: **{_selected_template_name}** — {len(zip_codes)} ZIPs, {radius}mi radius · States: {state_display}")
+                calculated_zips = _zip_data
+            else:
+                states = []
+                calculated_zips = []
+
+    elif location_mode == "radius":
         # Radius-based search
         col1, col2 = st.columns([2, 1])
 
@@ -495,7 +566,6 @@ if has_operator:
         # Derive states from manual ZIPs
         if zip_codes:
             # Build ZIP dicts for state extraction
-            from geo import load_zip_centroids
             centroids = load_zip_centroids()
             calculated_zips = []
             for z in zip_codes:
@@ -511,6 +581,25 @@ if has_operator:
         else:
             states = []
             calculated_zips = []
+
+    # Save as Template (available when ZIP codes are configured)
+    if zip_codes and location_mode != "template":
+        _save_col1, _save_col2 = st.columns([2, 1])
+        with _save_col1:
+            _template_name = st.text_input(
+                "Save as template",
+                placeholder="e.g., Dallas Metro",
+                label_visibility="collapsed",
+                key="geo_template_name_input",
+            )
+        with _save_col2:
+            if ui.button(text="Save Template", variant="outline", key="geo_save_template_btn"):
+                if _template_name:
+                    db.save_location_template(_template_name, zip_codes, int(radius))
+                    st.toast(f"Saved template '{_template_name}'")
+                    st.rerun()
+                else:
+                    st.warning("Enter a template name")
 
     # Quality Filters (expandable)
     last_filters = st.session_state.geo_last_filters
@@ -881,8 +970,11 @@ if has_operator:
                     shared_log=progress_log,
                 )
                 job.result = result
+            except PipelineError as e:
+                job.error = e.user_message
             except Exception as e:
-                job.error = str(e)
+                logger.exception("Geography search failed")
+                job.error = "Search failed unexpectedly. Check application logs."
             job.done.set()
 
         job.thread = threading.Thread(target=_run_geo_search, daemon=True)
@@ -1369,10 +1461,11 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                     st.session_state.geo_enriched_contacts = enriched
                     st.session_state.geo_enrichment_done = True
                     st.rerun()
-                except ZoomInfoError as e:
+                except PipelineError as e:
                     st.error(f"Enrichment failed: {e.user_message}")
                 except Exception as e:
-                    st.error(f"Enrichment failed: {str(e)}")
+                    logger.exception("Geography enrichment failed")
+                    st.error("Enrichment failed unexpectedly. Check application logs.")
     else:
         st.error("No valid person IDs found in selected contacts")
 
@@ -1447,7 +1540,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
     for lead in scored:
         zip_codes = st.session_state.geo_query_params.get("zip_codes", [])
         radius = st.session_state.geo_query_params.get("radius_miles", 0)
-        lead["_lead_source"] = f"ZoomInfo Contact · {zip_codes[0] if zip_codes else ''} · {radius}mi"
+        lead["_lead_source"] = f"ZoomInfo Geo - {zip_codes[0] if zip_codes else ''} - {radius}mi"
         lead["_priority"] = get_priority_label(lead.get("_score", 0))
 
     st.session_state.geo_results = scored

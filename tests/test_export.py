@@ -69,15 +69,27 @@ class TestBuildVanillasoftRow:
         today = datetime.now().strftime("%b %d %Y")
         assert row["List Source"] == f"SalesGenie {today}"
 
-    def test_lead_source_empty_by_default(self):
-        """Test that Lead Source is empty (List Source has attribution)."""
+    def test_lead_source_from_lead_source_tag(self):
+        """Test that Lead Source is populated from _lead_source."""
+        lead = {"companyName": "Test Co", "_lead_source": "ZoomInfo Intent - Vending - 85 - 2d"}
+        row = build_vanillasoft_row(lead)
+        assert row["Lead Source"] == "ZoomInfo Intent - Vending - 85 - 2d"
+
+    def test_lead_source_empty_when_no_tag(self):
+        """Test that Lead Source is empty when no _lead_source set."""
         lead = {"companyName": "Test Co"}
         row = build_vanillasoft_row(lead)
         assert row["Lead Source"] == ""
 
-    def test_call_priority_empty(self):
-        """Test that Call Priority is left empty (VanillaSoft handles routing)."""
+    def test_call_priority_from_score(self):
+        """Test that Call Priority is derived from _priority."""
         lead = {"companyName": "Test Co", "_priority": "High"}
+        row = build_vanillasoft_row(lead)
+        assert row["Call Priority"] == "High"
+
+    def test_call_priority_empty_when_no_score(self):
+        """Test that Call Priority is empty when no _priority set."""
+        lead = {"companyName": "Test Co"}
         row = build_vanillasoft_row(lead)
         assert row["Call Priority"] == ""
 
@@ -213,11 +225,11 @@ class TestExportLeadsToCsv:
         leads = [{"companyName": "Test"}]
 
         _, filename, _batch = export_leads_to_csv(leads, workflow_type="intent")
-        assert filename.startswith("intent_leads_")
+        assert filename.startswith("HADES-intent-")
         assert filename.endswith(".csv")
 
         _, filename, _batch = export_leads_to_csv(leads, workflow_type="geography")
-        assert filename.startswith("geography_leads_")
+        assert filename.startswith("HADES-geography-")
 
     def test_operator_added_to_all_rows(self):
         """Test that operator is added to all rows."""

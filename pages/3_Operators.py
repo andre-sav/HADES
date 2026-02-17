@@ -6,7 +6,7 @@ Superhuman-inspired: clean, focused, inline editing.
 import streamlit as st
 import streamlit_shadcn_ui as ui
 from turso_db import get_database
-from ui_components import inject_base_styles, page_header, paginate_items, pagination_controls
+from ui_components import inject_base_styles, page_header, paginate_items, pagination_controls, empty_state
 
 st.set_page_config(page_title="Operators", page_icon="👤", layout="wide")
 
@@ -223,6 +223,7 @@ if st.session_state.operators_adding:
                         team=new_team or None,
                     )
                     st.session_state.operators_adding = False
+                    st.toast(f"Operator '{new_name}' created")
                     st.rerun()
                 except Exception as e:
                     if "UNIQUE" in str(e):
@@ -243,9 +244,9 @@ if st.session_state.operators_adding:
 # =============================================================================
 if not filtered_operators:
     if search_query:
-        st.caption("No operators match your search")
+        empty_state("No operators match your search", icon="🔍", hint="Try a different search term.")
     else:
-        st.caption("No operators yet")
+        empty_state("No operators yet", icon="👤", hint="Click '+ Add operator' to create your first operator.")
 else:
     # Paginate the operator list
     page_items, current_page, total_pages = paginate_items(filtered_operators, page_size=20, page_key="operators_page")

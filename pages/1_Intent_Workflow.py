@@ -5,25 +5,30 @@ Pipeline: Intent Search → Select Companies → Resolve company IDs → Contact
 Dual mode: Autopilot (auto-select) and Manual Review (user selects companies + contacts).
 """
 
+import hashlib
 import json
+import logging
 
 import streamlit as st
 import streamlit_shadcn_ui as ui
+
+logger = logging.getLogger(__name__)
 import pandas as pd
 from datetime import datetime
 
 from turso_db import get_database
+from errors import PipelineError
 from zoominfo_client import (
     get_zoominfo_client,
     IntentQueryParams,
     ContactQueryParams,
-    ZoomInfoError,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
 from scoring import (
     score_intent_leads,
     score_intent_contacts,
     get_priority_label,
+    calculate_age_days,
 )
 from dedup import dedupe_leads
 from cost_tracker import CostTracker
@@ -106,6 +111,15 @@ for key, default in defaults.items():
         st.session_state[key] = default
 
 
+def _intent_cache_key(topics: list[str], signal_strengths: list[str]) -> str:
+    """Generate a deterministic cache key from intent search parameters."""
+    normalized = json.dumps(
+        {"topics": sorted(topics), "signals": sorted(signal_strengths)},
+        sort_keys=True,
+    )
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+
 # =============================================================================
 # HEADER
 # =============================================================================
@@ -113,10 +127,12 @@ budget = cost_tracker.format_budget_display("intent")
 if budget["has_cap"]:
     remaining = budget["remaining"]
     pct = budget["percent"]
-    if pct > 90:
+    if pct >= 95:
         badge = status_badge("error", f"{remaining:,} left")
-    elif pct > 70:
+    elif pct >= 80:
         badge = status_badge("warning", f"{remaining:,} left")
+    elif pct >= 50:
+        badge = status_badge("neutral", f"{remaining:,} left")
     else:
         badge = status_badge("success", f"{remaining:,} left")
     page_header(
@@ -298,7 +314,11 @@ else:
             st.caption("**Intent Search filters:**")
             st.caption(f"Minimum employees: {get_employee_minimum():,}")
             st.caption(f"Maximum employees: {get_employee_maximum():,}")
-            st.caption(f"SIC codes: {len(get_sic_codes())} industries")
+            sic_with_names = get_sic_codes_with_descriptions()
+            st.caption(f"SIC codes: {len(sic_with_names)} industries")
+            with st.popover("View SIC codes"):
+                for code, desc in sic_with_names:
+                    st.caption(f"**{code}** — {desc}")
         with filter_col2:
             st.caption("**Contact Search filters:**")
             intent_mgmt_levels = st.multiselect(
@@ -323,6 +343,19 @@ else:
                 help="Contact must have at least one selected phone type",
             )
 
+    # Query Preview (shown when parameters are selected)
+    can_query = len(selected_topics) > 0 and len(signal_strengths) > 0
+    if can_query:
+        _strength_to_score_preview = {"High": 90, "Medium": 75, "Low": 60}
+        _min_score = min(_strength_to_score_preview.get(s, 60) for s in signal_strengths)
+        _preview_parts = [
+            f"**Topics**: {', '.join(selected_topics)}",
+            f"**Signal**: {', '.join(signal_strengths)} (score >= {_min_score})",
+            f"**Employees**: {get_employee_minimum():,}–{get_employee_maximum():,}",
+            f"**Industries**: {len(get_sic_codes())} SIC codes",
+        ]
+        st.caption(" · ".join(_preview_parts))
+
     # Target companies input
     target_col1, target_col2, target_col3 = st.columns([1, 1, 2])
     with target_col1:
@@ -335,12 +368,12 @@ else:
             help="Number of top companies to select for contact search.",
         )
     with target_col2:
-        can_query = len(selected_topics) > 0 and len(signal_strengths) > 0
+        _budget_exceeded = budget.get("has_cap") and budget.get("percent", 0) >= 100
         search_clicked = st.button(
-            "Search Companies",
+            "Search Companies" if not _budget_exceeded else "Budget Exceeded",
             type="primary",
             use_container_width=True,
-            disabled=not can_query,
+            disabled=not can_query or _budget_exceeded,
         )
 
     # Reset button
@@ -365,109 +398,178 @@ if search_clicked:
     if budget_status.alert_level in ("warning", "critical"):
         st.warning(budget_status.alert_message)
 
-    with st.spinner("Searching for intent companies..."):
-        try:
-            client = get_zoominfo_client()
-            params = IntentQueryParams(
-                topics=selected_topics,
-                signal_strengths=signal_strengths,
-                employee_min=get_employee_minimum(),
-                sic_codes=get_sic_codes(),
-            )
+    # Cache-first lookup
+    _cache_key = _intent_cache_key(selected_topics, signal_strengths)
+    _force_refresh = st.session_state.get("_intent_force_refresh", False)
+    st.session_state["_intent_force_refresh"] = False  # reset flag
 
-            # Build request body for display (mirrors search_intent logic)
-            _strength_to_score = {"High": 90, "Medium": 75, "Low": 60}
-            _display_body = {
-                "topics": params.topics,
-                "rpp": params.page_size,
-                "page": params.page,
-            }
-            if params.signal_strengths:
-                _display_body["signalScoreMin"] = min(_strength_to_score.get(s, 60) for s in params.signal_strengths)
-            if params.employee_min:
-                _display_body["employeeRangeMin"] = str(params.employee_min)
-            if params.sic_codes:
-                _display_body["sicCodes"] = f"[{len(params.sic_codes)} codes]"
+    cached_leads = None if _force_refresh else db.get_cached_results(_cache_key)
 
-            st.session_state["_intent_api_request"] = {
-                "method": "POST",
-                "endpoint": "/search/intent",
-                "body": _display_body,
-                "query_params": None,
-            }
+    if cached_leads is not None:
+        # Cache hit — use cached results directly
+        st.session_state["_intent_from_cache"] = True
+        scored = score_intent_leads(cached_leads)
+        deduped, removed = dedupe_leads(scored)
 
-            leads = client.search_intent_all_pages(params, max_pages=5)
+        for lead in deduped:
+            topic = lead.get("intentTopic", selected_topics[0] if selected_topics else "")
+            score = lead.get("_score", 0)
+            age = calculate_age_days(lead.get("intentDate"))
+            lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
+            lead["_priority"] = get_priority_label(score)
 
-            st.session_state["_intent_api_response_summary"] = {
-                "total_results": len(leads),
-                "sample": leads[:3] if leads else [],
-                "raw_keys": getattr(client, "_last_intent_raw_keys", []),
-                "raw_sample": getattr(client, "_last_intent_raw_sample", {}),
-            }
+        st.session_state.intent_companies = deduped
+        st.session_state.intent_search_executed = True
+        st.session_state.intent_query_params = {
+            "topics": selected_topics,
+            "signal_strengths": signal_strengths,
+        }
+        st.session_state["_intent_dedup_removed"] = removed
 
-            if not leads:
-                st.info("No companies found matching criteria.")
-                st.session_state.intent_companies = None
-                st.session_state.intent_search_executed = True
-            else:
-                scored = score_intent_leads(leads)
-                deduped, removed = dedupe_leads(scored)
+        # Log cache hit (credits=0) so it appears in Usage Dashboard
+        cost_tracker.log_usage(
+            workflow_type="intent",
+            query_params=st.session_state.intent_query_params,
+            credits_used=0,
+            leads_returned=len(deduped),
+        )
+        db.log_query(
+            workflow_type="intent",
+            query_params=st.session_state.intent_query_params,
+            leads_returned=len(deduped),
+        )
 
-                for lead in deduped:
-                    topic = lead.get("intentTopic", selected_topics[0] if selected_topics else "")
-                    lead["_lead_source"] = f"ZoomInfo Intent · {topic}"
-                    lead["_priority"] = get_priority_label(lead.get("_score", 0))
+        # In autopilot, auto-select top N
+        if st.session_state.intent_mode == "autopilot":
+            top_n = deduped[:target_companies]
+            auto_selected = {}
+            for lead in top_n:
+                cid = str(lead.get("companyId", ""))
+                if cid:
+                    auto_selected[cid] = lead
+            st.session_state.intent_selected_companies = auto_selected
+            st.session_state.intent_companies_confirmed = True
 
-                st.session_state.intent_companies = deduped
-                st.session_state.intent_search_executed = True
-                st.session_state.intent_query_params = {
-                    "topics": selected_topics,
-                    "signal_strengths": signal_strengths,
-                }
+        st.rerun()
 
-                st.session_state["_intent_api_response_summary"]["after_scoring"] = {
-                    "scored": len(scored),
-                    "deduped": len(deduped),
-                    "removed": removed,
-                }
-
-                # Log intent search usage (search is free — credits only on enrich)
-                cost_tracker.log_usage(
-                    workflow_type="intent",
-                    query_params=st.session_state.intent_query_params,
-                    credits_used=0,
-                    leads_returned=len(deduped),
-                )
-                db.log_query(
-                    workflow_type="intent",
-                    query_params=st.session_state.intent_query_params,
-                    leads_returned=len(deduped),
-                )
-
-                # In autopilot, auto-select top N
-                if st.session_state.intent_mode == "autopilot":
-                    top_n = deduped[:target_companies]
-                    auto_selected = {}
-                    for lead in top_n:
-                        cid = str(lead.get("companyId", ""))
-                        if cid:
-                            auto_selected[cid] = lead
-                    st.session_state.intent_selected_companies = auto_selected
-                    st.session_state.intent_companies_confirmed = True
-
-                st.rerun()
-
-        except ZoomInfoError as e:
-            st.session_state["_intent_api_error"] = str(e.user_message)
-            st.session_state["_intent_api_exchange"] = getattr(client, "last_exchange", None)
-            st.error(e.user_message)
-        except Exception as e:
-            st.session_state["_intent_api_error"] = str(e)
+    else:
+        # Cache miss — call API
+        st.session_state["_intent_from_cache"] = False
+        with st.spinner("Searching for intent companies..."):
             try:
+                client = get_zoominfo_client()
+                params = IntentQueryParams(
+                    topics=selected_topics,
+                    signal_strengths=signal_strengths,
+                    employee_min=get_employee_minimum(),
+                    sic_codes=get_sic_codes(),
+                )
+
+                # Build request body for display (mirrors search_intent logic)
+                _strength_to_score = {"High": 90, "Medium": 75, "Low": 60}
+                _display_body = {
+                    "topics": params.topics,
+                    "rpp": params.page_size,
+                    "page": params.page,
+                }
+                if params.signal_strengths:
+                    _display_body["signalScoreMin"] = min(_strength_to_score.get(s, 60) for s in params.signal_strengths)
+                if params.employee_min:
+                    _display_body["employeeRangeMin"] = str(params.employee_min)
+                if params.sic_codes:
+                    _display_body["sicCodes"] = f"[{len(params.sic_codes)} codes]"
+
+                st.session_state["_intent_api_request"] = {
+                    "method": "POST",
+                    "endpoint": "/search/intent",
+                    "body": _display_body,
+                    "query_params": None,
+                }
+
+                leads = client.search_intent_all_pages(params, max_pages=5)
+
+                st.session_state["_intent_api_response_summary"] = {
+                    "total_results": len(leads),
+                    "sample": leads[:3] if leads else [],
+                    "raw_keys": getattr(client, "_last_intent_raw_keys", []),
+                    "raw_sample": getattr(client, "_last_intent_raw_sample", {}),
+                }
+
+                if not leads:
+                    st.info("No companies found matching criteria.")
+                    st.session_state.intent_companies = None
+                    st.session_state.intent_search_executed = True
+                else:
+                    # Cache raw leads for future lookups
+                    db.cache_results(
+                        cache_id=_cache_key,
+                        workflow_type="intent",
+                        query_params={"topics": selected_topics, "signal_strengths": signal_strengths},
+                        leads=leads,
+                    )
+
+                    scored = score_intent_leads(leads)
+                    deduped, removed = dedupe_leads(scored)
+
+                    for lead in deduped:
+                        topic = lead.get("intentTopic", selected_topics[0] if selected_topics else "")
+                        score = lead.get("_score", 0)
+                        age = calculate_age_days(lead.get("intentDate"))
+                        lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
+                        lead["_priority"] = get_priority_label(score)
+
+                    st.session_state.intent_companies = deduped
+                    st.session_state.intent_search_executed = True
+                    st.session_state.intent_query_params = {
+                        "topics": selected_topics,
+                        "signal_strengths": signal_strengths,
+                    }
+                    st.session_state["_intent_dedup_removed"] = removed
+
+                    st.session_state["_intent_api_response_summary"]["after_scoring"] = {
+                        "scored": len(scored),
+                        "deduped": len(deduped),
+                        "removed": removed,
+                    }
+
+                    # Log intent search usage (search is free — credits only on enrich)
+                    cost_tracker.log_usage(
+                        workflow_type="intent",
+                        query_params=st.session_state.intent_query_params,
+                        credits_used=0,
+                        leads_returned=len(deduped),
+                    )
+                    db.log_query(
+                        workflow_type="intent",
+                        query_params=st.session_state.intent_query_params,
+                        leads_returned=len(deduped),
+                    )
+
+                    # In autopilot, auto-select top N
+                    if st.session_state.intent_mode == "autopilot":
+                        top_n = deduped[:target_companies]
+                        auto_selected = {}
+                        for lead in top_n:
+                            cid = str(lead.get("companyId", ""))
+                            if cid:
+                                auto_selected[cid] = lead
+                        st.session_state.intent_selected_companies = auto_selected
+                        st.session_state.intent_companies_confirmed = True
+
+                    st.rerun()
+
+            except PipelineError as e:
+                st.session_state["_intent_api_error"] = str(e.user_message)
                 st.session_state["_intent_api_exchange"] = getattr(client, "last_exchange", None)
-            except Exception:
-                pass
-            st.error(str(e))
+                st.error(e.user_message)
+            except Exception as e:
+                st.session_state["_intent_api_error"] = "An unexpected error occurred"
+                try:
+                    st.session_state["_intent_api_exchange"] = getattr(client, "last_exchange", None)
+                except Exception:
+                    pass
+                logger.exception("Intent search failed")
+                st.error("An unexpected error occurred. Check application logs for details.")
 
 # --- API Request / Response Debug Panel (hidden when results showing) ---
 _has_debug = not _results_showing and (
@@ -562,6 +664,32 @@ if _has_debug:
                         clean = [{k: v for k, v in item.items() if not k.startswith("_") and v not in ("", None, [], {})} for item in sample]
                         st.code(json.dumps(clean, indent=2, default=str), language="json")
 
+
+# =============================================================================
+# CACHE / DEDUP INDICATORS (shown after search, before company list)
+# =============================================================================
+if st.session_state.intent_search_executed and st.session_state.intent_companies:
+    _indicator_parts = []
+    _dedup_removed = st.session_state.get("_intent_dedup_removed", 0)
+    if _dedup_removed:
+        _indicator_parts.append(f"{_dedup_removed} duplicate{'s' if _dedup_removed != 1 else ''} removed")
+    if st.session_state.get("_intent_from_cache"):
+        _indicator_parts.append("Cached results")
+
+    if _indicator_parts:
+        _info_col, _refresh_col = st.columns([4, 1])
+        with _info_col:
+            st.caption(" · ".join(_indicator_parts))
+        if st.session_state.get("_intent_from_cache"):
+            with _refresh_col:
+                if ui.button(text="Refresh", variant="outline", key="intent_cache_refresh_btn"):
+                    st.session_state["_intent_force_refresh"] = True
+                    # Reset search state so search_clicked can re-trigger
+                    st.session_state.intent_companies = None
+                    st.session_state.intent_search_executed = False
+                    st.session_state.intent_companies_confirmed = False
+                    st.session_state.intent_selected_companies = {}
+                    st.rerun()
 
 # =============================================================================
 # STEP 2: SELECT COMPANIES (Manual mode only; Autopilot auto-advances)
@@ -800,12 +928,13 @@ if (
                         else:
                             st.rerun()
 
-            except ZoomInfoError as e:
+            except PipelineError as e:
                 search_status.update(label="❌ API Error", state="error")
                 st.error(e.user_message)
             except Exception as e:
                 search_status.update(label="❌ Contact search failed", state="error")
-                st.error(str(e))
+                logger.exception("Contact search failed")
+                st.error("Contact search failed unexpectedly. Check application logs.")
 
     # Show contacts for manual selection
     if (
@@ -987,10 +1116,11 @@ if (
                             st.session_state.intent_enriched_contacts = enriched
                             st.session_state.intent_enrichment_done = True
                             st.rerun()
-                        except ZoomInfoError as e:
+                        except PipelineError as e:
                             st.error(f"Enrichment failed: {e.user_message}")
                         except Exception as e:
-                            st.error(f"Enrichment failed: {str(e)}")
+                            logger.exception("Enrichment failed")
+                            st.error("Enrichment failed unexpectedly. Check application logs.")
 
 
 # =============================================================================
@@ -1021,8 +1151,10 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         if not topic and st.session_state.intent_query_params:
             topics = st.session_state.intent_query_params.get("topics", [])
             topic = topics[0] if topics else ""
-        lead["_lead_source"] = f"ZoomInfo Intent · {topic}"
-        lead["_priority"] = get_priority_label(lead.get("_score", 0))
+        score = lead.get("_score", 0)
+        age = lead.get("_intent_age_days", 0)
+        lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
+        lead["_priority"] = get_priority_label(score)
 
     st.session_state.intent_results = scored
 

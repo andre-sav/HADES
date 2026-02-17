@@ -15,7 +15,7 @@ from scoring import (
     score_intent_contacts,
     get_score_breakdown_intent_contact,
     get_priority_label,
-    _calculate_age_days,
+    calculate_age_days,
     _calculate_authority_score,
 )
 
@@ -361,45 +361,45 @@ class TestAgeCalculation:
     def test_today(self):
         """Test age of today's date."""
         today = date.today().isoformat()
-        assert _calculate_age_days(today) == 0
+        assert calculate_age_days(today) == 0
 
     def test_yesterday(self):
         """Test age of yesterday."""
         yesterday = (date.today() - timedelta(days=1)).isoformat()
-        assert _calculate_age_days(yesterday) == 1
+        assert calculate_age_days(yesterday) == 1
 
     def test_week_ago(self):
         """Test age of a week ago."""
         week_ago = (date.today() - timedelta(days=7)).isoformat()
-        assert _calculate_age_days(week_ago) == 7
+        assert calculate_age_days(week_ago) == 7
 
     def test_iso_with_time(self):
         """Test ISO format with time component."""
         today = date.today().isoformat() + "T12:00:00Z"
-        assert _calculate_age_days(today) == 0
+        assert calculate_age_days(today) == 0
 
     def test_none_returns_max(self):
         """Test None returns max age."""
-        assert _calculate_age_days(None) == 999
+        assert calculate_age_days(None) == 999
 
     def test_invalid_returns_max(self):
         """Test invalid date returns max age."""
-        assert _calculate_age_days("not-a-date") == 999
+        assert calculate_age_days("not-a-date") == 999
 
     def test_us_format_with_time(self):
         """Test US format M/D/YYYY h:mm AM from legacy intent API."""
         today_str = date.today().strftime("%m/%d/%Y") + " 12:00 AM"
-        assert _calculate_age_days(today_str) == 0
+        assert calculate_age_days(today_str) == 0
 
     def test_us_format_without_time(self):
         """Test US format M/D/YYYY without time."""
         yesterday = date.today() - timedelta(days=1)
-        assert _calculate_age_days(yesterday.strftime("%m/%d/%Y")) == 1
+        assert calculate_age_days(yesterday.strftime("%m/%d/%Y")) == 1
 
     def test_us_format_single_digit_month(self):
         """Test US format with single-digit month/day."""
         today_str = date.today().strftime("%-m/%-d/%Y") + " 3:45 PM"
-        assert _calculate_age_days(today_str) == 0
+        assert calculate_age_days(today_str) == 0
 
 
 class TestPriorityLabel:
@@ -750,21 +750,21 @@ class TestMessyDataEdgeCases:
 
     def test_truncated_iso_date(self):
         """Truncated ISO date '2025-02-' should return 999."""
-        assert _calculate_age_days("2025-02-") == 999
+        assert calculate_age_days("2025-02-") == 999
 
     def test_date_with_milliseconds(self):
         """ISO date with milliseconds should parse."""
-        result = _calculate_age_days("2026-01-15T10:30:00.123Z")
+        result = calculate_age_days("2026-01-15T10:30:00.123Z")
         assert result >= 0
 
     def test_date_empty_string(self):
         """Empty string date returns 999."""
-        assert _calculate_age_days("") == 999
+        assert calculate_age_days("") == 999
 
     def test_date_whitespace_only(self):
         """Whitespace-only date returns 999."""
-        assert _calculate_age_days("   ") == 999
+        assert calculate_age_days("   ") == 999
 
     def test_future_date_clamped(self):
         """Future date returns 0 (not negative)."""
-        assert _calculate_age_days("2099-01-01") == 0
+        assert calculate_age_days("2099-01-01") == 0

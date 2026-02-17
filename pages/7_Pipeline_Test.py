@@ -9,11 +9,10 @@ from datetime import datetime
 import streamlit as st
 import pandas as pd
 
+from errors import PipelineError
 from zoominfo_client import (
     get_zoominfo_client,
     ContactQueryParams,
-    ZoomInfoError,
-    ZoomInfoAuthError,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
 from scoring import score_geography_leads, get_priority_label
@@ -209,7 +208,7 @@ if st.session_state.test_request_confirmed and st.session_state.test_search_requ
                     "data": {"token_expires": str(client.token_expires_at)},
                 }
                 status.update(label="Step 1: Authentication ✅", state="complete")
-            except ZoomInfoAuthError as e:
+            except PipelineError as e:
                 results["auth"] = {
                     "status": "fail",
                     "message": f"Auth failed: {e.user_message}",
@@ -286,7 +285,7 @@ if st.session_state.test_request_confirmed and st.session_state.test_search_requ
                 **Accuracy:** {results['search']['data']['accuracy_score']}
                 """)
 
-            except ZoomInfoError as e:
+            except PipelineError as e:
                 results["search"] = {
                     "status": "fail",
                     "message": e.user_message,
@@ -374,7 +373,7 @@ if st.session_state.test_request_confirmed and st.session_state.test_search_requ
                 except Exception as log_err:
                     st.warning(f"Usage logging failed: {log_err}")
 
-            except ZoomInfoError as e:
+            except PipelineError as e:
                 results["enrich"] = {
                     "status": "fail",
                     "message": e.user_message,

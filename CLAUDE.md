@@ -40,6 +40,7 @@ HADES/
 ├── scoring.py            # Lead scoring engine
 ├── dedup.py              # Deduplication logic
 ├── cost_tracker.py       # Budget controls
+├── errors.py             # PipelineError base class and exception hierarchy
 ├── export.py             # VanillaSoft CSV generation
 ├── utils.py              # Config loading, phone formatting, ZIP-to-state mapping
 ├── geo.py                # ZIP radius calculations, haversine distance
@@ -60,7 +61,7 @@ HADES/
 │   └── _credentials.py           # Credential loader (env → toml → st.secrets)
 ├── .github/workflows/
 │   └── intent-poll.yml           # Daily intent poll (Mon-Fri 7AM ET)
-├── tests/                # 451 tests (pytest)
+├── tests/                # 474 tests (pytest)
 └── docs/
     └── stories/          # User stories with acceptance criteria
 ```
@@ -251,7 +252,7 @@ states = get_states_from_zips(zips)
 
 ## Status
 
-- **451 tests passing** (all tests green)
+- **474 tests passing** (all tests green)
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
 - ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).
 - ✅ **Target Contacts Expansion** - Implemented 2026-02-03

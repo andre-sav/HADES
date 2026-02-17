@@ -74,8 +74,11 @@ def build_vanillasoft_row(
     today = datetime.now().strftime("%b %d %Y")  # e.g., "Jan 29 2026"
     row["List Source"] = f"{data_source} {today}"
 
-    # Lead Source can hold workflow-specific tag (optional)
-    row["Lead Source"] = ""
+    # Lead Source: workflow-specific tag from scoring (e.g., "ZoomInfo Intent - Vending - 85 - 2d")
+    row["Lead Source"] = lead.get("_lead_source", "")
+
+    # Call Priority derived from composite score priority label
+    row["Call Priority"] = lead.get("_priority", "")
 
     # Contact Owner: call center agent email (round-robin assigned by export_leads_to_csv)
     row["Contact Owner"] = contact_owner
@@ -148,8 +151,8 @@ def export_leads_to_csv(
         writer.writerow(row)
 
     csv_content = output.getvalue()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    filename = f"{workflow_type}_leads_{timestamp}.csv"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"HADES-{workflow_type}-{timestamp}.csv"
 
     return csv_content, filename, batch_id
 

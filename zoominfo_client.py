@@ -13,6 +13,7 @@ from typing import Any
 import requests
 import streamlit as st
 
+from errors import PipelineError
 from utils import get_sic_codes, get_employee_minimum, get_employee_maximum
 
 # Configure logging
@@ -31,14 +32,14 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 
-class ZoomInfoError(Exception):
-    """Base exception for ZoomInfo API errors."""
+class ZoomInfoError(PipelineError):
+    """Base for all ZoomInfo API errors.
 
-    def __init__(self, message: str, user_message: str, recoverable: bool = True):
-        self.message = message
-        self.user_message = user_message
-        self.recoverable = recoverable
-        super().__init__(message)
+    Catch this to distinguish ZoomInfo failures from other pipeline
+    errors (e.g., BudgetExceededError). Otherwise catch PipelineError.
+    """
+
+    pass
 
 
 class ZoomInfoAuthError(ZoomInfoError):
@@ -76,9 +77,11 @@ class ZoomInfoAPIError(ZoomInfoError):
 
     def __init__(self, status_code: int, message: str):
         self.status_code = status_code
+        # Truncate raw response for user_message to avoid leaking verbose API bodies
+        safe_msg = (message[:200].replace("\n", " ").strip()) if message else "Unknown error"
         super().__init__(
             message=f"API error {status_code}: {message}",
-            user_message=f"ZoomInfo API error: {message}",
+            user_message=f"ZoomInfo API error ({status_code}): {safe_msg}",
             recoverable=status_code >= 500,
         )
 
@@ -239,7 +242,6 @@ class ZoomInfoClient:
                 ("zoominfo_token",),
             )
             if rows:
-                import json
                 data = json.loads(rows[0][0])
                 token = data.get("jwt")
                 expires_at_str = data.get("expires_at")
@@ -256,7 +258,6 @@ class ZoomInfoClient:
         if not self._token_store or not self.access_token:
             return
         try:
-            import json
             data = json.dumps({
                 "jwt": self.access_token,
                 "expires_at": self.token_expires_at.isoformat(),
@@ -1105,7 +1106,7 @@ class ZoomInfoClient:
                     if "data" in item and isinstance(item["data"], list) and item["data"]:
                         contact = item["data"][0]
                         contacts.append(contact)
-                        logger.debug(f"Extracted contact: {contact.get('firstName', '')} {contact.get('lastName', '')}")
+                        logger.debug(f"Extracted contact: personId={contact.get('personId', 'N/A')}")
                     elif "firstName" in item or "lastName" in item:
                         # Direct contact object (no nesting)
                         contacts.append(item)
@@ -1126,7 +1127,7 @@ class ZoomInfoClient:
                             if "data" in item and isinstance(item["data"], list) and item["data"]:
                                 contact = item["data"][0]
                                 contacts.append(contact)
-                                logger.debug(f"Extracted contact from result: {contact.get('firstName', '')} {contact.get('lastName', '')}")
+                                logger.debug(f"Extracted contact from result: personId={contact.get('personId', 'N/A')}")
                             elif "firstName" in item or "lastName" in item:
                                 # Direct contact (no nesting)
                                 contacts.append(item)

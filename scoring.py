@@ -85,7 +85,7 @@ def calculate_intent_score(lead: dict) -> dict:
 
     # Freshness score
     intent_date = lead.get("intentDate")
-    age_days = _calculate_age_days(intent_date)
+    age_days = calculate_age_days(intent_date)
     freshness_multiplier, freshness_label = get_freshness_multiplier(age_days)
 
     # If stale, exclude the lead
@@ -295,7 +295,7 @@ def get_score_breakdown_geography(lead: dict) -> str:
     )
 
 
-def _calculate_age_days(date_str: str | None) -> int:
+def calculate_age_days(date_str: str | None) -> int:
     """Calculate age in days from a date string."""
     if not date_str:
         return 999  # Unknown date treated as very old
@@ -404,6 +404,7 @@ def score_intent_contacts(
             "_accuracy_score": accuracy_score,
             "_phone_score": phone_score,
             "_intent_topic": company_data.get("intentTopic", ""),
+            "_intent_age_days": calculate_age_days(company_data.get("intentDate")),
         }
         scored.append(scored_contact)
 
