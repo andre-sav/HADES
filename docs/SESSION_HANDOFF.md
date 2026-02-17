@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-13
-**Status:** Intent Workflow 9-issue fix complete, 382 tests passing
+**Date:** 2026-02-17
+**Status:** Intent automation shipped, design system extracted, 451 tests passing
 
 ## What's Working
 
@@ -23,16 +23,152 @@
 16. **Company ID Cache** - Turso `company_id_mapping` table persists hashed→numeric ID resolutions across sessions
 17. **Editable Contact Filters** - Management level, accuracy minimum, phone fields editable in Intent Workflow Filters expander
 18. **Calibration Script** - `calibrate_scoring.py` analyzes enriched delivery data and outputs per-SIC scores
+19. **Intent Polling Automation** - Headless pipeline script, GitHub Actions cron (Mon-Fri 7AM ET), manual Run Now button, pipeline_runs DB tracking, Automation dashboard page
+20. **Design System** - Extracted from `ui_components.py` into `.interface-design/system.md` — color tokens, typography, spacing, component patterns
+21. **Staged Exports** - Workflow results persist to `staged_exports` table, survive browser refresh
 
 ## Known Issues
 
-- **Intent field normalization (FIXED session 4)** — Legacy API returns `company.name` (nested), `signalDate` (not `intentDate`), and some fields as `null` requiring `or` fallbacks instead of `.get()` defaults. All fixed.
 - **v2 Intent API requires OAuth2 PKCE** — The new `/gtm/data/v1/intent/search` endpoint rejects legacy JWT. Using legacy endpoint instead.
 - **`@st.cache_resource` gotcha** — Code changes to cached classes require Streamlit restart.
 - **Contact Enrich** — Response parsing fixed but never tested with real production data.
 - **Intent search is free** — Only enrichment costs credits. Intent search `credits_used` set to 0.
 - **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers" (not "Vending", "Break Room", etc.)
-- **Claude in Chrome extension conflict** — Claude Desktop's native messaging host (`com.anthropic.claude_browser_extension.json`) claims the same Chrome extension ID as Claude Code's host. Renamed Desktop host to `.bak` but extension still won't connect. May need extension reload or reinstall. See troubleshooting notes in session 5.
+- **GitHub Actions secrets not configured** — The intent-poll.yml workflow is deployed but repo needs 7 secrets set: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, ZOOMINFO_CLIENT_ID, ZOOMINFO_CLIENT_SECRET, SMTP_USER, SMTP_PASSWORD, EMAIL_RECIPIENTS
+
+---
+
+## Session Summary (2026-02-17, Sessions 10-11)
+
+### Intent Polling Automation (Full Feature)
+
+Designed, planned, and implemented automated intent lead polling. 6-task TDD plan executed via subagent-driven development with two-stage review (spec compliance + code quality) per task.
+
+**Commits:**
+- `3854e2b` — `pipeline_runs` table + 3 DB methods + 9 tests
+- `0d25203` — Pipeline run logging with status tracking and trigger source
+- `c3535c8` — Credentials fallback to `st.secrets` for Run Now button
+- `3612af8` — GitHub Actions workflow (`intent-poll.yml`, Mon-Fri 7AM ET, `workflow_dispatch` with dry_run)
+- `6bbcee8` — Automation dashboard page (initial build)
+- `21e0c54` — CLAUDE.md updated (file structure, 451 tests)
+
+### Design System & UI Critique
+
+- `d4079c8` — Extracted design system from `ui_components.py` into `.interface-design/system.md`. Rebuilt Automation page with custom HTML run cards, budget progress bar, structured config display.
+- `bb985da` — Automation config block in `icp.yaml` + SMTP template
+- `3fa4a6a` — Zoho sync: ISO timestamp format fix + duplicate name guard
+- `c86e220` — Operators page: replaced unreliable `ui.button` with `st.button`
+- `76451bf` — Fixed `empty_state` rendering raw HTML (indented tags treated as code blocks by markdown parser)
+
+### Key Files Modified (Sessions 10-11)
+```
+turso_db.py                    - pipeline_runs table + 3 CRUD methods
+scripts/run_intent_pipeline.py - Headless intent pipeline with DB logging
+scripts/_credentials.py        - Env → secrets.toml → st.secrets fallback
+.github/workflows/intent-poll.yml - Cron + manual dispatch workflow
+pages/9_Automation.py          - Dashboard: metrics, Run Now, history, config
+.interface-design/system.md    - Formalized design system
+ui_components.py               - empty_state HTML rendering fix
+config/icp.yaml                - automation.intent config block
+zoho_sync.py                   - ISO timestamp + duplicate name guard
+pages/3_Operators.py           - st.button for sync actions
+.streamlit/secrets.toml.template - SMTP credential placeholders
+tests/test_turso_db.py         - 9 pipeline_runs tests
+tests/test_run_intent_pipeline.py - Pipeline logging + credential tests
+CLAUDE.md                      - File structure, test count 451
+```
+
+### Test Count
+451 tests passing (up from 438 at session 9)
+
+### What Needs Doing Next Session
+1. **Configure GitHub secrets** — 7 repo secrets needed for Actions cron to run
+2. **Live test all pipelines** — Intent, Geography, Enrich, Export end-to-end (beads HADES-1ln, HADES-kyi, HADES-5c7, HADES-kbu)
+3. **Zoho CRM dedup check at export** — P4 backlog (bead HADES-iic)
+
+### Beads Status
+```
+HADES-1ln [P2] Live test Intent pipeline end-to-end
+HADES-5c7 [P2] Live test Contact Enrich with real data
+HADES-kyi [P2] Live test Geography pipeline end-to-end
+HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+```
+
+---
+
+## Session Summary (2026-02-16, Session 9)
+
+### Staged Exports — Persist Leads for CSV Re-Export
+
+Implemented `staged_exports` table so workflow results survive browser refresh. Users can now re-export past runs without re-running the workflow.
+
+- **turso_db.py** — Added `staged_exports` table to `init_schema()` (auto-creates on app start), plus 4 methods: `save_staged_export()`, `get_staged_exports()`, `get_staged_export()`, `mark_staged_exported()`
+- **pages/1_Intent_Workflow.py** — Persist leads to `staged_exports` after scoring, with `intent_leads_staged` rerun guard
+- **pages/2_Geography_Workflow.py** — Same pattern with `geo_leads_staged` guard, includes `operator_id`
+- **pages/4_CSV_Export.py** — When session state empty, shows staged exports table with Load buttons. Loaded leads populate session state, existing export flow works unchanged. Mark-as-exported updates the staged row.
+
+### Messy Data Hardening (HADES-20n — CLOSED)
+
+Ran comprehensive code exploration across all API boundary code. Found and fixed 4 bugs, added 28 edge case tests.
+
+**Bugs fixed:**
+1. **scoring.py:156** — `float("5.0 miles")` crash in geography scoring → try/except + regex digit extraction
+2. **scoring.py:350** — `"95%" >= 95` type mismatch in contact scoring → int coercion + regex fallback
+3. **utils.py:316** — ZIP+4 with space `"75201 1234"` and 9-digit `"752011234"` → split/truncate to 5 digits
+4. **expand_search.py:119** — Mixed int/string company/person IDs → normalize to `str()` for dedup
+
+**28 new tests across:** test_scoring.py (17), test_utils.py (4), test_expand_search.py (4), test_dedup.py (3)
+
+### CLAUDE.md Updated
+
+- Test count 288 → 438
+- Documented schema auto-creation pattern and Streamlit rerun guard pattern
+- Added ZoomInfo messy data specifics (mixed ID types, string numerics, ZIP+4 variants)
+- Reviewed all available skills; identified `/commit`, `/code-review`, `systematic-debugging`, `dispatching-parallel-agents` as most relevant for HADES
+
+### Key Files Modified (This Session)
+```
+turso_db.py                    - staged_exports table + 4 CRUD methods
+scoring.py                     - Distance/accuracy defensive parsing
+utils.py                       - ZIP+4 space/9-digit handling
+expand_search.py               - Normalize company/person IDs to str
+pages/1_Intent_Workflow.py     - Persist leads to staged_exports
+pages/2_Geography_Workflow.py  - Persist leads to staged_exports
+pages/4_CSV_Export.py          - Load staged exports from DB
+tests/test_scoring.py          - 17 messy data edge case tests
+tests/test_utils.py            - 4 ZIP format edge case tests
+tests/test_expand_search.py    - 4 mixed ID edge case tests
+tests/test_dedup.py            - 3 HTML entity / unicode tests
+CLAUDE.md                      - Updated patterns, test count, messy data docs
+```
+
+### Uncommitted Changes (from prior sessions)
+4 modified files + 3 untracked from sessions before this one:
+- `.streamlit/secrets.toml.template` — Zoho/SMTP credential placeholders
+- `config/icp.yaml` — ICP config changes
+- `pages/3_Operators.py` — Operator page updates
+- `zoho_sync.py` — Sync logic changes
+- `scripts/_credentials.py`, `scripts/run_intent_pipeline.py`, `tests/test_run_intent_pipeline.py` — Untracked scripts
+
+### Test Count
+438 tests passing (up from 410 at session start)
+
+### What Needs Doing Next Session
+1. **Live test all pipelines** — Intent, Geography, Enrich, Export end-to-end (beads HADES-1ln, HADES-kyi, HADES-5c7, HADES-kbu)
+2. **Commit prior session changes** — 4 modified + 3 untracked files from sessions 6-8
+3. **Zoho CRM dedup check at export** — P4 backlog (bead HADES-iic)
+
+### Beads Status
+```
+HADES-1ln [P2] Live test Intent pipeline end-to-end
+HADES-5c7 [P2] Live test Contact Enrich with real data
+HADES-kyi [P2] Live test Geography pipeline end-to-end
+HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+HADES-20n [P2] CLOSED — 4 bugs fixed + 28 edge case tests
+HADES-bk3 [P2] CLOSED — Production test UX (visual audit + 10 fixes)
+```
 
 ---
 
@@ -399,7 +535,7 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Test Coverage
 
-- **296 tests passing** (all green, run `python -m pytest tests/ -v`)
+- **451 tests passing** (all green, run `python -m pytest tests/ -v`)
 
 ## API Usage
 
@@ -410,9 +546,9 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Next Steps (Priority Order)
 
-1. **Commit all changes** — 21 modified files from sessions 6-7 + new files
+1. **Configure GitHub secrets** — 7 repo secrets for intent polling cron
 2. **Live test all pipelines** — Intent, Geography, Enrich, Export end-to-end
-3. **Harden API clients** — Edge case tests for messy data
+3. **Zoho CRM dedup check at export** — P4 backlog
 
 ## Beads Status
 
@@ -421,8 +557,9 @@ HADES-1ln [P2] Live test Intent pipeline end-to-end
 HADES-5c7 [P2] Live test Contact Enrich with real data
 HADES-kyi [P2] Live test Geography pipeline end-to-end
 HADES-bk3 [P2] CLOSED - Production test UX (visual audit + 10 fixes applied)
-HADES-20n [P2] Harden API clients: edge case tests for messy data
+HADES-20n [P2] CLOSED — 4 bugs fixed + 28 edge case tests
 HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
+HADES-iic [P4] Add Zoho CRM dedup check at export time
 ```
 
 ## Chrome Extension Fix
@@ -444,4 +581,4 @@ python calibrate_scoring.py   # Re-run calibration analysis
 ```
 
 ---
-*Last updated: 2026-02-12 (Session 7)*
+*Last updated: 2026-02-17 (Session 11)*
