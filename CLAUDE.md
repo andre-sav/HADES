@@ -53,8 +53,14 @@ HADES/
 │   ├── 3_Operators.py            # Operator CRUD
 │   ├── 4_CSV_Export.py           # Export with operator metadata
 │   ├── 5_Usage_Dashboard.py      # Credit usage monitoring
-│   └── 6_Executive_Summary.py    # MTD metrics and trends
-├── tests/                # 438 tests (pytest)
+│   ├── 6_Executive_Summary.py    # MTD metrics and trends
+│   └── 9_Automation.py           # Automation dashboard + Run Now
+├── scripts/
+│   ├── run_intent_pipeline.py    # Headless intent pipeline (cron/manual)
+│   └── _credentials.py           # Credential loader (env → toml → st.secrets)
+├── .github/workflows/
+│   └── intent-poll.yml           # Daily intent poll (Mon-Fri 7AM ET)
+├── tests/                # 451 tests (pytest)
 └── docs/
     └── stories/          # User stories with acceptance criteria
 ```
@@ -245,7 +251,7 @@ states = get_states_from_zips(zips)
 
 ## Status
 
-- **438 tests passing** (all tests green)
+- **451 tests passing** (all tests green)
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
 - ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).
 - ✅ **Target Contacts Expansion** - Implemented 2026-02-03
