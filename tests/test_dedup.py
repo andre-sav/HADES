@@ -12,6 +12,7 @@ from dedup import (
     dedupe_by_phone,
     dedupe_leads,
     find_duplicates,
+    fuzzy_company_match,
     merge_lead_lists,
     flag_duplicates_in_list,
 )
@@ -342,3 +343,37 @@ class TestMessyCompanyNames:
         """None company name returns empty string."""
         assert normalize_company_name(None) == ""
         assert normalize_company_name("") == ""
+
+
+class TestFuzzyCompanyMatch:
+    """Tests for fuzzy company name matching."""
+
+    def test_exact_match(self):
+        assert fuzzy_company_match("acme", "acme") is True
+
+    def test_typo_match(self):
+        """One-char typo should match at default threshold."""
+        assert fuzzy_company_match("acme services", "acmee services") is True
+
+    def test_word_reorder_match(self):
+        """Word reorder should match (token_sort_ratio)."""
+        assert fuzzy_company_match("saint joseph hospital", "hospital saint joseph") is True
+
+    def test_abbreviation_match(self):
+        """Common abbreviation should match."""
+        assert fuzzy_company_match("st joseph hospital", "saint joseph hospital") is True
+
+    def test_different_companies_no_match(self):
+        """Genuinely different companies should not match."""
+        assert fuzzy_company_match("acme services", "beta industries") is False
+
+    def test_empty_strings_no_match(self):
+        """Empty strings should not match."""
+        assert fuzzy_company_match("", "") is False
+        assert fuzzy_company_match("acme", "") is False
+
+    def test_custom_threshold(self):
+        """Custom threshold should be respected."""
+        # "acme" vs "acmee" is ~89 ratio — passes at 85, fails at 95
+        assert fuzzy_company_match("acme", "acmee", threshold=80) is True
+        assert fuzzy_company_match("acme", "acmee", threshold=95) is False

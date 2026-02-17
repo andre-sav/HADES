@@ -197,3 +197,7 @@ automation:
     accuracy_min: 95
     phone_fields: ["mobilePhone", "directPhone", "phone"]
     dedup_days_back: 180
+
+# Cross-workflow dedup settings
+dedup:
+  fuzzy_threshold: 85

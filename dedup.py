@@ -5,7 +5,8 @@ Deduplication logic for phone numbers and cross-workflow leads.
 import re
 from typing import Any
 
-from utils import normalize_phone
+from rapidfuzz.fuzz import token_sort_ratio
+from utils import load_config, normalize_phone
 
 
 # Common company suffixes to strip for matching
@@ -54,6 +55,41 @@ def normalize_company_name(name: str) -> str:
     normalized = re.sub(r"\s+", " ", normalized).strip()
 
     return normalized
+
+
+def _get_fuzzy_threshold() -> float:
+    """Load fuzzy match threshold from config."""
+    config = load_config()
+    return config.get("dedup", {}).get("fuzzy_threshold", 85)
+
+
+def fuzzy_company_match(
+    name1: str,
+    name2: str,
+    threshold: float | None = None,
+) -> bool:
+    """
+    Check if two normalized company names are a fuzzy match.
+
+    Uses token_sort_ratio which handles word reordering.
+    Names should already be passed through normalize_company_name().
+
+    Args:
+        name1: First normalized company name
+        name2: Second normalized company name
+        threshold: Match threshold (0-100). None = use config value.
+
+    Returns:
+        True if names match above threshold
+    """
+    if not name1 or not name2:
+        return False
+
+    if threshold is None:
+        threshold = _get_fuzzy_threshold()
+
+    score = token_sort_ratio(name1, name2)
+    return score >= threshold
 
 
 def get_dedup_key(lead: dict) -> str:
