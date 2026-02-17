@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-17
-**Status:** Epics 1-3 implemented (12 tasks). 474 tests passing. Ready for live testing + Epic 4 remaining gaps.
+**Status:** All 4 epics implemented (18 stories complete). 492 tests passing. Ready for live testing.
 
 ## What's Working
 
@@ -36,6 +36,78 @@
 - **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers" (not "Vending", "Break Room", etc.)
 - **SMTP secrets not configured** — GitHub Actions has 4 required secrets set (Turso + ZoomInfo) but SMTP_USER, SMTP_PASSWORD, EMAIL_RECIPIENTS not set. Pipeline runs but skips email delivery.
 - **managementLevel as list** — ZoomInfo enrich API returns `managementLevel` as a list (e.g. `["Manager"]`) while Contact Search returns a string. Fixed in scoring.py (session 12).
+
+---
+
+## Session Summary (2026-02-17, Session 15)
+
+### All Remaining Stories Implemented (4 stories)
+
+Committed session 14 changes (2 commits: project code + BMAD tooling) then implemented all 4 remaining story gaps.
+
+**Story 2.6: Cross-Workflow Dedup UI**
+- Added dedup check section to CSV Export page (`pages/4_CSV_Export.py`)
+- When both Intent and Geography leads are staged, detects cross-workflow duplicates
+- Shows duplicate table with scores from both workflows, "Kept In" pill indicator
+- Checkbox to exclude lower-scored duplicates (default: ON)
+- Uses existing `find_duplicates()` and `flag_duplicates_in_list()` from `dedup.py`
+
+**Story 4.1: Usage Dashboard Date Range Filter**
+- Added `get_queries_by_date_range()` to `turso_db.py` with start/end date + optional workflow filter
+- Replaced hardcoded `limit=20` "Recent Queries" tab with date range selector
+- Options: This Week, This Month, Last 30 Days, Custom (date picker)
+- Added workflow filter dropdown (All/Intent/Geography)
+- Added "Exported" column to query history table
+
+**Story 4.2: Executive Summary Narrative Metrics**
+- Created `narrative_metric()` component in `ui_components.py`
+- Renders metrics as sentences with highlighted values (accent color, mono font)
+- Left border accent, optional subtext for context
+- Updated Executive Summary Overview tab: "312 leads exported at 2.38 credits per lead"
+- Budget narrative: "487 of 500 (97%) weekly Intent credits used"
+- Geography narrative: "23 searches this month · no credit cap"
+
+**Story 4.3: Pipeline Health Dashboard**
+- Created `pages/10_Pipeline_Health.py` — entirely new page
+- 4 health indicators with green/yellow/red dot + status label:
+  - Last Query (green <1h, yellow <6h, red >6h)
+  - Cache (active/total entries, newest entry age)
+  - Database (Turso connection ping)
+  - ZoomInfo API (token validity check)
+- Recent pipeline runs table with status pills (Completed/Failed/Running)
+- Recent query activity summary
+- "Refresh Status" button clears cache and re-checks all indicators
+- Added `get_cache_stats()` to `turso_db.py`
+
+### Key Files Created/Modified (Session 15)
+```
+pages/4_CSV_Export.py          - Cross-workflow dedup UI
+pages/5_Usage_Dashboard.py     - Date range filter on Recent Queries
+pages/6_Executive_Summary.py   - narrative_metric integration
+pages/10_Pipeline_Health.py    - NEW: Pipeline Health dashboard
+ui_components.py               - narrative_metric() component
+turso_db.py                    - get_queries_by_date_range(), get_cache_stats()
+tests/test_turso_db.py         - 7 new tests (date range + cache stats)
+tests/test_ui_components.py    - 4 new tests (narrative_metric)
+tests/test_pipeline_health.py  - NEW: 7 tests (time_ago helper)
+CLAUDE.md                      - Test count 474→492, added page 10
+```
+
+### Test Count
+492 tests passing (up from 474)
+
+### What Needs Doing Next Session
+1. **Live test Geography pipeline** — Needs browser interaction (bead HADES-kyi)
+2. **Live test full Streamlit UI** — All pages through Streamlit (bead HADES-kbu)
+3. **Configure SMTP secrets** — For email delivery from GitHub Actions
+4. **Zoho CRM dedup check at export** — P4 backlog (bead HADES-iic)
+
+### Beads Status
+```
+HADES-kyi [P2] Live test Geography pipeline end-to-end
+HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+```
 
 ---
 
