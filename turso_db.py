@@ -231,6 +231,26 @@ class TursoDatabase:
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_staged_created ON staged_exports(created_at)",
+            # Pipeline automation run history
+            """
+            CREATE TABLE IF NOT EXISTS pipeline_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_type TEXT NOT NULL,
+                trigger TEXT NOT NULL,
+                status TEXT NOT NULL,
+                config_json TEXT,
+                summary_json TEXT,
+                batch_id TEXT,
+                credits_used INTEGER DEFAULT 0,
+                leads_exported INTEGER DEFAULT 0,
+                error_message TEXT,
+                started_at TIMESTAMP NOT NULL,
+                completed_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_workflow ON pipeline_runs(workflow_type)",
+            "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_created ON pipeline_runs(created_at)",
         ]
 
         for statement in schema_statements:
@@ -770,6 +790,63 @@ class TursoDatabase:
             "UPDATE staged_exports SET batch_id = ?, exported_at = CURRENT_TIMESTAMP WHERE id = ?",
             (batch_id, export_id),
         )
+
+    # --- Pipeline Runs ---
+
+    def start_pipeline_run(
+        self, workflow_type: str, trigger: str, config: dict,
+    ) -> int:
+        """Record start of an automated pipeline run. Returns the row id."""
+        return self.execute_write(
+            "INSERT INTO pipeline_runs (workflow_type, trigger, status, config_json, started_at) "
+            "VALUES (?, ?, 'running', ?, CURRENT_TIMESTAMP)",
+            (workflow_type, trigger, json.dumps(config)),
+        )
+
+    def complete_pipeline_run(
+        self, run_id: int, status: str, summary: dict,
+        batch_id: str | None, credits_used: int, leads_exported: int,
+        error: str | None,
+    ) -> None:
+        """Update a pipeline run with completion details."""
+        self.execute_write(
+            """UPDATE pipeline_runs
+               SET status = ?, summary_json = ?, batch_id = ?,
+                   credits_used = ?, leads_exported = ?,
+                   error_message = ?, completed_at = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (status, json.dumps(summary), batch_id, credits_used,
+             leads_exported, error, run_id),
+        )
+
+    def get_pipeline_runs(self, workflow_type: str, limit: int = 20) -> list[dict]:
+        """Get recent pipeline runs (newest first)."""
+        rows = self.execute(
+            "SELECT id, workflow_type, trigger, status, config_json, summary_json, "
+            "batch_id, credits_used, leads_exported, error_message, "
+            "started_at, completed_at, created_at "
+            "FROM pipeline_runs WHERE workflow_type = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (workflow_type, limit),
+        )
+        return [
+            {
+                "id": r[0],
+                "workflow_type": r[1],
+                "trigger": r[2],
+                "status": r[3],
+                "config": json.loads(r[4]) if r[4] else {},
+                "summary": json.loads(r[5]) if r[5] else {},
+                "batch_id": r[6],
+                "credits_used": r[7],
+                "leads_exported": r[8],
+                "error_message": r[9],
+                "started_at": r[10],
+                "completed_at": r[11],
+                "created_at": r[12],
+            }
+            for r in rows
+        ]
 
 
 @st.cache_resource(ttl=3600)  # Refresh connection every hour to prevent stale connections

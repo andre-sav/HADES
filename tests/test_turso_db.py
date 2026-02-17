@@ -498,3 +498,105 @@ class TestLeadOutcomes:
 
         mock_conn.execute.assert_called_once()
         mock_conn.commit.assert_called_once()
+
+
+class TestPipelineRuns:
+    """Test pipeline_runs table operations."""
+
+    def _get_db(self):
+        """Create an in-memory DB with schema using stdlib sqlite3."""
+        import sqlite3
+        db = TursoDatabase.__new__(TursoDatabase)
+        db._conn = sqlite3.connect(":memory:")
+        db.url = ":memory:"
+        db.init_schema()
+        return db
+
+    def test_start_pipeline_run_returns_id(self):
+        db = self._get_db()
+        run_id = db.start_pipeline_run("intent", "scheduled", {"topics": ["Vending"]})
+        assert isinstance(run_id, int)
+        assert run_id > 0
+
+    def test_complete_pipeline_run_success(self):
+        db = self._get_db()
+        run_id = db.start_pipeline_run("intent", "manual", {})
+        db.complete_pipeline_run(
+            run_id, "success",
+            summary={"contacts_exported": 10},
+            batch_id="HADES-20260216-001",
+            credits_used=10,
+            leads_exported=10,
+            error=None,
+        )
+        runs = db.get_pipeline_runs("intent")
+        assert len(runs) == 1
+        assert runs[0]["status"] == "success"
+        assert runs[0]["batch_id"] == "HADES-20260216-001"
+        assert runs[0]["credits_used"] == 10
+        assert runs[0]["leads_exported"] == 10
+        assert runs[0]["completed_at"] is not None
+
+    def test_complete_pipeline_run_failed(self):
+        db = self._get_db()
+        run_id = db.start_pipeline_run("intent", "scheduled", {})
+        db.complete_pipeline_run(
+            run_id, "failed",
+            summary={}, batch_id=None,
+            credits_used=0, leads_exported=0,
+            error="API timeout",
+        )
+        runs = db.get_pipeline_runs("intent")
+        assert runs[0]["status"] == "failed"
+        assert runs[0]["error_message"] == "API timeout"
+
+    def test_complete_pipeline_run_skipped(self):
+        db = self._get_db()
+        run_id = db.start_pipeline_run("intent", "scheduled", {"topics": ["Vending"]})
+        db.complete_pipeline_run(
+            run_id, "skipped",
+            summary={"budget_exceeded": True}, batch_id=None,
+            credits_used=0, leads_exported=0,
+            error="Weekly cap reached",
+        )
+        runs = db.get_pipeline_runs("intent")
+        assert runs[0]["status"] == "skipped"
+
+    def test_get_pipeline_runs_ordered_newest_first(self):
+        db = self._get_db()
+        id1 = db.start_pipeline_run("intent", "scheduled", {})
+        db.complete_pipeline_run(id1, "success", {}, "B1", 5, 5, None)
+        id2 = db.start_pipeline_run("intent", "scheduled", {})
+        db.complete_pipeline_run(id2, "success", {}, "B2", 10, 10, None)
+        runs = db.get_pipeline_runs("intent", limit=10)
+        assert len(runs) == 2
+        assert runs[0]["id"] == id2  # Newest first
+
+    def test_get_pipeline_runs_respects_limit(self):
+        db = self._get_db()
+        for i in range(5):
+            rid = db.start_pipeline_run("intent", "scheduled", {})
+            db.complete_pipeline_run(rid, "success", {}, None, 0, 0, None)
+        runs = db.get_pipeline_runs("intent", limit=3)
+        assert len(runs) == 3
+
+    def test_get_pipeline_runs_filters_by_workflow(self):
+        db = self._get_db()
+        rid = db.start_pipeline_run("intent", "scheduled", {})
+        db.complete_pipeline_run(rid, "success", {}, None, 0, 0, None)
+        runs = db.get_pipeline_runs("geography")
+        assert len(runs) == 0
+
+    def test_start_run_stores_config(self):
+        db = self._get_db()
+        config = {"topics": ["Vending"], "target_companies": 25}
+        run_id = db.start_pipeline_run("intent", "manual", config)
+        runs = db.get_pipeline_runs("intent")
+        assert runs[0]["config"] == config
+
+    def test_start_run_sets_running_status(self):
+        db = self._get_db()
+        run_id = db.start_pipeline_run("intent", "scheduled", {})
+        runs = db.get_pipeline_runs("intent")
+        assert runs[0]["status"] == "running"
+        assert runs[0]["completed_at"] is None
