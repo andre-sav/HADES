@@ -1,0 +1,44 @@
+name: Intent Lead Poll
+
+on:
+  schedule:
+    # 12:00 UTC = 7:00 AM ET (Mon-Fri)
+    - cron: '0 12 * * 1-5'
+  workflow_dispatch:
+    # Allow manual trigger from GitHub UI
+    inputs:
+      dry_run:
+        description: 'Dry run (no API calls)'
+        type: boolean
+        default: false
+
+jobs:
+  poll-intent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run intent pipeline
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          ZOOMINFO_CLIENT_ID: ${{ secrets.ZOOMINFO_CLIENT_ID }}
+          ZOOMINFO_CLIENT_SECRET: ${{ secrets.ZOOMINFO_CLIENT_SECRET }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+        run: |
+          python scripts/run_intent_pipeline.py \
+            --trigger scheduled \
+            --verbose \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
