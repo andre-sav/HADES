@@ -445,16 +445,16 @@ class TestLocationTypeTagging:
         # p1 should retain PersonAndHQ tag (more authoritative)
         assert all_contacts["p1"]["_location_type"] == "PersonAndHQ"
 
-    def test_no_tag_when_combined_search_disabled(self):
-        """When combined search is disabled, no _location_type tag is added."""
+    def test_always_tagged_when_combined_search_disabled(self):
+        """Even without combined search, contacts are tagged with the search location type."""
         all_contacts = {}
 
         contacts = [
             {"personId": "p1", "firstName": "John", "companyId": "c1"},
         ]
 
-        # Simulate process_contacts without location_type_tag (None)
-        location_type_tag = None
+        # expand_search now always passes the location type tag
+        location_type_tag = "PersonAndHQ"
         for c in contacts:
             person_id = c.get("personId")
             if person_id and person_id not in all_contacts:
@@ -462,7 +462,7 @@ class TestLocationTypeTagging:
                     c["_location_type"] = location_type_tag
                 all_contacts[person_id] = c
 
-        assert "_location_type" not in all_contacts["p1"]
+        assert all_contacts["p1"]["_location_type"] == "PersonAndHQ"
 
 
 class TestCombinedSearchIntegration:

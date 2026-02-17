@@ -326,8 +326,8 @@ def expand_search(
         )
         searches_performed += 1
 
-        # Tag contacts with location type when combined search is enabled
-        location_tag = "PersonAndHQ" if include_person_only else None
+        # Tag contacts with location type (always tag so Loc Type column is populated)
+        location_tag = fixed_params.get("location_type", "PersonAndHQ")
         new_contacts, new_companies = process_contacts(contacts, location_type_tag=location_tag)
         log_progress(f"Found **{len(contacts)}** contacts → **{len(unique_companies)}** companies ({new_companies} new)")
 
@@ -478,8 +478,8 @@ def expand_search(
             )
             searches_performed += 1
 
-            # Tag contacts with location type when combined search is enabled
-            exp_location_tag = "PersonAndHQ" if include_person_only else None
+            # Tag contacts with location type (always tag so Loc Type column is populated)
+            exp_location_tag = fixed_params.get("location_type", "PersonAndHQ")
             new_contacts, new_companies = process_contacts(contacts, location_type_tag=exp_location_tag)
             log_progress(f"Found {len(contacts)} contacts → **{len(unique_companies)}** companies (+{new_companies} new)")
 

@@ -209,6 +209,64 @@ class TestBuildVanillasoftRow:
         assert row["Vending Business Name"] == ""
 
 
+class TestEnrichmentFieldMapping:
+    """Tests for Enrich API field name fallbacks in VanillaSoft export."""
+
+    def test_enrich_company_website_maps_to_web_site(self):
+        """Enrich API returns companyWebsite, not website."""
+        lead = {"companyName": "Test", "companyWebsite": "https://test.com"}
+        row = build_vanillasoft_row(lead)
+        assert row["Web site"] == "https://test.com"
+
+    def test_enrich_company_zip_maps_to_zip_code(self):
+        """Enrich API returns companyZipCode when person zipCode is missing."""
+        lead = {"companyName": "Test", "companyZipCode": "17036"}
+        row = build_vanillasoft_row(lead)
+        assert row["ZIP code"] == "17036"
+
+    def test_enrich_company_phone_maps_to_home(self):
+        """Enrich API returns companyPhone, not companyHQPhone."""
+        lead = {"companyName": "Test", "companyPhone": "7175551234"}
+        row = build_vanillasoft_row(lead)
+        assert row["Home"] == "(717) 555-1234"
+
+    def test_nested_company_object_maps_to_company(self):
+        """Enrich API may nest company info under 'company' object."""
+        lead = {"company": {"name": "Nested Corp", "website": "https://nested.com"}}
+        row = build_vanillasoft_row(lead)
+        assert row["Company"] == "Nested Corp"
+        assert row["Web site"] == "https://nested.com"
+
+    def test_flat_companyname_preferred_over_nested(self):
+        """Flat companyName should be preferred over nested company.name."""
+        lead = {"companyName": "Flat Corp", "company": {"name": "Nested Corp"}}
+        row = build_vanillasoft_row(lead)
+        assert row["Company"] == "Flat Corp"
+
+    def test_search_field_names_still_work(self):
+        """Original Search API field names should continue to work."""
+        lead = {
+            "companyName": "Search Corp",
+            "website": "https://search.com",
+            "sicCode": "7011",
+            "employeeCount": 250,
+            "zipCode": "75201",
+        }
+        row = build_vanillasoft_row(lead)
+        assert row["Company"] == "Search Corp"
+        assert row["Web site"] == "https://search.com"
+        assert row["Primary SIC"] == "7011"
+        assert row["Number of Employees"] == "250"
+        assert row["ZIP code"] == "75201"
+
+    def test_first_nonempty_value_wins(self):
+        """When multiple keys map to same column, first non-empty wins."""
+        lead = {"zipCode": "75201", "companyZipCode": "90210"}
+        row = build_vanillasoft_row(lead)
+        # zipCode appears before companyZipCode in the mapping dict
+        assert row["ZIP code"] == "75201"
+
+
 class TestExportLeadsToCsv:
     """Tests for export_leads_to_csv function."""
 

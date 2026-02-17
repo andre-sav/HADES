@@ -1495,8 +1495,9 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
 
     enriched_contacts = st.session_state.geo_enriched_contacts
 
-    # Merge pre-enrichment metadata (location_type) and compute distance
-    # Enrichment replaces contact objects entirely, losing computed fields
+    # Merge pre-enrichment metadata and compute distance
+    # Enrichment replaces contact objects entirely, losing search-only fields
+    # (sicCode, employeeCount, industry require additional subscription and aren't in enrich output)
     pre_enrichment = {}
     for company_id, contact in st.session_state.geo_selected_contacts.items():
         pid = str(contact.get("personId") or contact.get("id") or "")
@@ -1504,6 +1505,13 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             pre_enrichment[pid] = {
                 "_location_type": contact.get("_location_type", ""),
                 "personZip": contact.get("zipCode") or contact.get("personZip") or contact.get("companyZipCode", ""),
+                "companyName": contact.get("companyName", ""),
+                "companyId": contact.get("companyId", ""),
+                "website": contact.get("website") or contact.get("companyWebsite", ""),
+                "sicCode": contact.get("sicCode", ""),
+                "employees": contact.get("employees") or contact.get("employeeCount", ""),
+                "industry": contact.get("industry", ""),
+                "directPhone": contact.get("directPhone", ""),
             }
 
     center_zip = st.session_state.geo_query_params.get("center_zip") or (
@@ -1515,9 +1523,22 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         pid = str(contact.get("id") or contact.get("personId") or "")
         pre = pre_enrichment.get(pid, {})
 
-        # Restore _location_type from pre-enrichment data
-        if not contact.get("_location_type") and pre.get("_location_type"):
-            contact["_location_type"] = pre["_location_type"]
+        # Restore fields from pre-enrichment data that enrichment drops
+        # Enrich API doesn't return sicCode, employeeCount, industry (subscription-gated)
+        # and may return companyName/website under different keys
+        for field in ("_location_type", "companyName", "companyId", "website", "sicCode", "employees", "industry", "directPhone"):
+            if not contact.get(field) and pre.get(field):
+                contact[field] = pre[field]
+
+        # Normalize enrich-specific field names to match search field names
+        if not contact.get("companyName"):
+            contact["companyName"] = (
+                contact.get("company", {}).get("name", "")
+                if isinstance(contact.get("company"), dict)
+                else ""
+            )
+        if not contact.get("website") and contact.get("companyWebsite"):
+            contact["website"] = contact["companyWebsite"]
 
         # Compute distance from contact ZIP to center ZIP
         contact_zip = (

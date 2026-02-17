@@ -57,10 +57,21 @@ def build_vanillasoft_row(
     row = {col: "" for col in VANILLASOFT_COLUMNS}
 
     # Map ZoomInfo fields to VanillaSoft columns
+    # Note: ZOOMINFO_TO_VANILLASOFT has multiple keys mapping to the same column
+    # (e.g. both "website" and "companyWebsite" → "Web site"). First non-empty wins.
     for zi_field, vs_col in ZOOMINFO_TO_VANILLASOFT.items():
         value = lead.get(zi_field, "")
-        if value is not None:
-            row[vs_col] = str(value)
+        if value is not None and str(value).strip():
+            if not row.get(vs_col):  # Don't overwrite if already populated by earlier mapping
+                row[vs_col] = str(value)
+
+    # Handle nested company object (Enrich API may nest company info)
+    company_obj = lead.get("company")
+    if isinstance(company_obj, dict):
+        if not row.get("Company") and company_obj.get("name"):
+            row["Company"] = str(company_obj["name"])
+        if not row.get("Web site") and company_obj.get("website"):
+            row["Web site"] = str(company_obj["website"])
 
     # Fallback: use generic "phone" only if directPhone didn't map
     if not row.get("Business") and lead.get("phone"):

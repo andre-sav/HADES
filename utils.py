@@ -442,4 +442,11 @@ ZOOMINFO_TO_VANILLASOFT = {
     "employees": "Number of Employees",  # Fallback for employeeCount
     "zip": "ZIP code",             # Fallback for zipCode
     "address": "Address",          # Fallback for street
+    # Enrich API uses different field names than Search API
+    "companyWebsite": "Web site",       # Enrich returns companyWebsite, not website
+    "companyPhone": "Home",             # Enrich returns companyPhone, not companyHQPhone
+    "companyCity": "City",              # Enrich returns companyCity
+    "companyState": "State",            # Enrich returns companyState
+    "companyZipCode": "ZIP code",       # Enrich returns companyZipCode
+    "companyStreet": "Address",         # Enrich returns companyStreet
 }
