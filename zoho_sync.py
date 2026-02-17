@@ -136,14 +136,13 @@ async def fetch_owner_operators(
 
     if modified_since:
         # Incremental sync - only modified records
-        # COQL expects format: 'yyyy-MM-dd HH:mm:ss'
+        # COQL expects ISO 8601 with T separator and timezone: '2026-01-31T00:12:00+00:00'
         # Validate and parse timestamp to prevent injection
         try:
             from datetime import datetime as dt
-            # Parse to validate format, handle various ISO formats
             ts = modified_since.replace("Z", "+00:00")
             parsed = dt.fromisoformat(ts)
-            zoho_timestamp = parsed.strftime("%Y-%m-%d %H:%M:%S")
+            zoho_timestamp = parsed.isoformat(timespec="seconds")
         except (ValueError, TypeError) as e:
             logger.error(f"Invalid timestamp format: {modified_since} - {e}")
             raise ValueError(f"Invalid sync timestamp format: {modified_since}")
@@ -213,11 +212,14 @@ async def sync_operators(
     )
     existing_by_zoho_id = {}
     unlinked_by_name = {}
+    all_names = set()  # All operator names (for duplicate detection)
     for row in all_operators:
+        name_lower = (row[2] or "").lower()
+        all_names.add(name_lower)
         if row[1]:  # has zoho_id
             existing_by_zoho_id[row[1]] = {"id": row[0], "name": row[2]}
         else:
-            unlinked_by_name[row[2].lower()] = row[0]
+            unlinked_by_name[name_lower] = row[0]
 
     created = updated = skipped = linked = 0
     logger.info(f"Processing {len(zoho_records)} Zoho records...")
@@ -268,6 +270,11 @@ async def sync_operators(
             # Remove from unlinked so we don't match again
             del unlinked_by_name[mapped["operator_name"].lower()]
 
+        elif mapped["operator_name"].lower() in all_names:
+            # Name exists but linked to a different zoho_id — skip to avoid UNIQUE violation
+            logger.debug(f"  Skipping duplicate name: {mapped['operator_name']} (zoho_id={zoho_id})")
+            skipped += 1
+
         else:
             create_params.append((
                 mapped["operator_name"],
@@ -280,6 +287,7 @@ async def sync_operators(
                 mapped["synced_at"],
             ))
             created += 1
+            all_names.add(mapped["operator_name"].lower())
 
     # Batch write: 3 commits instead of N
     if update_params:
