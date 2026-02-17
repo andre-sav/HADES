@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-17
-**Status:** All 4 epics implemented (18 stories complete). 509 tests passing. Both pipelines E2E live tested and PASSED. 7 bugs fixed across sessions 17-18.
+**Status:** All 4 epics implemented (18 stories complete). 532 tests passing. Both pipelines E2E live tested and PASSED. 2 P3 features added in session 19.
 
 ## What's Working
 
@@ -36,6 +36,80 @@
 - **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers" (not "Vending", "Break Room", etc.)
 - **SMTP secrets not configured** — GitHub Actions has 4 required secrets set (Turso + ZoomInfo) but SMTP_USER, SMTP_PASSWORD, EMAIL_RECIPIENTS not set. Pipeline runs but skips email delivery.
 - **managementLevel as list** — ZoomInfo enrich API returns `managementLevel` as a list (e.g. `["Manager"]`) while Contact Search returns a string. Fixed in scoring.py (session 12).
+
+---
+
+## Session Summary (2026-02-17, Session 19)
+
+### Two P3 Features + Code Review
+
+**HADES-1wk — Rapidfuzz Fuzzy Matching for Cross-Workflow Dedup (CLOSED):**
+- Added `fuzzy_company_match()` to `dedup.py` using `rapidfuzz.fuzz.token_sort_ratio`
+- Default threshold 85, configurable in `icp.yaml` at `dedup.fuzzy_threshold`
+- Fuzzy fallback added to `find_duplicates()`, `merge_lead_lists()`, `flag_duplicates_in_list()`
+- Within-workflow dedup stays exact match (by design — ZoomInfo returns consistent names)
+- Catches typos ("Acmee" vs "Acme"), abbreviations ("St" vs "Saint"), word reordering
+- 15 new tests (7 unit + 4 find_duplicates + 3 merge + 1 flag)
+
+**HADES-5xm — Expansion Timeline Component (CLOSED):**
+- Added structured `expansion_steps` list to `expand_search()` result dict
+- Each step records: param changed, old value, new value, contacts found, new companies, cumulative companies
+- Built `expansion_timeline()` component in `ui_components.py` — styled HTML rows with left-border accent
+- Wired into Geography Workflow inside `st.expander("Expansion details", expanded=True)`
+- 8 new tests (3 data structure + 5 UI rendering)
+
+**CodeRabbit Code Review — 2 issues found and fixed:**
+1. `_get_fuzzy_threshold()` — Added `@lru_cache(maxsize=1)` to avoid redundant dict lookups in O(n×m) loops
+2. Geography page — Guarded edge case where `steps_applied > 0` but `expansion_steps` empty (failed step)
+
+### Key Files Modified (Session 19)
+```
+dedup.py                        - fuzzy_company_match(), lru_cache, fuzzy fallback in 3 functions
+config/icp.yaml                 - dedup.fuzzy_threshold: 85
+expand_search.py                - expansion_steps structured data in result dict
+ui_components.py                - expansion_timeline() component
+pages/2_Geography_Workflow.py   - Wire expansion_timeline, guard empty steps
+tests/test_dedup.py             - 15 new fuzzy matching tests
+tests/test_expand_search.py     - 3 new expansion_steps tests
+tests/test_ui_components.py     - 5 new expansion_timeline tests
+docs/plans/                     - 4 new design + plan docs
+```
+
+### Uncommitted Changes
+None — working tree clean. 10 commits ready to push.
+
+### Test Count
+532 tests passing (up from 509)
+
+### What Needs Doing Next Session
+1. **Plan compliance gaps** — HADES-umv (P4, 9 items: CTA, error log, PII, doc updates)
+2. **Zoho CRM dedup check at export** — HADES-iic (P4)
+3. **Configure SMTP secrets** — For GitHub Actions email delivery
+4. **Deploy to Streamlit Community Cloud**
+
+### Beads Status
+```
+OPEN:
+HADES-umv [P4] Plan compliance: missing CTA, error log, PII, doc updates
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+
+CLOSED (13):
+HADES-1wk [P3] Rapidfuzz fuzzy matching — 15 tests, 5 commits
+HADES-5xm [P3] Expansion timeline component — 8 tests, 4 commits
+HADES-0rp [P2] VanillaSoft export missing fields
+HADES-1nn [P2] XSS escaping
+HADES-4vu [P2] Thread-safety
+HADES-ti1 [P2] Token persistence
+HADES-kyi [P2] Geography E2E — PASSED
+HADES-kbu [P2] Intent E2E — PASSED (all pages verified)
+HADES-6s4 [P2] HTML-as-code-block bug
+HADES-7g5 [P3] Loc Type column
+HADES-8fd [P3] Score clamp
+HADES-1ln [P2] Intent live test
+HADES-5c7 [P2] Enrich confirmed
+HADES-20n [P2] Messy data hardening
+HADES-bk3 [P2] Production UX test
+```
 
 ---
 
@@ -968,7 +1042,7 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Test Coverage
 
-- **509 tests passing** (all green, run `python -m pytest tests/ -v`)
+- **532 tests passing** (all green, run `python -m pytest tests/ -v`)
 
 ## API Usage
 
@@ -979,30 +1053,28 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Next Steps (Priority Order)
 
-1. **Live test remaining pipelines** — HADES-kbu (Intent, Automation, all pages)
-2. **Build expansion_timeline component** — HADES-5xm (P3)
-3. **Add rapidfuzz fuzzy matching** — HADES-1wk (P3)
-4. **Plan compliance gaps** — HADES-umv (P4)
-5. **Zoho CRM dedup check at export** — HADES-iic (P4)
-6. **Configure SMTP secrets** — For GitHub Actions email delivery
-7. **Deploy to Streamlit Community Cloud**
+1. **Plan compliance gaps** — HADES-umv (P4, 9 items)
+2. **Zoho CRM dedup check at export** — HADES-iic (P4)
+3. **Configure SMTP secrets** — For GitHub Actions email delivery
+4. **Deploy to Streamlit Community Cloud**
 
 ## Beads Status
 
 ```
 OPEN:
-HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
-HADES-5xm [P3] Story 2.3 gap: build expansion_timeline component
-HADES-1wk [P3] Story 2.6 gap: add rapidfuzz fuzzy matching
 HADES-umv [P4] Plan compliance: missing CTA, error log, PII, doc updates
 HADES-iic [P4] Add Zoho CRM dedup check at export time
 
-CLOSED (11):
+CLOSED (15):
+HADES-1wk [P3] Rapidfuzz fuzzy matching — 15 tests, 5 commits
+HADES-5xm [P3] Expansion timeline component — 8 tests, 4 commits
 HADES-0rp [P2] VanillaSoft export missing Company/ZIP/SIC fields
 HADES-1nn [P2] XSS escaping on API-sourced HTML
 HADES-4vu [P2] Thread-safety on shared ZoomInfoClient
 HADES-ti1 [P2] Token persistence expired-token check
 HADES-kyi [P2] Geography pipeline E2E test — PASSED
+HADES-kbu [P2] Intent E2E + all pages verified — PASSED
+HADES-6s4 [P2] HTML-as-code-block bug
 HADES-7g5 [P3] Loc Type column always populated
 HADES-8fd [P3] Geography score clamp to 100
 HADES-1ln [P2] Intent pipeline live test — PASSED
