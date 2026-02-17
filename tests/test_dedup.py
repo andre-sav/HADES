@@ -409,3 +409,33 @@ class TestFindDuplicatesFuzzy:
         list2 = [{"phone": "555-111-1111", "companyName": "Acme Corp", "_score": 70}]
         duplicates = find_duplicates(list1, list2)
         assert len(duplicates) == 1
+
+
+class TestMergeLeadListsFuzzy:
+    """Tests for fuzzy matching in merge_lead_lists."""
+
+    def test_fuzzy_merge_keeps_higher_score(self):
+        """Fuzzy match across workflows keeps the higher-scored lead."""
+        intent = [{"phone": "555-111-1111", "companyName": "Acme Services", "_score": 90}]
+        geo = [{"phone": "555-222-2222", "companyName": "Acmee Services LLC", "_score": 70}]
+        merged, dup_count = merge_lead_lists(intent, geo)
+        assert len(merged) == 1
+        assert dup_count == 1
+        assert merged[0]["_score"] == 90
+
+    def test_fuzzy_merge_geo_higher(self):
+        """Fuzzy match where geo lead scores higher."""
+        intent = [{"phone": "555-111-1111", "companyName": "St Joseph Hospital", "_score": 60}]
+        geo = [{"phone": "555-222-2222", "companyName": "Saint Joseph Hospital", "_score": 85}]
+        merged, dup_count = merge_lead_lists(intent, geo)
+        assert len(merged) == 1
+        assert dup_count == 1
+        assert merged[0]["_score"] == 85
+
+    def test_no_false_merge(self):
+        """Different companies should not merge."""
+        intent = [{"phone": "555-111-1111", "companyName": "Acme Services", "_score": 90}]
+        geo = [{"phone": "555-222-2222", "companyName": "Beta Industries", "_score": 80}]
+        merged, dup_count = merge_lead_lists(intent, geo)
+        assert len(merged) == 2
+        assert dup_count == 0

@@ -260,6 +260,7 @@ def merge_lead_lists(
 ) -> tuple[list[dict], int]:
     """
     Merge intent and geography leads, keeping higher-scored duplicates.
+    Uses exact key match first, then fuzzy company name fallback.
 
     Args:
         intent_leads: Leads from intent workflow (should have _score)
@@ -269,43 +270,59 @@ def merge_lead_lists(
     Returns:
         Tuple of (merged_leads, duplicate_count)
     """
-    # Tag sources
     if tag_source:
         for lead in intent_leads:
             lead["_source"] = "intent"
         for lead in geo_leads:
             lead["_source"] = "geography"
 
-    # Build dict of best lead by dedup key
-    best_leads = {}
+    # Build index of intent leads by key and normalized company
+    best_leads: dict[str, dict] = {}
+    intent_companies: dict[str, str] = {}
 
-    # Process intent leads first
     for lead in intent_leads:
         key = get_dedup_key(lead)
         if key == "|":
-            key = f"intent_{id(lead)}"  # Unique key for leads without phone/company
+            key = f"intent_{id(lead)}"
+
+        company = normalize_company_name(
+            lead.get("companyName", "") or lead.get("Company", "") or ""
+        )
+        intent_companies[key] = company
 
         if key not in best_leads or lead.get("_score", 0) > best_leads[key].get("_score", 0):
             best_leads[key] = lead
 
-    # Process geo leads, keeping higher score
+    # Process geo leads with exact match first, then fuzzy fallback
     duplicate_count = 0
     for lead in geo_leads:
         key = get_dedup_key(lead)
         if key == "|":
             key = f"geo_{id(lead)}"
 
+        # Try exact match first
+        matched_key = None
         if key in best_leads:
+            matched_key = key
+        else:
+            # Fuzzy fallback: compare company name against all intent companies
+            geo_company = normalize_company_name(
+                lead.get("companyName", "") or lead.get("Company", "") or ""
+            )
+            if geo_company:
+                for ikey, icompany in intent_companies.items():
+                    if icompany and fuzzy_company_match(geo_company, icompany):
+                        matched_key = ikey
+                        break
+
+        if matched_key is not None:
             duplicate_count += 1
-            # Only replace if geo score is higher
-            if lead.get("_score", 0) > best_leads[key].get("_score", 0):
-                best_leads[key] = lead
+            if lead.get("_score", 0) > best_leads[matched_key].get("_score", 0):
+                best_leads[matched_key] = lead
         else:
             best_leads[key] = lead
 
-    # Sort by score descending
     merged = sorted(best_leads.values(), key=lambda x: x.get("_score", 0), reverse=True)
-
     return merged, duplicate_count
 
 
