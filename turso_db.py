@@ -421,6 +421,24 @@ class TursoDatabase:
 
         return count
 
+    def get_cache_stats(self) -> dict:
+        """Get cache health statistics."""
+        rows = self.execute(
+            "SELECT COUNT(*) as total, "
+            "MIN(created_at) as oldest, "
+            "MAX(created_at) as newest, "
+            "SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) as active "
+            "FROM zoominfo_cache"
+        )
+        if rows and rows[0][0]:
+            return {
+                "total": rows[0][0],
+                "oldest": rows[0][1],
+                "newest": rows[0][2],
+                "active": rows[0][3] or 0,
+            }
+        return {"total": 0, "oldest": None, "newest": None, "active": 0}
+
     # --- Credit Usage ---
 
     def log_credit_usage(
@@ -510,6 +528,42 @@ class TursoDatabase:
             "FROM query_history ORDER BY created_at DESC LIMIT ?",
             (limit,),
         )
+        return [
+            {
+                "id": r[0],
+                "workflow_type": r[1],
+                "query_params": json.loads(r[2]) if r[2] else {},
+                "leads_returned": r[3],
+                "leads_exported": r[4],
+                "created_at": r[5],
+            }
+            for r in rows
+        ]
+
+    def get_queries_by_date_range(
+        self, start_date: str, end_date: str, workflow_type: str | None = None
+    ) -> list[dict]:
+        """Get query history within a date range.
+
+        Args:
+            start_date: ISO date string (YYYY-MM-DD)
+            end_date: ISO date string (YYYY-MM-DD), inclusive
+            workflow_type: Optional filter by workflow type
+        """
+        if workflow_type:
+            rows = self.execute(
+                "SELECT id, workflow_type, query_params, leads_returned, leads_exported, created_at "
+                "FROM query_history WHERE created_at >= ? AND created_at < date(?, '+1 day') "
+                "AND workflow_type = ? ORDER BY created_at DESC",
+                (start_date, end_date, workflow_type),
+            )
+        else:
+            rows = self.execute(
+                "SELECT id, workflow_type, query_params, leads_returned, leads_exported, created_at "
+                "FROM query_history WHERE created_at >= ? AND created_at < date(?, '+1 day') "
+                "ORDER BY created_at DESC",
+                (start_date, end_date),
+            )
         return [
             {
                 "id": r[0],

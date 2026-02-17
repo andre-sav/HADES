@@ -1767,6 +1767,60 @@ def empty_state(
 
 
 # =============================================================================
+# NARRATIVE METRIC (Story 4.2)
+# =============================================================================
+
+def narrative_metric(text: str, highlight_value: str | None = None, subtext: str | None = None) -> None:
+    """
+    Display a metric as a narrative sentence — metrics as answers, not raw numbers.
+
+    Args:
+        text: The narrative sentence with {value} placeholder for the highlight
+        highlight_value: The value to highlight (rendered in accent color + mono font)
+        subtext: Optional secondary context line
+    """
+    if highlight_value is not None:
+        # Replace {value} placeholder with styled span
+        styled_value = (
+            f'<span style="color: {COLORS["primary"]}; font-family: \'IBM Plex Mono\', monospace; '
+            f'font-weight: 600; font-size: 1.1em;">{highlight_value}</span>'
+        )
+        rendered = text.replace("{value}", styled_value)
+    else:
+        rendered = text
+
+    html = f'''
+    <div style="
+        background: {COLORS['bg_secondary']};
+        border: 1px solid {COLORS['border']};
+        border-left: 3px solid {COLORS['primary']};
+        border-radius: {SPACING['xs']};
+        padding: {SPACING['md']} {SPACING['lg']};
+        margin-bottom: {SPACING['sm']};
+    ">
+        <p style="
+            color: {COLORS['text_primary']};
+            font-size: 1.05rem;
+            line-height: 1.5;
+            margin: 0;
+        ">{rendered}</p>
+    '''
+
+    if subtext:
+        html += f'''
+        <p style="
+            color: {COLORS['text_secondary']};
+            font-size: 0.85rem;
+            margin: {SPACING['xs']} 0 0 0;
+        ">{subtext}</p>
+        '''
+
+    html += '</div>'
+
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# =============================================================================
 # SKELETON LOADING CARD (Phase 4)
 # =============================================================================
 

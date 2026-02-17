@@ -288,6 +288,121 @@ class TestTursoDatabase:
         assert call_args[1] == (0, 1)
 
 
+class TestQueriesByDateRange:
+    """Tests for date range query filtering."""
+
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock database instance."""
+        mock_conn = MagicMock()
+        db = TursoDatabase(url="libsql://test.turso.io", auth_token="test-token")
+        db._conn = mock_conn
+        return db, mock_conn
+
+    def _set_cursor_rows(self, mock_conn, rows):
+        """Helper to set mock cursor fetchall return value."""
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = rows
+        mock_conn.execute.return_value = mock_cursor
+
+    def test_date_range_no_workflow_filter(self, mock_db):
+        """Test querying by date range without workflow filter."""
+        db, mock_conn = mock_db
+        self._set_cursor_rows(mock_conn, [
+            (1, "intent", '{"topics": ["Vending"]}', 10, 5, "2026-02-15T10:00:00"),
+        ])
+
+        result = db.get_queries_by_date_range("2026-02-10", "2026-02-17")
+
+        assert len(result) == 1
+        assert result[0]["workflow_type"] == "intent"
+        assert result[0]["leads_returned"] == 10
+        call_sql = mock_conn.execute.call_args[0][0]
+        assert "created_at >= ?" in call_sql
+        assert "workflow_type = ?" not in call_sql
+
+    def test_date_range_with_workflow_filter(self, mock_db):
+        """Test querying by date range with workflow filter."""
+        db, mock_conn = mock_db
+        self._set_cursor_rows(mock_conn, [])
+
+        db.get_queries_by_date_range("2026-02-10", "2026-02-17", workflow_type="intent")
+
+        call_sql = mock_conn.execute.call_args[0][0]
+        assert "workflow_type = ?" in call_sql
+        assert mock_conn.execute.call_args[0][1] == ("2026-02-10", "2026-02-17", "intent")
+
+    def test_date_range_empty_results(self, mock_db):
+        """Test empty results for date range."""
+        db, mock_conn = mock_db
+        self._set_cursor_rows(mock_conn, [])
+
+        result = db.get_queries_by_date_range("2026-01-01", "2026-01-07")
+
+        assert result == []
+
+    def test_date_range_parses_json_params(self, mock_db):
+        """Test that query_params JSON is parsed."""
+        db, mock_conn = mock_db
+        self._set_cursor_rows(mock_conn, [
+            (1, "geography", '{"zip_codes": ["75201"]}', 25, 0, "2026-02-15"),
+        ])
+
+        result = db.get_queries_by_date_range("2026-02-15", "2026-02-15")
+
+        assert result[0]["query_params"] == {"zip_codes": ["75201"]}
+
+
+class TestCacheStats:
+    """Tests for cache statistics method."""
+
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock database instance."""
+        mock_conn = MagicMock()
+        db = TursoDatabase(url="libsql://test.turso.io", auth_token="test-token")
+        db._conn = mock_conn
+        return db, mock_conn
+
+    def _set_cursor_rows(self, mock_conn, rows):
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = rows
+        mock_conn.execute.return_value = mock_cursor
+
+    def test_cache_stats_with_entries(self, mock_db):
+        """Test cache stats with existing entries."""
+        db, mock_conn = mock_db
+        self._set_cursor_rows(mock_conn, [
+            (10, "2026-02-10T10:00:00", "2026-02-17T10:00:00", 8),
+        ])
+
+        result = db.get_cache_stats()
+
+        assert result["total"] == 10
+        assert result["active"] == 8
+        assert result["oldest"] == "2026-02-10T10:00:00"
+        assert result["newest"] == "2026-02-17T10:00:00"
+
+    def test_cache_stats_empty(self, mock_db):
+        """Test cache stats with no entries."""
+        db, mock_conn = mock_db
+        self._set_cursor_rows(mock_conn, [(0, None, None, None)])
+
+        result = db.get_cache_stats()
+
+        assert result["total"] == 0
+        assert result["active"] == 0
+
+    def test_cache_stats_no_rows(self, mock_db):
+        """Test cache stats when query returns no rows."""
+        db, mock_conn = mock_db
+        self._set_cursor_rows(mock_conn, [])
+
+        result = db.get_cache_stats()
+
+        assert result["total"] == 0
+
+
 class TestLeadOutcomes:
     """Tests for lead outcome CRUD methods."""
 

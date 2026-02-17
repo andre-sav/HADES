@@ -8,6 +8,7 @@ import streamlit_shadcn_ui as ui
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from datetime import datetime, timedelta
 
 from turso_db import get_database
 from cost_tracker import CostTracker
@@ -234,10 +235,53 @@ elif _usage_active == "By Period":
 
 # --- RECENT QUERIES TAB ---
 elif _usage_active == "Recent Queries":
-    queries = db.get_recent_queries(limit=20)
+    # Date range filter
+    today = datetime.now().date()
+    col_range, col_wf = st.columns([2, 1])
+
+    with col_range:
+        range_option = st.selectbox(
+            "Date range",
+            ["This Week", "This Month", "Last 30 Days", "Custom"],
+            label_visibility="collapsed",
+            key="query_date_range",
+        )
+
+    with col_wf:
+        wf_filter = st.selectbox(
+            "Workflow",
+            ["All", "Intent", "Geography"],
+            label_visibility="collapsed",
+            key="query_wf_filter",
+        )
+
+    # Determine date range
+    if range_option == "This Week":
+        start_date = today - timedelta(days=today.weekday())
+        end_date = today
+    elif range_option == "This Month":
+        start_date = today.replace(day=1)
+        end_date = today
+    elif range_option == "Last 30 Days":
+        start_date = today - timedelta(days=30)
+        end_date = today
+    else:
+        col_s, col_e = st.columns(2)
+        with col_s:
+            start_date = st.date_input("From", value=today - timedelta(days=7), key="query_start")
+        with col_e:
+            end_date = st.date_input("To", value=today, key="query_end")
+
+    wf_type = wf_filter.lower() if wf_filter != "All" else None
+
+    queries = db.get_queries_by_date_range(
+        start_date=start_date.isoformat(),
+        end_date=end_date.isoformat(),
+        workflow_type=wf_type,
+    )
 
     if not queries:
-        st.caption("No queries yet")
+        st.caption(f"No queries found for {range_option.lower()}")
     else:
         data = []
         for q in queries:
@@ -254,6 +298,7 @@ elif _usage_active == "Recent Queries":
                 "Workflow": q["workflow_type"].title(),
                 "Query": desc[:30],
                 "Leads": q["leads_returned"],
+                "Exported": q["leads_exported"] or 0,
             })
 
         df = pd.DataFrame(data)
@@ -266,5 +311,7 @@ elif _usage_active == "Recent Queries":
                 "Workflow": st.column_config.TextColumn("Type", width="small"),
                 "Query": st.column_config.TextColumn("Query", width="large"),
                 "Leads": st.column_config.NumberColumn("Leads", width="small"),
+                "Exported": st.column_config.NumberColumn("Exported", width="small"),
             },
         )
+        st.caption(f"{len(queries)} queries")

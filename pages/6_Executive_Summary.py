@@ -18,6 +18,7 @@ from ui_components import (
     status_badge,
     colored_progress_bar,
     metric_card,
+    narrative_metric,
     styled_table,
     COLORS,
 )
@@ -70,23 +71,44 @@ _exec_active = ui.tabs(options=["Overview", "Trends", "Budget"], default_value="
 if _exec_active == "Overview":
     mtd = cost_tracker.get_usage_summary(days=today.day)
 
-    col1, col2, col3, col4 = st.columns(4)
+    # Narrative metrics — answers, not raw numbers
+    if mtd.total_leads > 0 and mtd.total_credits > 0:
+        cpl = mtd.total_credits / mtd.total_leads
+        narrative_metric(
+            f"{{value}} leads exported this month at {cpl:.2f} credits per lead",
+            highlight_value=f"{mtd.total_leads:,}",
+            subtext=f"{mtd.total_credits:,} credits used across {mtd.total_queries} queries",
+        )
+    else:
+        narrative_metric(
+            "{value} leads exported this month",
+            highlight_value=f"{mtd.total_leads:,}" if mtd.total_leads > 0 else "0",
+            subtext="No leads exported yet this month. First export will populate this dashboard."
+            if mtd.total_leads == 0
+            else f"{mtd.total_credits:,} credits used across {mtd.total_queries} queries",
+        )
 
-    with col1:
-        metric_card("MTD Credits", mtd.total_credits)
+    # Budget narrative
+    intent_budget = cost_tracker.format_budget_display("intent")
+    if intent_budget["has_cap"]:
+        pct = intent_budget["percent"]
+        narrative_metric(
+            "{value} of weekly Intent credits used",
+            highlight_value=f"{intent_budget['current']:,} of {intent_budget['cap']:,} ({pct:.0f}%)",
+            subtext=f"{intent_budget['remaining']:,} credits remaining this week"
+            if intent_budget["remaining"] and intent_budget["remaining"] > 0
+            else "Budget exhausted — resets Monday",
+        )
 
-    with col2:
-        metric_card("MTD Leads", mtd.total_leads)
-
-    with col3:
-        metric_card("MTD Queries", mtd.total_queries)
-
-    with col4:
-        if mtd.total_credits > 0 and mtd.total_leads > 0:
-            cpl = mtd.total_credits / mtd.total_leads
-            metric_card("Credits/Lead", f"{cpl:.2f}")
-        else:
-            metric_card("Credits/Lead", "—")
+    # Geography searches narrative
+    geo_queries = mtd.by_workflow.get("geography", {}).get("queries", 0)
+    if geo_queries > 0:
+        geo_leads = mtd.by_workflow.get("geography", {}).get("leads", 0)
+        narrative_metric(
+            "{value} Geography searches this month",
+            highlight_value=str(geo_queries),
+            subtext=f"{geo_leads:,} leads found · no credit cap",
+        )
 
     # Workflow comparison
     if mtd.by_workflow:

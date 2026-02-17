@@ -10,6 +10,7 @@ from datetime import datetime
 
 from turso_db import get_database
 from export import export_leads_to_csv, get_export_summary
+from dedup import find_duplicates, flag_duplicates_in_list
 from utils import get_call_center_agents
 from ui_components import (
     inject_base_styles,
@@ -146,6 +147,81 @@ else:
     st.caption(sources[0][1])
 
 leads_to_export = intent_leads if workflow_type == "intent" else geo_leads
+
+
+# =============================================================================
+# CROSS-WORKFLOW DEDUP CHECK
+# =============================================================================
+if intent_leads and geo_leads:
+    other_leads = geo_leads if workflow_type == "intent" else intent_leads
+    other_name = "Geography" if workflow_type == "intent" else "Intent"
+
+    duplicates = find_duplicates(leads_to_export, other_leads)
+
+    if duplicates:
+        st.markdown("---")
+        with st.expander(f"Cross-workflow duplicates ({len(duplicates)} found)", expanded=True):
+            st.caption(
+                f"{len(duplicates)} lead(s) also appear in {other_name} results. "
+                "Higher-scored version kept by default."
+            )
+
+            # Initialize override state
+            if "_dedup_overrides" not in st.session_state:
+                st.session_state._dedup_overrides = {}
+
+            dup_rows = []
+            for i, dup in enumerate(duplicates):
+                company1 = dup["lead1"].get("companyName", "Unknown")
+                score1 = dup["lead1"].get("_score", 0)
+                score2 = dup["lead2"].get("_score", 0)
+                winner = "current" if score1 >= score2 else other_name.lower()
+                dup_rows.append({
+                    "company": company1,
+                    "this_score": int(score1) if score1 else 0,
+                    "other_score": int(score2) if score2 else 0,
+                    "kept": "This workflow" if winner == "current" else other_name,
+                })
+
+            styled_table(
+                rows=dup_rows,
+                columns=[
+                    {"key": "company", "label": "Company"},
+                    {"key": "this_score", "label": f"{workflow_type.title()} Score", "align": "right", "mono": True},
+                    {"key": "other_score", "label": f"{other_name} Score", "align": "right", "mono": True},
+                    {"key": "kept", "label": "Kept In", "pill": {"This workflow": "success", other_name: "muted"}},
+                ],
+            )
+
+            exclude_dupes = st.checkbox(
+                "Exclude lower-scored duplicates from this export",
+                value=True,
+                key="exclude_cross_dupes",
+            )
+
+            if exclude_dupes:
+                # Flag duplicates and filter out ones where other workflow scores higher
+                flagged = flag_duplicates_in_list(leads_to_export, other_leads)
+                filtered = []
+                for lead in flagged:
+                    if not lead.get("_is_duplicate"):
+                        filtered.append(lead)
+                        continue
+                    # Keep if this lead scores >= the other version
+                    key_matches = [d for d in duplicates if d["lead1"] is lead or d["lead2"] is lead]
+                    if key_matches:
+                        dup = key_matches[0]
+                        my_score = lead.get("_score", 0)
+                        other_score = (dup["score2"] if dup["lead1"] is lead else dup["score1"])
+                        if my_score >= other_score:
+                            filtered.append(lead)
+                    else:
+                        filtered.append(lead)
+
+                removed = len(leads_to_export) - len(filtered)
+                if removed > 0:
+                    st.caption(f"{removed} duplicate(s) excluded from export")
+                    leads_to_export = filtered
 
 
 # =============================================================================

@@ -13,7 +13,7 @@ mock_st = MagicMock()
 mock_st.session_state = {}
 sys.modules["streamlit"] = mock_st
 
-from ui_components import workflow_run_state, export_validation_checklist
+from ui_components import workflow_run_state, export_validation_checklist, narrative_metric
 
 
 class TestWorkflowRunState:
@@ -288,3 +288,39 @@ class TestExportValidationChecklist:
         result = export_validation_checklist(leads)
         phone_check = next(c for c in result if c["check"] == "Has phone number")
         assert phone_check["status"] == "error"
+
+
+class TestNarrativeMetric:
+    """Tests for narrative_metric component."""
+
+    def test_renders_with_highlight(self):
+        """narrative_metric calls st.markdown with highlighted value."""
+        mock_st.reset_mock()
+        narrative_metric("{value} leads exported", highlight_value="312")
+        mock_st.markdown.assert_called_once()
+        html = mock_st.markdown.call_args[0][0]
+        assert "312" in html
+        assert "leads exported" in html
+
+    def test_renders_with_subtext(self):
+        """narrative_metric includes subtext when provided."""
+        mock_st.reset_mock()
+        narrative_metric("{value} credits used", highlight_value="500", subtext="Budget at 80%")
+        html = mock_st.markdown.call_args[0][0]
+        assert "Budget at 80%" in html
+
+    def test_renders_without_highlight(self):
+        """narrative_metric works without highlight_value."""
+        mock_st.reset_mock()
+        narrative_metric("No leads yet")
+        html = mock_st.markdown.call_args[0][0]
+        assert "No leads yet" in html
+
+    def test_renders_without_subtext(self):
+        """narrative_metric works without subtext."""
+        mock_st.reset_mock()
+        narrative_metric("{value} queries", highlight_value="10")
+        html = mock_st.markdown.call_args[0][0]
+        assert "10" in html
+        # Should not contain subtext paragraph
+        assert html.count("<p") == 1  # Only the main text paragraph
