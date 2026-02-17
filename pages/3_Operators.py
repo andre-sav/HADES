@@ -79,56 +79,36 @@ with st.expander("Sync from Zoho CRM", expanded=False):
         else:
             st.caption("Never synced - will perform full sync")
 
-        col1, col2, _spacer = st.columns([1, 1, 3])
+        btn_col1, btn_col2 = st.columns(2)
 
-        with col1:
-            if ui.button(text="Sync Changes", variant="default", key="op_sync_btn"):
-                with st.spinner("Syncing from Zoho CRM..."):
-                    try:
-                        from zoho_auth import ZohoAuth
-                        from zoho_sync import run_sync
+        with btn_col1:
+            sync_clicked = st.button("Sync Changes", key="op_sync_btn")
+        with btn_col2:
+            _resync_trigger = st.button("Full Resync", type="primary", key="op_resync_btn")
 
-                        auth = ZohoAuth.from_streamlit_secrets(st.secrets)
-                        result = run_sync(db, auth, force_full=False)
+        _resync_confirmed = ui.alert_dialog(
+            show=_resync_trigger,
+            title="Full Resync",
+            description="This will fetch all records from Zoho CRM. This may take a while.",
+            confirm_label="Resync",
+            cancel_label="Cancel",
+            key="op_resync_dialog",
+        )
 
-                        sync_type = result.get('sync_type', 'unknown')
-                        if result['total_zoho'] == 0 and sync_type == 'incremental':
-                            st.info("No changes since last sync")
-                        else:
-                            msg = f"{sync_type.title()} sync: "
-                            parts = []
-                            if result['created']:
-                                parts.append(f"{result['created']} created")
-                            if result['updated']:
-                                parts.append(f"{result['updated']} updated")
-                            if result['linked']:
-                                parts.append(f"{result['linked']} linked")
-                            if result['skipped']:
-                                parts.append(f"{result['skipped']} skipped")
-                            st.success(msg + ", ".join(parts) if parts else msg + "no changes")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Sync failed: {e}")
+        if sync_clicked:
+            with st.spinner("Syncing from Zoho CRM..."):
+                try:
+                    from zoho_auth import ZohoAuth
+                    from zoho_sync import run_sync
 
-        with col2:
-            _resync_trigger = ui.button(text="Full Resync", variant="destructive", key="op_resync_btn")
-            _resync_confirmed = ui.alert_dialog(
-                show=_resync_trigger,
-                title="Full Resync",
-                description="This will fetch all records from Zoho CRM. This may take a while.",
-                confirm_label="Resync",
-                cancel_label="Cancel",
-                key="op_resync_dialog",
-            )
-            if _resync_confirmed:
-                with st.spinner("Full resync from Zoho CRM..."):
-                    try:
-                        from zoho_auth import ZohoAuth
-                        from zoho_sync import run_sync
+                    auth = ZohoAuth.from_streamlit_secrets(st.secrets)
+                    result = run_sync(db, auth, force_full=False)
 
-                        auth = ZohoAuth.from_streamlit_secrets(st.secrets)
-                        result = run_sync(db, auth, force_full=True)
-
+                    sync_type = result.get('sync_type', 'unknown')
+                    if result['total_zoho'] == 0 and sync_type == 'incremental':
+                        st.info("No changes since last sync")
+                    else:
+                        msg = f"{sync_type.title()} sync: "
                         parts = []
                         if result['created']:
                             parts.append(f"{result['created']} created")
@@ -138,10 +118,33 @@ with st.expander("Sync from Zoho CRM", expanded=False):
                             parts.append(f"{result['linked']} linked")
                         if result['skipped']:
                             parts.append(f"{result['skipped']} skipped")
-                        st.success(f"Full sync: " + (", ".join(parts) if parts else "no changes"))
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Sync failed: {e}")
+                        st.success(msg + ", ".join(parts) if parts else msg + "no changes")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Sync failed: {e}")
+
+        if _resync_confirmed:
+            with st.spinner("Full resync from Zoho CRM..."):
+                try:
+                    from zoho_auth import ZohoAuth
+                    from zoho_sync import run_sync
+
+                    auth = ZohoAuth.from_streamlit_secrets(st.secrets)
+                    result = run_sync(db, auth, force_full=True)
+
+                    parts = []
+                    if result['created']:
+                        parts.append(f"{result['created']} created")
+                    if result['updated']:
+                        parts.append(f"{result['updated']} updated")
+                    if result['linked']:
+                        parts.append(f"{result['linked']} linked")
+                    if result['skipped']:
+                        parts.append(f"{result['skipped']} skipped")
+                    st.success(f"Full sync: " + (", ".join(parts) if parts else "no changes"))
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Sync failed: {e}")
 
 st.markdown("---")
 
