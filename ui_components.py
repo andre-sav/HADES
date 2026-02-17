@@ -1810,6 +1810,99 @@ def narrative_metric(text: str, highlight_value: str | None = None, subtext: str
 
 
 # =============================================================================
+# EXPANSION TIMELINE (Phase 5 - Geography Expansion Visibility)
+# =============================================================================
+
+def expansion_timeline(
+    steps: list[dict],
+    target: int,
+    target_met: bool,
+    steps_skipped: int = 0,
+) -> str:
+    """
+    Render expansion step timeline as styled HTML.
+
+    Args:
+        steps: List of step dicts from expand_search() expansion_steps
+        target: Target company count
+        target_met: Whether target was met
+        steps_skipped: Number of steps skipped after target met
+
+    Returns:
+        HTML string (also rendered via st.markdown)
+    """
+    if not steps:
+        out = (
+            f'<div style="color:{COLORS["text_secondary"]};font-size:0.9rem;'
+            f'padding:{SPACING["sm"]} 0;">No expansion needed</div>'
+        )
+        st.markdown(out, unsafe_allow_html=True)
+        return out
+
+    param_labels = {
+        "management_levels": "Management",
+        "employee_max": "Employees",
+        "accuracy_min": "Accuracy",
+        "radius": "Radius",
+    }
+
+    rows = []
+    for i, step in enumerate(steps, 1):
+        label = param_labels.get(step["param"], step["param"])
+        new_companies = step.get("new_companies", 0)
+        cumulative = step.get("cumulative_companies", 0)
+        safe_label = html_mod.escape(label)
+        safe_old = html_mod.escape(step.get("old_value", ""))
+        safe_new = html_mod.escape(step.get("new_value", ""))
+
+        row = (
+            f'<div style="display:flex;align-items:baseline;gap:{SPACING["sm"]};'
+            f'padding:{SPACING["xs"]} 0;border-bottom:1px solid {COLORS["border"]}22;">'
+            f'<span style="color:{COLORS["text_muted"]};font-size:0.8rem;min-width:3rem;">'
+            f'Step {i}</span>'
+            f'<span style="color:{COLORS["primary_light"]};font-weight:600;min-width:6.5rem;'
+            f'font-size:0.9rem;">{safe_label}</span>'
+            f'<span style="color:{COLORS["text_secondary"]};font-family:{FONTS["mono"]};'
+            f'font-size:0.85rem;">{safe_old}</span>'
+            f'<span style="color:{COLORS["text_muted"]};font-size:0.8rem;">\u2192</span>'
+            f'<span style="color:{COLORS["text_primary"]};font-family:{FONTS["mono"]};'
+            f'font-size:0.85rem;">{safe_new}</span>'
+            f'<span style="margin-left:auto;color:{COLORS["success"]};font-family:{FONTS["mono"]};'
+            f'font-size:0.85rem;white-space:nowrap;">'
+            f'+{new_companies} companies ({cumulative} total)</span>'
+            f'</div>'
+        )
+        rows.append(row)
+
+    if target_met:
+        footer_color = COLORS["success"]
+        cumulative = steps[-1].get("cumulative_companies", "?")
+        footer_text = f"Target met \u2014 {cumulative} companies found"
+        if steps_skipped > 0:
+            suffix = "s" if steps_skipped != 1 else ""
+            footer_text += f". {steps_skipped} expansion step{suffix} skipped."
+    else:
+        footer_color = COLORS["warning"]
+        cumulative = steps[-1].get("cumulative_companies", 0) if steps else 0
+        footer_text = f"{cumulative} of {target} target companies found after all expansions"
+
+    footer = (
+        f'<div style="padding:{SPACING["sm"]} 0;color:{footer_color};'
+        f'font-size:0.9rem;font-weight:500;">{footer_text}</div>'
+    )
+
+    out = (
+        f'<div style="background:{COLORS["bg_secondary"]};border:1px solid {COLORS["border"]};'
+        f'border-left:3px solid {COLORS["primary"]};border-radius:{SPACING["xs"]};'
+        f'padding:{SPACING["md"]} {SPACING["lg"]};margin-bottom:{SPACING["sm"]};">'
+        f'{"".join(rows)}{footer}</div>'
+    )
+
+    st.markdown(out, unsafe_allow_html=True)
+    return out
+
+
+# =============================================================================
 # SKELETON LOADING CARD (Phase 4)
 # =============================================================================
 

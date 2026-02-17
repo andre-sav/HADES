@@ -13,7 +13,7 @@ mock_st = MagicMock()
 mock_st.session_state = {}
 sys.modules["streamlit"] = mock_st
 
-from ui_components import workflow_run_state, export_validation_checklist, narrative_metric, company_card_header, score_breakdown
+from ui_components import workflow_run_state, export_validation_checklist, narrative_metric, company_card_header, score_breakdown, expansion_timeline
 
 
 class TestWorkflowRunState:
@@ -358,3 +358,67 @@ class TestXSSEscaping:
         html = score_breakdown(contact)
         assert 'onmouseover="alert(1)"' not in html
         assert "&lt;b" in html
+
+
+class TestExpansionTimeline:
+    """Tests for expansion_timeline component."""
+
+    def test_renders_steps(self):
+        """expansion_timeline renders HTML for each step."""
+        mock_st.reset_mock()
+        steps = [
+            {"param": "management_levels", "old_value": "Manager/Director/VP Level Exec",
+             "new_value": "management → Manager/Director/VP Level Exec/C Level Exec",
+             "contacts_found": 14, "new_companies": 5, "cumulative_companies": 18},
+            {"param": "employee_max", "old_value": "50-5,000",
+             "new_value": "employees → 50+ (no cap)",
+             "contacts_found": 20, "new_companies": 12, "cumulative_companies": 30},
+        ]
+        html = expansion_timeline(steps, target=25, target_met=True)
+        assert "Step 1" in html
+        assert "Step 2" in html
+        assert "+5" in html
+        assert "+12" in html
+        assert "18" in html
+        assert "30" in html
+
+    def test_renders_target_met_footer(self):
+        """Shows target met message when target_met=True."""
+        mock_st.reset_mock()
+        steps = [
+            {"param": "accuracy_min", "old_value": "accuracy 95",
+             "new_value": "accuracy → 85",
+             "contacts_found": 10, "new_companies": 5, "cumulative_companies": 25},
+        ]
+        html = expansion_timeline(steps, target=25, target_met=True, steps_skipped=5)
+        assert "Target met" in html
+        assert "5" in html
+
+    def test_renders_target_not_met_footer(self):
+        """Shows shortfall message when target_met=False."""
+        mock_st.reset_mock()
+        steps = [
+            {"param": "radius", "old_value": "10mi",
+             "new_value": "radius → 20mi",
+             "contacts_found": 5, "new_companies": 2, "cumulative_companies": 12},
+        ]
+        html = expansion_timeline(steps, target=25, target_met=False)
+        assert "12" in html
+        assert "25" in html
+
+    def test_empty_steps_returns_no_expansion(self):
+        """Empty steps list returns a 'no expansion' message."""
+        mock_st.reset_mock()
+        html = expansion_timeline([], target=25, target_met=True)
+        assert "No expansion" in html
+
+    def test_old_value_shown(self):
+        """Old value is displayed in each step."""
+        mock_st.reset_mock()
+        steps = [
+            {"param": "radius", "old_value": "10mi",
+             "new_value": "radius → 15mi",
+             "contacts_found": 8, "new_companies": 3, "cumulative_companies": 18},
+        ]
+        html = expansion_timeline(steps, target=25, target_met=False)
+        assert "10mi" in html
