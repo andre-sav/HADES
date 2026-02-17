@@ -768,3 +768,18 @@ class TestMessyDataEdgeCases:
     def test_future_date_clamped(self):
         """Future date returns 0 (not negative)."""
         assert calculate_age_days("2099-01-01") == 0
+
+
+class TestGeographyScoreClamp:
+    """Test that geography score is clamped to 100."""
+
+    def test_score_never_exceeds_100(self):
+        """Geography score should never exceed 100 even with max sub-scores."""
+        lead = {
+            "distance": 0.0,           # Max proximity (100)
+            "sicCode": "4581",          # Max onsite (100 - Aviation Services)
+            "employees": 75,            # Max employee (100 - small company)
+            "managementLevel": "VP",    # Max authority (90)
+        }
+        result = calculate_geography_score(lead)
+        assert result["score"] <= 100

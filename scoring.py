@@ -193,7 +193,7 @@ def calculate_geography_score(lead: dict, target_zip: str = None) -> dict:
     )
 
     return {
-        "score": round(composite),
+        "score": min(100, round(composite)),
         "proximity_score": proximity_score,
         "onsite_score": onsite_score,
         "authority_score": authority_score,

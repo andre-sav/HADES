@@ -22,6 +22,7 @@ Usage:
     step_indicator(current=2, total=4, labels=["Search", "Select", "Enrich", "Export"])
 """
 
+import html as html_mod
 import streamlit as st
 try:
     import streamlit_shadcn_ui as ui
@@ -1936,12 +1937,13 @@ def score_breakdown(contact: dict) -> str:
     # Management level
     mgmt = contact.get("managementLevel", "")
     if mgmt:
+        safe_mgmt = html_mod.escape(str(mgmt))
         if mgmt in ("VP", "C-Level"):
-            parts.append(f"<span style='color:{COLORS['success']}'>{mgmt}</span>")
+            parts.append(f"<span style='color:{COLORS['success']}'>{safe_mgmt}</span>")
         elif mgmt == "Director":
-            parts.append(f"<span style='color:{COLORS['warning']}'>{mgmt}</span>")
+            parts.append(f"<span style='color:{COLORS['warning']}'>{safe_mgmt}</span>")
         else:
-            parts.append(f"<span style='color:{COLORS['text_muted']}'>{mgmt}</span>")
+            parts.append(f"<span style='color:{COLORS['text_muted']}'>{safe_mgmt}</span>")
 
     # Location type
     loc_type = contact.get("_location_type", "")
@@ -1977,6 +1979,8 @@ def company_card_header(
     """
     badge_color = COLORS["success"] if contact_count == 1 else COLORS["info"]
     badge_text = f"{contact_count} contact{'s' if contact_count > 1 else ''}"
+    safe_company = html_mod.escape(company_name)
+    safe_contact = html_mod.escape(best_contact_name)
 
     return f'''
     <div style="
@@ -1990,9 +1994,9 @@ def company_card_header(
         margin-bottom: {SPACING['xs']};
     ">
         <div>
-            <span style="font-weight: 600; color: {COLORS['text_primary']};">{company_name}</span>
+            <span style="font-weight: 600; color: {COLORS['text_primary']};">{safe_company}</span>
             <span style="color: {COLORS['text_muted']}; font-size: {FONT_SIZES['sm']}; margin-left: {SPACING['sm']};">
-                Best: {best_contact_name}
+                Best: {safe_contact}
             </span>
         </div>
         <span style="
@@ -2001,7 +2005,7 @@ def company_card_header(
             padding: {SPACING['xs']} {SPACING['sm']};
             border-radius: 9999px;
             font-size: {FONT_SIZES['xs']};
-            font-weight: 500;
+            font_weight: 500;
         ">{badge_text}</span>
     </div>
     '''

@@ -3,6 +3,7 @@ ZoomInfo API client with OAuth authentication, rate limiting, and error handling
 """
 
 import logging
+import threading
 import time
 import hashlib
 import json
@@ -215,24 +216,27 @@ class ZoomInfoClient:
         self._token_store = token_store  # TursoDatabase instance for token persistence
         self.last_exchange: dict | None = None  # Captures last API request/response for debugging
         self._last_auth_response: dict | None = None  # Captures auth error details for debugging
+        self._lock = threading.Lock()  # Guards token, last_exchange, and rate-limit state
 
     def _get_token(self) -> str:
-        """Get valid access token, refreshing if needed."""
-        if self.access_token and self.token_expires_at:
-            # Refresh 5 minutes before expiry
-            if datetime.now() < self.token_expires_at - timedelta(minutes=5):
-                return self.access_token
-
-        # Try loading persisted token from DB before hitting the auth endpoint
-        if not self.access_token and self._token_store:
-            self._load_persisted_token()
+        """Get valid access token, refreshing if needed. Thread-safe."""
+        with self._lock:
+            # 1. Check in-memory token
             if self.access_token and self.token_expires_at:
                 if datetime.now() < self.token_expires_at - timedelta(minutes=5):
-                    logger.info("Using persisted ZoomInfo token from database")
                     return self.access_token
 
-        self._authenticate()
-        return self.access_token
+            # 2. In-memory token missing or expired — try DB before re-authenticating
+            if self._token_store:
+                self._load_persisted_token()
+                if self.access_token and self.token_expires_at:
+                    if datetime.now() < self.token_expires_at - timedelta(minutes=5):
+                        logger.info("Using persisted ZoomInfo token from database")
+                        return self.access_token
+
+            # 3. No valid token anywhere — authenticate
+            self._authenticate()
+            return self.access_token
 
     def _load_persisted_token(self) -> None:
         """Load cached token from database."""
@@ -330,9 +334,13 @@ class ZoomInfoClient:
     ) -> dict:
         """Make authenticated API request with retry logic and proactive rate limiting."""
         # Proactive rate limiting: ensure minimum gap between requests
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self.MIN_REQUEST_INTERVAL:
-            wait = self.MIN_REQUEST_INTERVAL - elapsed
+        with self._lock:
+            elapsed = time.time() - self._last_request_time
+            if elapsed < self.MIN_REQUEST_INTERVAL:
+                wait = self.MIN_REQUEST_INTERVAL - elapsed
+            else:
+                wait = 0.0
+        if wait > 0:
             logger.debug(f"Rate limiter: waiting {wait:.2f}s before {endpoint}")
             time.sleep(wait)
 
@@ -386,7 +394,8 @@ class ZoomInfoClient:
                     timeout=60,
                     **kwargs,
                 )
-                self._last_request_time = time.time()
+                with self._lock:
+                    self._last_request_time = time.time()
 
                 # Capture response for debugging
                 try:
@@ -427,8 +436,9 @@ class ZoomInfoClient:
                 if response.status_code == 401:
                     logger.warning(f"Auth error on {endpoint}, refreshing token (attempt {attempt + 1}/{max_retries})")
                     try:
-                        self._authenticate()
-                        headers["Authorization"] = f"Bearer {self.access_token}"
+                        with self._lock:
+                            self._authenticate()
+                            headers["Authorization"] = f"Bearer {self.access_token}"
                     except Exception as auth_err:
                         self.last_exchange["error"] = f"Re-authentication failed: {auth_err}"
                         raise

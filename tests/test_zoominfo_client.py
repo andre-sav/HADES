@@ -1336,3 +1336,73 @@ class TestContactSearchByCompanyId:
         assert len(contacts) == 3
         person_ids = [c["personId"] for c in contacts]
         assert person_ids == ["p1", "p2", "p3"]
+
+
+
+class TestTokenPersistenceAndThreadSafety:
+    """Tests for token persistence fix and thread-safety."""
+
+    @pytest.fixture
+    def client(self):
+        return ZoomInfoClient(client_id="test-id", client_secret="test-secret")
+
+    @pytest.fixture
+    def mock_session(self, client):
+        mock = MagicMock()
+        client._session = mock
+        return mock
+
+    def test_get_token_expired_checks_db_before_reauth(self, client, mock_session):
+        """When in-memory token is expired, should try DB before re-authenticating."""
+        from datetime import datetime, timedelta
+        import json
+
+        client.access_token = "expired-token"
+        client.token_expires_at = datetime.now() - timedelta(minutes=10)
+
+        mock_store = MagicMock()
+        valid_token_data = json.dumps({
+            "jwt": "persisted-token",
+            "expires_at": (datetime.now() + timedelta(hours=1)).isoformat(),
+        })
+        mock_store.execute.return_value = [(valid_token_data,)]
+        client._token_store = mock_store
+
+        token = client._get_token()
+
+        assert token == "persisted-token"
+        mock_store.execute.assert_called_once()
+        mock_session.post.assert_not_called()
+
+    def test_get_token_expired_reauths_when_db_also_expired(self, client, mock_session):
+        """When both in-memory and DB tokens are expired, should re-authenticate."""
+        from datetime import datetime, timedelta
+        import json
+
+        client.access_token = "expired-token"
+        client.token_expires_at = datetime.now() - timedelta(minutes=10)
+
+        mock_store = MagicMock()
+        expired_token_data = json.dumps({
+            "jwt": "also-expired",
+            "expires_at": (datetime.now() - timedelta(hours=1)).isoformat(),
+        })
+        mock_store.execute.return_value = [(expired_token_data,)]
+        client._token_store = mock_store
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"jwt": "fresh-token", "expiresIn": 3600}
+        mock_session.post.return_value = mock_response
+
+        token = client._get_token()
+
+        assert token == "fresh-token"
+        mock_store.execute.assert_called_once()
+        mock_session.post.assert_called_once()
+
+    def test_client_has_threading_lock(self, client):
+        """Client should have a threading lock for thread-safety."""
+        import threading
+        assert hasattr(client, "_lock")
+        assert isinstance(client._lock, type(threading.Lock()))

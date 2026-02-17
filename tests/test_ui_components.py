@@ -13,7 +13,7 @@ mock_st = MagicMock()
 mock_st.session_state = {}
 sys.modules["streamlit"] = mock_st
 
-from ui_components import workflow_run_state, export_validation_checklist, narrative_metric
+from ui_components import workflow_run_state, export_validation_checklist, narrative_metric, company_card_header, score_breakdown
 
 
 class TestWorkflowRunState:
@@ -324,3 +324,37 @@ class TestNarrativeMetric:
         assert "10" in html
         # Should not contain subtext paragraph
         assert html.count("<p") == 1  # Only the main text paragraph
+
+
+class TestXSSEscaping:
+    """Test that API-sourced data is HTML-escaped in UI components."""
+
+    def test_company_card_header_escapes_company_name(self):
+        """Company name with HTML tags should be escaped."""
+        html = company_card_header(
+            company_name='<script>alert("xss")</script>',
+            contact_count=1,
+            best_contact_name="Safe Name",
+        )
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+
+    def test_company_card_header_escapes_contact_name(self):
+        """Contact name with HTML should be escaped."""
+        html = company_card_header(
+            company_name="Safe Co",
+            contact_count=1,
+            best_contact_name='<img src=x onerror="alert(1)">',
+        )
+        assert 'onerror="alert(1)"' not in html
+        assert "&lt;img" in html
+
+    def test_score_breakdown_escapes_management_level(self):
+        """Management level from API should be HTML-escaped."""
+        contact = {
+            "contactAccuracyScore": 95,
+            "managementLevel": '<b onmouseover="alert(1)">Manager</b>',
+        }
+        html = score_breakdown(contact)
+        assert 'onmouseover="alert(1)"' not in html
+        assert "&lt;b" in html

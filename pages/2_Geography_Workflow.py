@@ -4,6 +4,7 @@ Features: Autopilot vs Manual Review modes, visible API parameters, contact sele
 """
 
 import hashlib
+import html as html_mod
 import json
 import logging
 import threading
@@ -1083,7 +1084,7 @@ if has_operator:
             with st.container(border=True):
                 if log:
                     for msg in log:
-                        st.markdown(f"<small>{msg}</small>", unsafe_allow_html=True)
+                        st.markdown(f"<small>{html_mod.escape(str(msg))}</small>", unsafe_allow_html=True)
                 else:
                     st.caption("Starting search...")
 
@@ -1262,7 +1263,7 @@ if (
                 # Company header with contact count badge
                 header_col1, header_col2 = st.columns([4, 1])
                 with header_col1:
-                    st.markdown(f"**{company_name}**")
+                    st.markdown(f"**{html_mod.escape(company_name)}**")
                     # Show score breakdown for best contact (Phase 3 UX)
                     if contacts:
                         best_contact = contacts[0]
@@ -1273,17 +1274,17 @@ if (
                         city = best_contact.get("companyCity", "")
                         state = best_contact.get("companyState", "")
                         if city and state:
-                            ctx_parts.append(f"{city}, {state}")
+                            ctx_parts.append(f"{html_mod.escape(city)}, {html_mod.escape(state)}")
                         elif city or state:
-                            ctx_parts.append(city or state)
+                            ctx_parts.append(html_mod.escape(city or state))
                         website = best_contact.get("companyWebsite", "")
                         if website:
                             # Strip protocol for cleaner display
                             display_url = website.replace("https://", "").replace("http://", "").rstrip("/")
-                            ctx_parts.append(display_url)
+                            ctx_parts.append(html_mod.escape(display_url))
                         co_phone = best_contact.get("companyPhone", "")
                         if co_phone:
-                            ctx_parts.append(co_phone)
+                            ctx_parts.append(html_mod.escape(co_phone))
                         if ctx_parts:
                             st.markdown(f"<small style='color:#888'>{' · '.join(ctx_parts)}</small>", unsafe_allow_html=True)
                 with header_col2:
