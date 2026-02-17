@@ -186,3 +186,14 @@ intent_topics:
   expansion:
     - "Coffee Services"
     - "Water Coolers"
+
+# Automation settings for headless pipeline scripts
+automation:
+  intent:
+    topics: ["Vending Machines", "Breakroom Solutions"]
+    signal_strengths: ["High", "Medium"]
+    target_companies: 25
+    management_levels: ["Manager", "Director", "VP Level Exec"]
+    accuracy_min: 95
+    phone_fields: ["mobilePhone", "directPhone", "phone"]
+    dedup_days_back: 180
