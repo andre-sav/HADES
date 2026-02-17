@@ -329,22 +329,35 @@ def merge_lead_lists(
 def flag_duplicates_in_list(leads: list[dict], other_leads: list[dict]) -> list[dict]:
     """
     Add _is_duplicate flag to leads that also appear in other_leads.
-
-    Args:
-        leads: Leads to check and flag
-        other_leads: Leads to check against
-
-    Returns:
-        Same leads with _is_duplicate field added
+    Uses exact key match first, then fuzzy company name fallback.
     """
     other_keys = set()
+    other_companies = []
     for lead in other_leads:
         key = get_dedup_key(lead)
         if key and key != "|":
             other_keys.add(key)
+        company = normalize_company_name(
+            lead.get("companyName", "") or lead.get("Company", "") or ""
+        )
+        if company:
+            other_companies.append(company)
 
     for lead in leads:
         key = get_dedup_key(lead)
-        lead["_is_duplicate"] = key in other_keys
+
+        # Tier 1: exact key match
+        if key in other_keys:
+            lead["_is_duplicate"] = True
+            continue
+
+        # Tier 2/3: fuzzy company fallback
+        company = normalize_company_name(
+            lead.get("companyName", "") or lead.get("Company", "") or ""
+        )
+        if company and any(fuzzy_company_match(company, oc) for oc in other_companies):
+            lead["_is_duplicate"] = True
+        else:
+            lead["_is_duplicate"] = False
 
     return leads

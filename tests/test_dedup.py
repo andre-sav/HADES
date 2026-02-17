@@ -439,3 +439,20 @@ class TestMergeLeadListsFuzzy:
         merged, dup_count = merge_lead_lists(intent, geo)
         assert len(merged) == 2
         assert dup_count == 0
+
+
+class TestFlagDuplicatesFuzzy:
+    """Tests for fuzzy matching in flag_duplicates_in_list."""
+
+    def test_fuzzy_flag(self):
+        """Fuzzy company match flags as duplicate."""
+        leads = [
+            {"phone": "555-111-1111", "companyName": "Acme Services"},
+            {"phone": "555-222-2222", "companyName": "Beta Corp"},
+        ]
+        other = [
+            {"phone": "555-333-3333", "companyName": "Acmee Services LLC"},
+        ]
+        flagged = flag_duplicates_in_list(leads, other)
+        assert flagged[0]["_is_duplicate"] is True
+        assert flagged[1]["_is_duplicate"] is False
