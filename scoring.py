@@ -34,6 +34,9 @@ def _calculate_authority_score(contact: dict) -> int:
         Authority score 0-100
     """
     mgmt_level = contact.get("managementLevel", "")
+    # Enrich API may return list instead of string
+    if isinstance(mgmt_level, list):
+        mgmt_level = mgmt_level[0] if mgmt_level else ""
     base_score = get_authority_score(mgmt_level)
 
     # Title keyword bonus

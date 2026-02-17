@@ -637,6 +637,16 @@ class TestAuthorityScore:
         """Test empty contact gets default score."""
         assert _calculate_authority_score({}) == 40
 
+    def test_management_level_as_list(self):
+        """Test managementLevel returned as list (enrich API format)."""
+        contact = {"managementLevel": ["Manager"], "jobTitle": "Office Manager"}
+        assert _calculate_authority_score(contact) == 60  # Manager base
+
+    def test_management_level_empty_list(self):
+        """Test managementLevel as empty list falls back to default."""
+        contact = {"managementLevel": [], "jobTitle": "Worker"}
+        assert _calculate_authority_score(contact) == 40  # default
+
     def test_geography_authority_in_score(self):
         """Test authority is included in geography scoring output."""
         lead = {
