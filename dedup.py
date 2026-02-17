@@ -185,9 +185,8 @@ def find_duplicates(
     """
     Find leads that appear in both lists.
 
-    Args:
-        leads1: First list of leads
-        leads2: Second list of leads
+    Uses exact key matching first, then fuzzy company name fallback
+    for cross-workflow dedup.
 
     Returns:
         List of dicts with duplicate info:
@@ -199,24 +198,56 @@ def find_duplicates(
             "score2": score from lead2,
         }
     """
-    # Build index of leads2
-    leads2_by_key = {}
+    duplicates = []
+    matched_leads2_indices = set()
+
+    # Extract normalized names for leads2 (once)
+    leads2_normalized = []
     for lead in leads2:
         key = get_dedup_key(lead)
-        if key and key != "|":
-            leads2_by_key[key] = lead
+        company = normalize_company_name(
+            lead.get("companyName", "") or lead.get("Company", "") or ""
+        )
+        leads2_normalized.append((key, company, lead))
 
-    # Find matches
-    duplicates = []
-    for lead in leads1:
-        key = get_dedup_key(lead)
-        if key in leads2_by_key:
+    for lead1 in leads1:
+        key1 = get_dedup_key(lead1)
+        if key1 == "|":
+            continue
+
+        company1 = normalize_company_name(
+            lead1.get("companyName", "") or lead1.get("Company", "") or ""
+        )
+
+        best_match = None
+        best_idx = None
+
+        for idx, (key2, company2, lead2) in enumerate(leads2_normalized):
+            if idx in matched_leads2_indices:
+                continue
+            if key2 == "|":
+                continue
+
+            # Tier 1: exact key match
+            if key1 == key2:
+                best_match = lead2
+                best_idx = idx
+                break
+
+            # Tier 2/3: fuzzy company match
+            if company1 and company2 and fuzzy_company_match(company1, company2):
+                best_match = lead2
+                best_idx = idx
+                break
+
+        if best_match is not None:
+            matched_leads2_indices.add(best_idx)
             duplicates.append({
-                "key": key,
-                "lead1": lead,
-                "lead2": leads2_by_key[key],
-                "score1": lead.get("_score", 0),
-                "score2": leads2_by_key[key].get("_score", 0),
+                "key": key1,
+                "lead1": lead1,
+                "lead2": best_match,
+                "score1": lead1.get("_score", 0),
+                "score2": best_match.get("_score", 0),
             })
 
     return duplicates

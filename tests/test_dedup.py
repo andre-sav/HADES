@@ -377,3 +377,35 @@ class TestFuzzyCompanyMatch:
         # "acme" vs "acmee" is ~89 ratio — passes at 85, fails at 95
         assert fuzzy_company_match("acme", "acmee", threshold=80) is True
         assert fuzzy_company_match("acme", "acmee", threshold=95) is False
+
+
+class TestFindDuplicatesFuzzy:
+    """Tests for fuzzy matching in find_duplicates."""
+
+    def test_fuzzy_company_same_phone(self):
+        """Typo in company name with same phone → duplicate found."""
+        list1 = [{"phone": "555-111-1111", "companyName": "Acme Services", "_score": 90}]
+        list2 = [{"phone": "555-111-1111", "companyName": "Acmee Services Inc", "_score": 70}]
+        duplicates = find_duplicates(list1, list2)
+        assert len(duplicates) == 1
+
+    def test_fuzzy_company_no_phone_overlap(self):
+        """Different phones but fuzzy company match → still found."""
+        list1 = [{"phone": "555-111-1111", "companyName": "Saint Joseph Medical Center", "_score": 90}]
+        list2 = [{"phone": "555-222-2222", "companyName": "St Joseph Medical Center LLC", "_score": 70}]
+        duplicates = find_duplicates(list1, list2)
+        assert len(duplicates) == 1
+
+    def test_no_fuzzy_match_different_companies(self):
+        """Genuinely different companies → no duplicate."""
+        list1 = [{"phone": "555-111-1111", "companyName": "Acme Services", "_score": 90}]
+        list2 = [{"phone": "555-111-1111", "companyName": "Beta Industries", "_score": 70}]
+        duplicates = find_duplicates(list1, list2)
+        assert len(duplicates) == 0
+
+    def test_exact_match_still_works(self):
+        """Exact match (current behavior) still works."""
+        list1 = [{"phone": "555-111-1111", "companyName": "Acme Inc", "_score": 90}]
+        list2 = [{"phone": "555-111-1111", "companyName": "Acme Corp", "_score": 70}]
+        duplicates = find_duplicates(list1, list2)
+        assert len(duplicates) == 1
