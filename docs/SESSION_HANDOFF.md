@@ -1,13 +1,13 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-17
-**Status:** Intent automation shipped, design system extracted, 451 tests passing
+**Status:** Intent pipeline live-tested, GitHub repo created, 453 tests passing
 
 ## What's Working
 
 1. **Authentication** - Legacy JWT from `/authenticate`, token persisted to Turso DB across restarts
 2. **Contact Search** - All filters working, including companyId-based search (`/search/contact`)
-3. **Contact Enrich** - 3-level nested response parsing fixed (needs production test)
+3. **Contact Enrich** - 3-level nested response parsing confirmed working in live pipeline run
 4. **Intent Search** - Legacy `/search/intent` with proper field normalization (nested `company` object + null field fallbacks)
 5. **Two-Phase Intent Pipeline** - Phase 1: Resolve hashed→numeric company IDs (enrich 1 contact, cache in Turso). Phase 2: Contact Search with ICP filters (management level, accuracy, phone)
 6. **Scoring** - Data-calibrated per-SIC scores from HLM delivery data (N=3,136). Inverted employee scale. 25 SIC codes.
@@ -34,7 +34,61 @@
 - **Contact Enrich** — Response parsing fixed but never tested with real production data.
 - **Intent search is free** — Only enrichment costs credits. Intent search `credits_used` set to 0.
 - **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers" (not "Vending", "Break Room", etc.)
-- **GitHub Actions secrets not configured** — The intent-poll.yml workflow is deployed but repo needs 7 secrets set: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, ZOOMINFO_CLIENT_ID, ZOOMINFO_CLIENT_SECRET, SMTP_USER, SMTP_PASSWORD, EMAIL_RECIPIENTS
+- **SMTP secrets not configured** — GitHub Actions has 4 required secrets set (Turso + ZoomInfo) but SMTP_USER, SMTP_PASSWORD, EMAIL_RECIPIENTS not set. Pipeline runs but skips email delivery.
+- **managementLevel as list** — ZoomInfo enrich API returns `managementLevel` as a list (e.g. `["Manager"]`) while Contact Search returns a string. Fixed in scoring.py (session 12).
+
+---
+
+## Session Summary (2026-02-17, Session 12)
+
+### Live Pipeline Test + Bug Fix
+
+First live run of the Intent pipeline against real ZoomInfo API. Pipeline completed end-to-end: 25 intent → 8 scored → 3 exported (batch HADES-20260217-001).
+
+**Bug found and fixed:**
+- `scoring.py:36` — `managementLevel` returned as list from enrich API, caused `TypeError: unhashable type: 'list'` in `get_authority_score()`. Fixed by normalizing to first element. 2 tests added.
+
+### Housekeeping
+- Committed 4 lingering files from sessions 6-8: `config/icp.yaml` (automation config), `zoho_sync.py` (ISO timestamp + dedup guard), `pages/3_Operators.py` (st.button), `.streamlit/secrets.toml.template` (SMTP placeholders)
+- Fixed `empty_state` rendering raw HTML as text — indented `<p>` tags in triple-quoted string treated as markdown code blocks
+- Created GitHub repo: `andre-sav/HADES` (private), pushed all commits
+- Set 4 GitHub secrets: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, ZOOMINFO_CLIENT_ID, ZOOMINFO_CLIENT_SECRET
+- Closed beads HADES-1ln (Intent live test), HADES-5c7 (Enrich live test)
+
+### Key Files Modified (Session 12)
+```
+scoring.py                     - managementLevel list normalization
+tests/test_scoring.py          - 2 tests for list managementLevel
+ui_components.py               - empty_state HTML rendering fix
+config/icp.yaml                - automation.intent config block
+zoho_sync.py                   - ISO timestamp + duplicate name guard
+pages/3_Operators.py           - st.button for sync actions
+.streamlit/secrets.toml.template - SMTP credential placeholders
+docs/SESSION_HANDOFF.md        - Updated through session 12
+```
+
+### Uncommitted Changes
+Only BMAD tooling updates (`.claude/commands/`, `.gemini/commands/`, `_bmad/` — plugin version changes, not project code). All project code committed and pushed.
+
+### Test Count
+453 tests passing (up from 451)
+
+### What Needs Doing Next Session
+1. **Live test Geography pipeline** — Needs browser/Streamlit UI interaction (bead HADES-kyi)
+2. **Live test full UI** — All 4 pipelines through Streamlit (bead HADES-kbu)
+3. **Configure SMTP secrets** — For email delivery from GitHub Actions cron
+4. **Zoho CRM dedup check at export** — P4 backlog (bead HADES-iic)
+
+### Beads Status
+```
+HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
+HADES-kyi [P2] Live test Geography pipeline end-to-end
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+HADES-1ln [P2] CLOSED — Live pipeline run: 25 intent → 8 scored → 3 exported
+HADES-5c7 [P2] CLOSED — Enrich confirmed working (3/3 contacts enriched)
+HADES-20n [P2] CLOSED — 4 bugs fixed + 28 edge case tests
+HADES-bk3 [P2] CLOSED — Production test UX (visual audit + 10 fixes)
+```
 
 ---
 
@@ -535,7 +589,7 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Test Coverage
 
-- **451 tests passing** (all green, run `python -m pytest tests/ -v`)
+- **453 tests passing** (all green, run `python -m pytest tests/ -v`)
 
 ## API Usage
 
@@ -546,9 +600,10 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Next Steps (Priority Order)
 
-1. **Configure GitHub secrets** — 7 repo secrets for intent polling cron
-2. **Live test all pipelines** — Intent, Geography, Enrich, Export end-to-end
-3. **Zoho CRM dedup check at export** — P4 backlog
+1. **Live test Geography pipeline** — Needs browser interaction (bead HADES-kyi)
+2. **Live test full Streamlit UI** — All 4 pipelines (bead HADES-kbu)
+3. **Configure SMTP secrets** — For email delivery from GitHub Actions
+4. **Zoho CRM dedup check at export** — P4 backlog (bead HADES-iic)
 
 ## Beads Status
 
@@ -581,4 +636,4 @@ python calibrate_scoring.py   # Re-run calibration analysis
 ```
 
 ---
-*Last updated: 2026-02-17 (Session 11)*
+*Last updated: 2026-02-17 (Session 12)*
