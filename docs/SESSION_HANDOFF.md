@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-17
-**Status:** All 4 epics implemented (18 stories complete). 495 tests passing. 2 critical bugs fixed. Ready for live testing.
+**Status:** All 4 epics implemented (18 stories complete). 509 tests passing. Geography pipeline E2E live test PASSED. 6 bugs fixed this session.
 
 ## What's Working
 
@@ -36,6 +36,73 @@
 - **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers" (not "Vending", "Break Room", etc.)
 - **SMTP secrets not configured** — GitHub Actions has 4 required secrets set (Turso + ZoomInfo) but SMTP_USER, SMTP_PASSWORD, EMAIL_RECIPIENTS not set. Pipeline runs but skips email delivery.
 - **managementLevel as list** — ZoomInfo enrich API returns `managementLevel` as a list (e.g. `["Manager"]`) while Contact Search returns a string. Fixed in scoring.py (session 12).
+
+---
+
+## Session Summary (2026-02-17, Session 17)
+
+### Bug Fixes + Geography Pipeline E2E Live Test
+
+**4 P2 Bugs Fixed (commit `e739391`):**
+1. **Token persistence** (HADES-ti1) — Expired in-memory token skipped DB check. Restructured `_get_token()`: in-memory → DB → authenticate.
+2. **Thread-safety** (HADES-4vu) — Shared `ZoomInfoClient` singleton mutated from multiple threads. Added `threading.Lock()` around token auth, rate limiting, and 401 re-auth.
+3. **XSS escaping** (HADES-1nn) — API-sourced data interpolated into raw HTML. Added `html.escape()` on company names, contact names, management levels, progress log messages.
+4. **Geography score clamp** (HADES-8fd) — Composite score could exceed 100. Added `min(100, round(composite))`.
+
+**Geography Pipeline E2E Live Test (HADES-kyi — PASSED):**
+- Ran full pipeline via Chrome MCP browser automation
+- Operator: Bridget Crouse · Dallas Rose (PA, ZIP 17036)
+- Manual Review mode, 5 target companies, 15mi radius
+- Search: 30 companies found (expansion: +Director/VP, +employee range, accuracy→75, radius→20mi, 7 searches)
+- Enrichment: 30 contacts enriched (30 credits used)
+- Scoring: 64-76%, all Medium priority
+- Quality Notes: 3/30 missing mobile, 3/30 low accuracy
+- Quick CSV + VanillaSoft CSV (31 columns) both downloaded successfully
+- GIF recording: `geography-pipeline-e2e-test.gif` (50 frames)
+
+**2 Bugs Found During Testing & Fixed (commit `500cef3`):**
+5. **VanillaSoft export missing fields** (HADES-0rp) — Enrich API replaces contact object, losing search-only fields (`sicCode`, `employeeCount`, `industry`). Also uses different field names (`companyWebsite` vs `website`). Fix: expanded pre-enrichment field preservation + added enrich API fallback mappings.
+6. **Loc Type column empty** (HADES-7g5) — `_location_type` only tagged when combined search enabled. Fix: always tag contacts with location type from search params.
+
+### Key Files Modified (Session 17)
+```
+scoring.py                     - Score clamp: min(100, round(composite))
+zoominfo_client.py             - Token persistence restructure + threading.Lock
+ui_components.py               - html.escape() on API-sourced data
+pages/2_Geography_Workflow.py  - XSS escaping + pre-enrichment field preservation
+expand_search.py               - Always tag _location_type
+export.py                      - First-non-empty-wins mapping + nested company fallback
+utils.py                       - Enrich API fallback field mappings
+tests/test_scoring.py          - +1 test (score clamp)
+tests/test_zoominfo_client.py  - +3 tests (token persistence, thread-safety)
+tests/test_ui_components.py    - +3 tests (XSS escaping)
+tests/test_export.py           - +7 tests (enrich field mappings)
+tests/test_expand_search.py    - Updated location type tagging test
+```
+
+### Uncommitted Changes
+None — all committed and pushed.
+
+### Test Count
+509 tests passing (up from 502 mid-session, up from 495 at session start)
+
+### What Needs Doing Next Session
+1. **Live test remaining pipelines** — HADES-kbu (Intent, Automation, all pages through Streamlit)
+2. **Build expansion_timeline component** — HADES-5xm (P3)
+3. **Add rapidfuzz fuzzy matching** — HADES-1wk (P3)
+4. **Plan compliance gaps** — HADES-umv (P4, 9 items)
+5. **Zoho CRM dedup check at export** — HADES-iic (P4)
+6. **Configure SMTP secrets** — For GitHub Actions email delivery
+7. **Deploy to Streamlit Community Cloud**
+
+### Beads Status
+```
+HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
+HADES-5xm [P3] Story 2.3 gap: build expansion_timeline component
+HADES-1wk [P3] Story 2.6 gap: add rapidfuzz fuzzy matching
+HADES-umv [P4] Plan compliance: missing CTA, error log, PII, doc updates
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+```
 
 ---
 
@@ -847,34 +914,47 @@ tests/test_zoominfo_client.py - 5 intent tests updated for legacy format
 
 ## Test Coverage
 
-- **474 tests passing** (all green, run `python -m pytest tests/ -v`)
+- **509 tests passing** (all green, run `python -m pytest tests/ -v`)
 
 ## API Usage
 
 | Limit | Used | Total | Remaining |
 |-------|------|-------|-----------|
-| Unique IDs (Credits) | ~566 | 30,000 | ~29,434 |
+| Unique IDs (Credits) | ~596 | 30,000 | ~29,404 |
 | API Requests | ~107 | 3,000,000 | ~3M |
 
 ## Next Steps (Priority Order)
 
-1. **Commit all changes** — Session 14 project code + BMAD tooling updates
-2. **Live test Geography pipeline** — Needs browser interaction (bead HADES-kyi)
-3. **Live test full Streamlit UI** — All 4 pipelines (bead HADES-kbu)
-4. **Implement remaining gaps** — Stories 2.6, 4.1, 4.2, 4.3
-5. **Configure SMTP secrets** — For email delivery from GitHub Actions
-6. **Zoho CRM dedup check at export** — P4 backlog (bead HADES-iic)
+1. **Live test remaining pipelines** — HADES-kbu (Intent, Automation, all pages)
+2. **Build expansion_timeline component** — HADES-5xm (P3)
+3. **Add rapidfuzz fuzzy matching** — HADES-1wk (P3)
+4. **Plan compliance gaps** — HADES-umv (P4)
+5. **Zoho CRM dedup check at export** — HADES-iic (P4)
+6. **Configure SMTP secrets** — For GitHub Actions email delivery
+7. **Deploy to Streamlit Community Cloud**
 
 ## Beads Status
 
 ```
-HADES-kyi [P2] Live test Geography pipeline end-to-end
+OPEN:
 HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
+HADES-5xm [P3] Story 2.3 gap: build expansion_timeline component
+HADES-1wk [P3] Story 2.6 gap: add rapidfuzz fuzzy matching
+HADES-umv [P4] Plan compliance: missing CTA, error log, PII, doc updates
 HADES-iic [P4] Add Zoho CRM dedup check at export time
-HADES-1ln [P2] CLOSED — Live pipeline run: 25 intent → 8 scored → 3 exported
-HADES-5c7 [P2] CLOSED — Enrich confirmed working (3/3 contacts enriched)
-HADES-20n [P2] CLOSED — 4 bugs fixed + 28 edge case tests
-HADES-bk3 [P2] CLOSED — Production test UX (visual audit + 10 fixes)
+
+CLOSED (11):
+HADES-0rp [P2] VanillaSoft export missing Company/ZIP/SIC fields
+HADES-1nn [P2] XSS escaping on API-sourced HTML
+HADES-4vu [P2] Thread-safety on shared ZoomInfoClient
+HADES-ti1 [P2] Token persistence expired-token check
+HADES-kyi [P2] Geography pipeline E2E test — PASSED
+HADES-7g5 [P3] Loc Type column always populated
+HADES-8fd [P3] Geography score clamp to 100
+HADES-1ln [P2] Intent pipeline live test — PASSED
+HADES-5c7 [P2] Enrich confirmed working
+HADES-20n [P2] Messy data hardening (28 tests)
+HADES-bk3 [P2] Production UX test (10 fixes)
 ```
 
 ## Chrome Extension Fix
@@ -896,4 +976,4 @@ python calibrate_scoring.py   # Re-run calibration analysis
 ```
 
 ---
-*Last updated: 2026-02-17 (Session 14)*
+*Last updated: 2026-02-17 (Session 17)*
