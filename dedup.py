@@ -3,6 +3,7 @@ Deduplication logic for phone numbers and cross-workflow leads.
 """
 
 import re
+from functools import lru_cache
 from typing import Any
 
 from rapidfuzz.fuzz import token_sort_ratio
@@ -57,8 +58,9 @@ def normalize_company_name(name: str) -> str:
     return normalized
 
 
+@lru_cache(maxsize=1)
 def _get_fuzzy_threshold() -> float:
-    """Load fuzzy match threshold from config."""
+    """Load fuzzy match threshold from config. Cached for process lifetime."""
     config = load_config()
     return config.get("dedup", {}).get("fuzzy_threshold", 85)
 

@@ -1152,7 +1152,7 @@ if (
 
         # Show expansion timeline
         expansion_steps = exp_result.get("expansion_steps", [])
-        if expansion_steps or exp_result["steps_applied"] > 0:
+        if expansion_steps:
             steps_skipped = 0
             if exp_result["target_met"] and exp_result["steps_applied"] > 0:
                 steps_skipped = len(EXPANSION_STEPS) - exp_result["steps_applied"]
@@ -1167,6 +1167,8 @@ if (
                     target_met=exp_result["target_met"],
                     steps_skipped=steps_skipped,
                 )
+        elif exp_result["steps_applied"] > 0:
+            st.caption("Expansion details unavailable for this run.")
         else:
             st.caption("No expansions needed")
     else:
