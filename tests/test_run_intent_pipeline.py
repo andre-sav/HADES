@@ -116,6 +116,33 @@ class TestCredentialLoading:
         with pytest.raises(ValueError, match="Missing required credential"):
             load_credentials()
 
+    @patch.dict("os.environ", {}, clear=True)
+    @patch("scripts._credentials.Path.exists", return_value=False)
+    def test_streamlit_secrets_fallback(self, _mock_exists):
+        """When running inside Streamlit, should use st.secrets."""
+        secrets_data = {
+            "TURSO_DATABASE_URL": "libsql://st-secrets.turso.io",
+            "TURSO_AUTH_TOKEN": "st-token",
+            "ZOOMINFO_CLIENT_ID": "st-id",
+            "ZOOMINFO_CLIENT_SECRET": "st-secret",
+        }
+        # Simulate st.secrets as an object that supports bool and dict()
+        mock_secrets = MagicMock()
+        mock_secrets.__bool__ = lambda self: True
+        mock_secrets.__iter__ = lambda self: iter(secrets_data)
+        mock_secrets.__getitem__ = lambda self, k: secrets_data[k]
+        mock_secrets.keys = lambda: secrets_data.keys()
+
+        mock_st = MagicMock()
+        mock_st.secrets = mock_secrets
+
+        with patch.dict("sys.modules", {"streamlit": mock_st}):
+            import importlib
+            import scripts._credentials as cred_mod
+            importlib.reload(cred_mod)
+            creds = cred_mod.load_credentials()
+            assert creds["TURSO_DATABASE_URL"] == "libsql://st-secrets.turso.io"
+
     def test_smtp_keys_optional(self):
         """SMTP keys should be None when not configured, not raise."""
         with patch.dict("os.environ", {
