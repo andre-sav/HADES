@@ -1756,14 +1756,14 @@ def empty_state(
     """
     icon_html = f'<div style="font-size: 1.5rem; margin-bottom: 0.25rem; opacity: 0.4;">{icon}</div>' if icon else ""
     hint_html = f'<p style="color: {COLORS["text_muted"]}; font-size: {FONT_SIZES["sm"]}; margin-top: 0.25rem;">{hint}</p>' if hint else ""
-    st.markdown(
-        f'''<div style="text-align: center; padding: {SPACING["xl"]} 0 {SPACING["lg"]};">
-            {icon_html}
-            <p style="color: {COLORS["text_secondary"]}; margin: 0;">{message}</p>
-            {hint_html}
-        </div>''',
-        unsafe_allow_html=True,
+    html = (
+        f'<div style="text-align: center; padding: {SPACING["xl"]} 0 {SPACING["lg"]};">'
+        f'{icon_html}'
+        f'<p style="color: {COLORS["text_secondary"]}; margin: 0;">{message}</p>'
+        f'{hint_html}'
+        f'</div>'
     )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # =============================================================================
