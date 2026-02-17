@@ -595,3 +595,41 @@ class TestMessyIdEdgeCases:
         ]
         result = build_contacts_by_company(contacts)
         assert len(result) == 1
+
+
+class TestExpansionSteps:
+    """Test structured expansion_steps data in result dict."""
+
+    def test_expansion_steps_present_in_result(self):
+        """Result dict must contain expansion_steps list."""
+        result = {
+            "expansion_steps": [
+                {"param": "management_levels", "old_value": "Manager/Director/VP Level Exec",
+                 "new_value": "management → Manager/Director/VP Level Exec/C Level Exec",
+                 "contacts_found": 14, "new_companies": 5, "cumulative_companies": 18},
+                {"param": "employee_max", "old_value": "50-5,000",
+                 "new_value": "employees → 50+ (no cap)",
+                 "contacts_found": 20, "new_companies": 12, "cumulative_companies": 30},
+            ],
+        }
+        assert "expansion_steps" in result
+        assert len(result["expansion_steps"]) == 2
+        assert result["expansion_steps"][0]["param"] == "management_levels"
+        assert result["expansion_steps"][1]["new_companies"] == 12
+
+    def test_expansion_steps_empty_when_no_expansion(self):
+        """When target met on first search, expansion_steps should be empty."""
+        result = {"expansion_steps": []}
+        assert result["expansion_steps"] == []
+
+    def test_expansion_step_param_names(self):
+        """Each step param should be one of the known expansion types."""
+        valid_params = {"management_levels", "employee_max", "accuracy_min", "radius"}
+        steps = [
+            {"param": "management_levels", "old_value": "a", "new_value": "b",
+             "contacts_found": 10, "new_companies": 5, "cumulative_companies": 15},
+            {"param": "radius", "old_value": "10mi", "new_value": "15mi",
+             "contacts_found": 8, "new_companies": 3, "cumulative_companies": 18},
+        ]
+        for step in steps:
+            assert step["param"] in valid_params

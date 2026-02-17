@@ -212,6 +212,9 @@ def expand_search(
             - contacts: List of all contacts found
             - contacts_by_company: Dict grouping contacts by company
             - expansion_log: List of progress messages
+            - expansion_steps: List of dicts with per-step structured data for timeline UI
+                Each dict has: param, old_value, new_value, contacts_found,
+                new_companies, cumulative_companies
             - stopped: True if search was cancelled before completion (optional)
             - error: Error message if search failed (optional)
     """
@@ -220,6 +223,7 @@ def expand_search(
     searches_performed = 0
     steps_applied = 0
     expansion_log = []  # Track what we did for verbose output
+    expansion_steps = []  # Structured per-step data for timeline UI
 
     def log_progress(message: str, is_step: bool = False):
         """Log progress to status container and/or shared_log if available."""
@@ -342,7 +346,8 @@ def expand_search(
                     "steps_applied": 0, "final_params": current_params,
                     "searches_performed": searches_performed, "contacts": contacts_list,
                     "contacts_by_company": build_contacts_by_company(contacts_list),
-                    "expansion_log": expansion_log, "stopped": True,
+                    "expansion_log": expansion_log, "expansion_steps": expansion_steps,
+                    "stopped": True,
                 }
             time.sleep(0.5)  # Rate limit
             log_progress("**Combined search:** Adding Person-only results for maximum coverage...", is_step=True)
@@ -382,6 +387,7 @@ def expand_search(
             "contacts_by_company": {},
             "error": str(e),
             "expansion_log": expansion_log,
+            "expansion_steps": expansion_steps,
         }
 
     # Check if target already met before expansion (target = unique companies, not contacts)
@@ -400,6 +406,7 @@ def expand_search(
             "contacts": contacts_list,
             "contacts_by_company": contacts_by_company,
             "expansion_log": expansion_log,
+            "expansion_steps": expansion_steps,
         }
 
     if len(unique_companies) < target:
@@ -439,6 +446,19 @@ def expand_search(
         if should_skip:
             log_progress(f"Skipping expansion step: {skip_reason}")
             continue
+
+        # Capture old values BEFORE applying the step
+        old_parts = []
+        if "radius" in step:
+            old_parts.append(f"{current_params['radius']}mi")
+        if "accuracy_min" in step:
+            old_parts.append(f"accuracy {current_params['accuracy_min']}")
+        if "management_levels" in step:
+            old_parts.append("/".join(current_params["management_levels"]))
+        if "employee_max" in step:
+            curr = current_params["employee_max"]
+            old_parts.append("50+ (no cap)" if curr == 0 else f"50-{curr:,}")
+        old_value_desc = ", ".join(old_parts)
 
         # Describe and apply expansion
         expansion_desc = []
@@ -482,6 +502,16 @@ def expand_search(
             exp_location_tag = fixed_params.get("location_type", "PersonAndHQ")
             new_contacts, new_companies = process_contacts(contacts, location_type_tag=exp_location_tag)
             log_progress(f"Found {len(contacts)} contacts → **{len(unique_companies)}** companies (+{new_companies} new)")
+
+            # Record structured step data for timeline
+            expansion_steps.append({
+                "param": list(step.keys())[0],
+                "old_value": old_value_desc,
+                "new_value": ", ".join(expansion_desc),
+                "contacts_found": len(contacts),
+                "new_companies": new_companies,
+                "cumulative_companies": len(unique_companies),
+            })
 
             # Combined search: Run Person-only search during expansion too
             if include_person_only and fixed_params["location_type"] == "PersonAndHQ":
@@ -549,6 +579,7 @@ def expand_search(
         "contacts": contacts_list,
         "contacts_by_company": contacts_by_company,
         "expansion_log": expansion_log,
+        "expansion_steps": expansion_steps,
     }
     if was_cancelled:
         result["stopped"] = True
