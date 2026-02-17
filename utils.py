@@ -437,7 +437,8 @@ ZOOMINFO_TO_VANILLASOFT = {
     # Company HQ phone → Home (per VSDP mapping)
     "companyHQPhone": "Home",
     # Fallback mappings (some APIs use different names)
-    "phone": "Business",           # Fallback for directPhone
+    # NOTE: "phone" -> "Business" removed — it silently overwrote directPhone.
+    # Fallback handled in export.py build_vanillasoft_row() instead.
     "employees": "Number of Employees",  # Fallback for employeeCount
     "zip": "ZIP code",             # Fallback for zipCode
     "address": "Address",          # Fallback for street

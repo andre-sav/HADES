@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-17
-**Status:** All 4 epics implemented (18 stories complete). 492 tests passing. Ready for live testing.
+**Status:** All 4 epics implemented (18 stories complete). 495 tests passing. 2 critical bugs fixed. Ready for live testing.
 
 ## What's Working
 
@@ -36,6 +36,71 @@
 - **Valid intent topics** — Must use exact ZoomInfo taxonomy: "Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers" (not "Vending", "Break Room", etc.)
 - **SMTP secrets not configured** — GitHub Actions has 4 required secrets set (Turso + ZoomInfo) but SMTP_USER, SMTP_PASSWORD, EMAIL_RECIPIENTS not set. Pipeline runs but skips email delivery.
 - **managementLevel as list** — ZoomInfo enrich API returns `managementLevel` as a list (e.g. `["Manager"]`) while Contact Search returns a string. Fixed in scoring.py (session 12).
+
+---
+
+## Session Summary (2026-02-17, Session 16)
+
+### Retrospective + Code Review + Bug Fixes
+
+**Retrospective (All 4 Epics Combined)**
+- Ran BMAD retrospective workflow across Epics 1-4 (18 stories, 15 sessions)
+- Key insights: spike-then-plan for API projects, mocked tests give partial false confidence, update docs at milestones
+- 9 action items, 3 team agreements, 2 critical path items identified
+- Retrospective saved: `_bmad-output/implementation-artifacts/epic-1-4-retro-2026-02-17.md`
+
+**Dual Code Review (feature-dev + superpowers reviewers in parallel)**
+- `feature-dev:code-reviewer` found 6 issues (2 critical, 4 important)
+- `superpowers:code-reviewer` found 6 plan compliance gaps + convention violations
+- Zero overlap between reviewers — complementary findings
+
+**2 Critical Bugs Fixed:**
+1. **directPhone overwritten by phone in export** (`utils.py:440`, `export.py:65`) — Both `directPhone` and `phone` mapped to "Business" column. Generic `phone` silently overwrote higher-quality `directPhone`. Fix: removed duplicate mapping, added explicit fallback in `build_vanillasoft_row()`.
+2. **Batch counter incremented every page render** (`pages/4_CSV_Export.py:312`) — `generate_batch_id(db)` did a DB write on every Streamlit rerun. Fix: cached export output in session state keyed by lead set + operator.
+
+**7 Beads Created for Remaining Issues:**
+- 3 bugs (P2): token persistence, thread-safety, XSS escaping
+- 1 bug (P3): geography score unclamped
+- 2 features (P3): rapidfuzz dedup, expansion_timeline component
+- 1 task (P4): grouped plan compliance gaps (9 items)
+
+### Key Files Modified (Session 16)
+```
+utils.py                      - Removed duplicate phone->Business mapping
+export.py                     - Added directPhone fallback logic
+pages/4_CSV_Export.py          - Cached export to prevent batch_id rerun writes
+tests/test_export.py           - 3 new tests (directPhone priority)
+_bmad-output/implementation-artifacts/epic-1-4-retro-2026-02-17.md - NEW: retrospective doc
+```
+
+### Uncommitted Changes
+All changes above are uncommitted. Ready to commit.
+
+### Test Count
+495 tests passing (up from 492)
+
+### What Needs Doing Next Session
+1. **Commit session 16 changes** — 2 bug fixes + retro doc + beads
+2. **Fix P2 bugs** — Token persistence (HADES-ti1), thread-safety (HADES-4vu), XSS (HADES-1nn)
+3. **Fix P3 bug** — Geography score clamp (HADES-8fd) — one-line fix
+4. **Live test Geography pipeline** — HADES-kyi (deployment blocker)
+5. **Live test all pages through Streamlit** — HADES-kbu (deployment blocker)
+6. **Deploy to Streamlit Community Cloud**
+7. **Configure SMTP secrets** — For GitHub Actions email delivery
+
+### Beads Status
+```
+HADES-ti1 [P2] Fix: expired token skips persisted-token check
+HADES-4vu [P2] Fix: thread-safety on shared ZoomInfoClient
+HADES-1nn [P2] Fix: XSS — API data in raw HTML without html.escape()
+HADES-kbu [P2] Live test all 4 pipelines with Streamlit running
+HADES-kyi [P2] Live test Geography pipeline end-to-end
+HADES-8fd [P3] Fix: geography score unclamped — can exceed 100
+HADES-1wk [P3] Story 2.6 gap: add rapidfuzz fuzzy matching
+HADES-5xm [P3] Story 2.3 gap: build expansion_timeline component
+HADES-umv [P4] Plan compliance: missing CTA, error log, PII, doc updates
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+```
 
 ---
 

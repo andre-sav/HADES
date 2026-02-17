@@ -62,6 +62,10 @@ def build_vanillasoft_row(
         if value is not None:
             row[vs_col] = str(value)
 
+    # Fallback: use generic "phone" only if directPhone didn't map
+    if not row.get("Business") and lead.get("phone"):
+        row["Business"] = str(lead["phone"])
+
     # Format phone numbers
     if row.get("Business"):
         row["Business"] = format_phone(row["Business"])

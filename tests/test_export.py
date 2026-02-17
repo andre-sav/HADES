@@ -48,6 +48,24 @@ class TestBuildVanillasoftRow:
         row = build_vanillasoft_row(lead)
         assert row["Mobile"] == "(555) 987-6543"
 
+    def test_direct_phone_preferred_over_generic_phone(self):
+        """Test that directPhone wins when both directPhone and phone are present."""
+        lead = {"directPhone": "5551111111", "phone": "5552222222"}
+        row = build_vanillasoft_row(lead)
+        assert row["Business"] == "(555) 111-1111"
+
+    def test_generic_phone_used_as_fallback(self):
+        """Test that phone is used when directPhone is absent."""
+        lead = {"phone": "5553333333"}
+        row = build_vanillasoft_row(lead)
+        assert row["Business"] == "(555) 333-3333"
+
+    def test_direct_phone_only(self):
+        """Test that directPhone works when phone is absent."""
+        lead = {"directPhone": "5554444444"}
+        row = build_vanillasoft_row(lead)
+        assert row["Business"] == "(555) 444-4444"
+
     def test_list_source_attribution(self):
         """Test that List Source follows VSDP format: '{DataSource} {Date}'."""
         from datetime import datetime

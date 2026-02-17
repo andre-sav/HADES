@@ -307,15 +307,25 @@ else:
 # =============================================================================
 st.markdown("---")
 
-# Generate
+# Generate (cached to avoid batch_id DB writes on every Streamlit rerun)
 agents = get_call_center_agents()
-csv_content, filename, batch_id = export_leads_to_csv(
-    leads_to_export,
-    operator=selected_operator,
-    workflow_type=workflow_type,
-    db=db,
-    agents=agents,
+_export_cache_key = (
+    tuple(l.get("personId", l.get("companyId", i)) for i, l in enumerate(leads_to_export)),
+    selected_operator.get("id") if selected_operator else None,
+    workflow_type,
 )
+if st.session_state.get("_export_cache_key") != _export_cache_key:
+    csv_content, filename, batch_id = export_leads_to_csv(
+        leads_to_export,
+        operator=selected_operator,
+        workflow_type=workflow_type,
+        db=db,
+        agents=agents,
+    )
+    st.session_state["_export_cache_key"] = _export_cache_key
+    st.session_state["_export_cached"] = (csv_content, filename, batch_id)
+else:
+    csv_content, filename, batch_id = st.session_state["_export_cached"]
 
 # Post-export display (if already exported)
 if st.session_state.last_export_metadata:
