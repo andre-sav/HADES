@@ -1,7 +1,149 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-17
-**Status:** All 4 epics implemented (18 stories complete). 532 tests passing. Both pipelines E2E live tested and PASSED. 2 P3 features added in session 19.
+**Date:** 2026-02-18
+**Status:** All 4 epics implemented (18 stories complete). 551 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft direct push feature added in session 20. Bug fixes and UX improvements in session 21.
+
+## Session Summary (2026-02-18, Session 21)
+
+### Bug Fixes, UX Improvements, Contact Skip Feature
+
+**Pipeline Health — "Last Query: Error" misleading (FIX):**
+- Red status on Last Query showed "Error" when the query actually succeeded — it was just stale (>6h old)
+- Changed label from "Error" → "Critical" globally for red status indicators
+- Added staleness explanation to detail text: "No queries in 11h (threshold: 6h)"
+- Yellow (1-6h) also now explains: "No queries in over Xh"
+
+**"unhashable type: 'list'" bug (FIX — found by ChatGPT UX review):**
+- Root cause: ZoomInfo API sometimes returns `company` field as a list instead of dict
+- `.get("company", {}).get("id")` crashes with `TypeError: unhashable type: 'list'`
+- Fixed across 7 files with `isinstance(contact.get("company"), dict)` guards
+- Added `safe_company()` helper to `utils.py` for reuse
+
+**Intent export missing Primary SIC (FIX):**
+- Intent Contact Search and Enrich APIs don't return `sicCode` (subscription-gated field)
+- But intent company data from Step 1 (Intent Search) has it
+- `score_intent_contacts()` in `scoring.py` now carries `sicCode`, `employees`, `industry` from company data onto contacts when missing
+- Geography workflow already handled this correctly via pre-enrichment data restore
+
+**Contact skip/unselect for enrichment (FEATURE — both workflows):**
+- Added "Skip — don't enrich" option to each company's radio group in manual review
+- Skipping a company removes it from selected contacts — no credit spent
+- Re-selecting a contact adds the company back
+- Enrich button disabled with warning when all companies skipped
+- Skip count shown: "8 of 12 companies selected · 4 skipped"
+- Added bulk "Select all best" and "Skip all" buttons to both workflows
+- Use case: Skip all → cherry-pick the ones you want → enrich
+
+### Key Files Modified (Session 21)
+```
+pages/10_Pipeline_Health.py     - Staleness detail + "Critical" label
+pages/1_Intent_Workflow.py      - Skip/unselect contacts, bulk buttons, safe_company guards
+pages/2_Geography_Workflow.py   - Skip/unselect contacts, Skip All button, safe_company guard
+scoring.py                      - Carry sicCode/employees/industry from intent company data
+expand_search.py                - safe_company guards (2 locations)
+zoominfo_client.py              - safe_company guard in search_contacts_one_per_company
+scripts/run_intent_pipeline.py  - safe_company guards (7 locations)
+utils.py                        - Added safe_company() helper function
+```
+
+### Uncommitted Changes
+All files listed above — ready to commit.
+
+### Test Count
+551 tests passing (unchanged from session 20)
+
+### What Needs Doing Next Session
+1. **Create VanillaSoft Incoming Web Lead Profile** — Admin > Integration > Incoming Web Leads > Add, map 28 XML fields
+2. **Add VANILLASOFT_WEB_LEAD_ID to secrets.toml** — copy WebLeadID from VanillaSoft Admin
+3. **Live test push with small batch** — verify end-to-end with real VanillaSoft instance
+4. **Live test Intent export with SIC code fix** — verify Primary SIC populates in CSV
+5. **Plan compliance gaps** — HADES-umv (P4, 9 items: CTA, error log, PII, doc updates)
+6. **Zoho CRM dedup check at export** — HADES-iic (P4)
+7. **Configure SMTP secrets** — For GitHub Actions email delivery
+8. **Deploy to Streamlit Community Cloud**
+
+---
+
+## Session Summary (2026-02-18, Session 20)
+
+### VanillaSoft Direct Push + Export Button Clarity
+
+**VanillaSoft Direct Push Feature (NEW):**
+- Built `vanillasoft_client.py` — HTTP POST client for VanillaSoft Incoming Web Leads endpoint
+- `PushResult`/`PushSummary` dataclasses, XML serialization via `ElementTree`, `_build_xml()`
+- `push_lead()` — single-lead POST with timeout/connection/HTTP error handling
+- `push_leads()` — sequential batch with progress callback, 200ms delay between POSTs
+- `_parse_response()` — XML response parsing with fallback for malformed responses
+- Export page (`pages/4_CSV_Export.py`) rewritten: "Push to VanillaSoft" primary button + "Download CSV" secondary
+- Push flow: progress bar, per-lead success/failure log, outcome tracking for succeeded leads only
+- Failed leads: retry button + "Download Failed as CSV" fallback
+- Push button disabled with tooltip when `VANILLASOFT_WEB_LEAD_ID` secret not configured
+- DB: 3 new columns on `staged_exports` (push_status, pushed_at, push_results_json) + `mark_staged_pushed()` method
+- Idempotent ALTER TABLE migrations for existing databases
+
+**Export Button Rename (UX Fix):**
+- Workflow pages: "Download CSV" → "Quick Preview CSV" (with tooltip: "Simple table export for review — not VanillaSoft format")
+- Workflow pages: "Full Export" → "VanillaSoft Export"
+- Filenames: `geo_contacts_` → `geo_preview_`, `intent_contacts_` → `intent_preview_`
+
+**Code Review Findings Fixed:**
+- Tightened `_parse_response()` fallback from `"Success" in text` to `"<ReturnValue>Success</ReturnValue>" in text` (prevents false positive on strings like "SuccessRateExceeded")
+
+### Key Files Created/Modified (Session 20)
+```
+vanillasoft_client.py               - NEW: VanillaSoft push client (XML, HTTP POST, progress)
+tests/test_vanillasoft_client.py    - NEW: 16 tests (dataclasses, XML, push_lead, push_leads)
+turso_db.py                         - 3 push tracking columns + mark_staged_pushed() + migrations
+tests/test_turso_db.py              - 3 new push tracking tests
+pages/4_CSV_Export.py               - Push to VanillaSoft button + progress + retry + CSV fallback
+pages/1_Intent_Workflow.py          - Button rename: Quick Preview CSV + VanillaSoft Export
+pages/2_Geography_Workflow.py       - Button rename: Quick Preview CSV + VanillaSoft Export
+.streamlit/secrets.toml.template    - VANILLASOFT_WEB_LEAD_ID placeholder
+CLAUDE.md                           - vanillasoft_client.py in structure, VS secret, test count 551
+docs/plans/2026-02-17-vanillasoft-push-design.md  - NEW: design doc (approved)
+docs/plans/2026-02-17-vanillasoft-push-plan.md    - NEW: 7-task implementation plan
+```
+
+### Uncommitted Changes
+None — working tree clean. 8 commits ready to push.
+
+### Test Count
+551 tests passing (up from 532)
+
+### What Needs Doing Next Session
+1. **Create VanillaSoft Incoming Web Lead Profile** — Admin > Integration > Incoming Web Leads > Add, map 28 XML fields
+2. **Add VANILLASOFT_WEB_LEAD_ID to secrets.toml** — copy WebLeadID from VanillaSoft Admin
+3. **Live test push with small batch** — verify end-to-end with real VanillaSoft instance
+4. **Plan compliance gaps** — HADES-umv (P4, 9 items: CTA, error log, PII, doc updates)
+5. **Zoho CRM dedup check at export** — HADES-iic (P4)
+6. **Configure SMTP secrets** — For GitHub Actions email delivery
+7. **Deploy to Streamlit Community Cloud**
+
+### Beads Status
+```
+OPEN:
+HADES-umv [P4] Plan compliance: missing CTA, error log, PII, doc updates
+HADES-iic [P4] Add Zoho CRM dedup check at export time
+
+CLOSED (15):
+HADES-1wk [P3] Rapidfuzz fuzzy matching — 15 tests, 5 commits
+HADES-5xm [P3] Expansion timeline component — 8 tests, 4 commits
+HADES-0rp [P2] VanillaSoft export missing fields
+HADES-1nn [P2] XSS escaping
+HADES-4vu [P2] Thread-safety
+HADES-ti1 [P2] Token persistence
+HADES-kyi [P2] Geography E2E — PASSED
+HADES-kbu [P2] Intent E2E + all pages verified — PASSED
+HADES-6s4 [P2] HTML-as-code-block bug
+HADES-7g5 [P3] Loc Type column
+HADES-8fd [P3] Score clamp
+HADES-1ln [P2] Intent live test
+HADES-5c7 [P2] Enrich confirmed
+HADES-20n [P2] Messy data hardening
+HADES-bk3 [P2] Production UX test
+```
+
+---
 
 ## What's Working
 

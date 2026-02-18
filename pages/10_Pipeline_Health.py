@@ -68,7 +68,7 @@ def health_indicator(label: str, status: str, detail: str, timestamp: str | None
         "gray": COLORS.get("text_secondary", "#64748b"),
     }
     dot_color = color_map.get(status, color_map["gray"])
-    status_label = {"green": "Healthy", "yellow": "Stale", "red": "Error", "gray": "Unknown"}.get(status, "Unknown")
+    status_label = {"green": "Healthy", "yellow": "Stale", "red": "Critical", "gray": "Unknown"}.get(status, "Unknown")
 
     ts_html = f'<span style="color: {COLORS["text_secondary"]}; font-size: 0.8rem;">{timestamp}</span>' if timestamp else ""
 
@@ -134,23 +134,30 @@ elif last_geo:
 if last_query:
     ts = last_query.get("created_at", "")
     ago = time_ago(ts)
-    # Determine staleness
+    wf = last_query['workflow_type'].title()
+    leads = last_query['leads_returned']
+    # Determine staleness — thresholds: <1h green, <6h yellow, >6h red
     try:
         dt = datetime.fromisoformat(ts)
         minutes = (datetime.now() - dt).total_seconds() / 60
         if minutes < 60:
             q_status = "green"
+            q_detail = f"{wf} · {leads} leads returned"
         elif minutes < 360:  # 6 hours
             q_status = "yellow"
+            q_detail = f"{wf} · {leads} leads returned · No queries in over {int(minutes / 60)}h"
         else:
             q_status = "red"
+            hours = int(minutes / 60)
+            q_detail = f"{wf} · {leads} leads returned · No queries in {hours}h (threshold: 6h)"
     except (ValueError, TypeError):
         q_status = "gray"
+        q_detail = f"{wf} · {leads} leads returned"
 
     health_indicator(
         "Last Query",
         q_status,
-        f"{last_query['workflow_type'].title()} · {last_query['leads_returned']} leads returned",
+        q_detail,
         timestamp=ago,
     )
 else:

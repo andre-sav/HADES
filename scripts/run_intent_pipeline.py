@@ -294,9 +294,10 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
 
         # Top 5 leads for email summary
         for lead in scored_contacts[:5]:
+            co = lead.get("company") if isinstance(lead.get("company"), dict) else {}
             summary["top_leads"].append({
                 "name": f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(),
-                "company": lead.get("companyName", "") or lead.get("company", {}).get("name", ""),
+                "company": lead.get("companyName", "") or co.get("name", ""),
                 "title": lead.get("jobTitle", ""),
                 "score": lead.get("_score", 0),
                 "topic": lead.get("_intent_topic", ""),
@@ -306,18 +307,19 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         now = datetime.now(timezone.utc).isoformat()
         outcomes = []
         for lead in scored_contacts:
-            cid = lead.get("companyId") or lead.get("company", {}).get("id", "")
+            co = lead.get("company") if isinstance(lead.get("company"), dict) else {}
+            cid = lead.get("companyId") or co.get("id", "")
             pid = lead.get("personId") or lead.get("id", "")
             outcomes.append((
                 batch_id,
-                lead.get("companyName", "") or lead.get("company", {}).get("name", ""),
+                lead.get("companyName", "") or co.get("name", ""),
                 str(cid) if cid else None,
                 str(pid) if pid else None,
-                lead.get("sicCode", "") or lead.get("company", {}).get("sicCode", ""),
-                lead.get("employeeCount") or lead.get("company", {}).get("employeeCount"),
+                lead.get("sicCode", "") or co.get("sicCode", ""),
+                lead.get("employeeCount") or co.get("employeeCount"),
                 None,  # distance_miles (N/A for intent)
-                lead.get("zipCode", "") or lead.get("company", {}).get("zip", ""),
-                lead.get("state", "") or lead.get("company", {}).get("state", ""),
+                lead.get("zipCode", "") or co.get("zip", ""),
+                lead.get("state", "") or co.get("state", ""),
                 lead.get("_score", 0),
                 "intent",
                 now,

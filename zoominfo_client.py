@@ -1063,7 +1063,8 @@ class ZoomInfoClient:
         unique_contacts = []
 
         for contact in all_contacts:
-            company_id = contact.get("companyId") or contact.get("company", {}).get("id")
+            co = contact.get("company") if isinstance(contact.get("company"), dict) else {}
+            company_id = contact.get("companyId") or co.get("id")
             if company_id and company_id not in seen_companies:
                 seen_companies.add(company_id)
                 unique_contacts.append(contact)

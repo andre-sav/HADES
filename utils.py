@@ -10,6 +10,12 @@ from functools import lru_cache
 import yaml
 
 
+def safe_company(lead: dict) -> dict:
+    """Return the 'company' field as a dict, guarding against list/None from messy API data."""
+    co = lead.get("company")
+    return co if isinstance(co, dict) else {}
+
+
 # --- Configuration Loading ---
 
 @lru_cache(maxsize=1)

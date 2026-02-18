@@ -1331,9 +1331,12 @@ if (
                     options.append((label, contact))
 
                 # Current selection
+                SKIP_LABEL = "Skip — don't enrich"
                 current_selected = st.session_state.geo_selected_contacts.get(company_id)
-                current_index = 0
-                if current_selected:
+                if current_selected is None:
+                    current_index = len(options)  # Skip option is last
+                else:
+                    current_index = 0
                     for i, (_, contact) in enumerate(options):
                         contact_id = contact.get("id") or contact.get("personId")
                         selected_id = current_selected.get("id") or current_selected.get("personId")
@@ -1342,9 +1345,10 @@ if (
                             break
 
                 # Radio selection
+                radio_options = [opt[0] for opt in options] + [SKIP_LABEL]
                 selected_label = st.radio(
                     f"Select contact for {company_name}",
-                    options=[opt[0] for opt in options],
+                    options=radio_options,
                     index=current_index,
                     key=f"contact_select_{company_id}",
                     label_visibility="collapsed",
@@ -1352,10 +1356,13 @@ if (
                 )
 
                 # Update selection
-                for label, contact in options:
-                    if label == selected_label:
-                        st.session_state.geo_selected_contacts[company_id] = contact
-                        break
+                if selected_label == SKIP_LABEL:
+                    st.session_state.geo_selected_contacts.pop(company_id, None)
+                else:
+                    for label, contact in options:
+                        if label == selected_label:
+                            st.session_state.geo_selected_contacts[company_id] = contact
+                            break
 
                 st.markdown("---")
 
@@ -1365,20 +1372,22 @@ if (
 
     # Bulk selection actions (Phase 3 UX)
     st.markdown("")
-    bulk_col1, bulk_col2, bulk_col3 = st.columns([1, 1, 2])
+    bulk_col1, bulk_col2, bulk_col3 = st.columns(3)
 
     with bulk_col1:
         if ui.button(text="Select all best", variant="secondary", key="geo_select_all_btn"):
-            # Select best (first) contact for each company
             for company_id, data in contacts_by_company.items():
                 if data["contacts"]:
                     st.session_state.geo_selected_contacts[company_id] = data["contacts"][0]
             st.rerun()
 
     with bulk_col2:
-        if ui.button(text="Clear selections", variant="destructive", key="geo_clear_sel_btn"):
+        if ui.button(text="Skip all", variant="secondary", key="geo_skip_all_btn"):
             st.session_state.geo_selected_contacts = {}
             st.rerun()
+
+    with bulk_col3:
+        pass  # spacer
 
     # Enrich confirmation dialog
     @st.dialog("Confirm Enrichment")
@@ -1398,11 +1407,18 @@ if (
 
     # Enrich Selected Button
     st.markdown("")
+    selected_count = len(st.session_state.geo_selected_contacts)
+    _skipped_count = total_companies - selected_count
+
+    if selected_count == 0:
+        st.warning("All companies skipped. Select at least one contact to enrich.")
+
     confirm_col1, confirm_col2, confirm_col3 = st.columns([1, 1, 2])
 
     with confirm_col1:
-        selected_count = len(st.session_state.geo_selected_contacts)
-        if st.session_state.geo_test_mode:
+        if selected_count == 0:
+            st.button(f"Enrich Selected (0 contacts)", type="primary", use_container_width=True, disabled=True)
+        elif st.session_state.geo_test_mode:
             # Test mode: skip dialog
             if st.button(f"Enrich Selected ({selected_count} contacts)", type="primary", use_container_width=True, key="geo_enrich_test_btn"):
                 st.session_state.geo_selection_confirmed = True
@@ -1412,6 +1428,8 @@ if (
                 confirm_geo_enrich(selected_count)
 
     with confirm_col2:
+        if _skipped_count > 0:
+            st.caption(f"{selected_count} of {total_companies} companies selected · {_skipped_count} skipped")
         if st.session_state.geo_test_mode:
             st.caption("🧪 Test mode: no credits used")
 
@@ -1618,7 +1636,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                 "_idx": idx,
                 "Name": f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(),
                 "Title": lead.get("jobTitle", ""),
-                "Company": lead.get("companyName", "") or lead.get("company", {}).get("name", ""),
+                "Company": lead.get("companyName", "") or (lead.get("company", {}).get("name", "") if isinstance(lead.get("company"), dict) else ""),
                 "City": lead.get("city", "") or lead.get("personCity", ""),
                 "State": lead.get("state", "") or lead.get("personState", ""),
                 "Loc Type": loc_type_display,

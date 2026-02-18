@@ -347,9 +347,10 @@ def score_intent_contacts(
     scored = []
 
     for contact in contacts:
+        co = contact.get("company") if isinstance(contact.get("company"), dict) else {}
         company_id = (
             contact.get("companyId")
-            or contact.get("company", {}).get("id")
+            or co.get("id")
             or ""
         )
         company_data = company_scores.get(str(company_id), {})
@@ -406,6 +407,12 @@ def score_intent_contacts(
             "_intent_topic": company_data.get("intentTopic", ""),
             "_intent_age_days": calculate_age_days(company_data.get("intentDate")),
         }
+
+        # Carry company-level fields from intent data onto contact if missing
+        # Contact Search/Enrich may not include sicCode, employees, or industry
+        for field in ("sicCode", "employees", "industry"):
+            if not scored_contact.get(field) and company_data.get(field):
+                scored_contact[field] = company_data[field]
         scored.append(scored_contact)
 
     scored.sort(key=lambda x: x["_score"], reverse=True)

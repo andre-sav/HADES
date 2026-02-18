@@ -875,7 +875,8 @@ if (
                                 output_fields=["id", "companyId", "companyName"],
                             )
                             if enriched:
-                                company = enriched[0].get("company", {})
+                                company = enriched[0].get("company")
+                                company = company if isinstance(company, dict) else {}
                                 numeric_id = company.get("id") or enriched[0].get("companyId")
                                 company_name = company.get("name") or enriched[0].get("companyName", "")
                                 if numeric_id:
@@ -945,7 +946,9 @@ if (
         contacts_by_company = st.session_state.intent_contacts_by_company
         total_contacts = sum(len(d["contacts"]) for d in contacts_by_company.values())
 
-        st.info(f"**{total_contacts}** contacts across **{len(contacts_by_company)}** companies. Select 1 per company.")
+        _skipped_count = len(contacts_by_company) - len(st.session_state.intent_selected_contacts)
+        _skip_note = f" ({_skipped_count} skipped)" if _skipped_count > 0 else ""
+        st.info(f"**{total_contacts}** contacts across **{len(contacts_by_company)}** companies. Select 1 per company or skip.{_skip_note}")
 
         _selected_co_count = len(st.session_state.intent_selected_companies)
         _matched_co_count = len(contacts_by_company)
@@ -988,6 +991,7 @@ if (
                     badge = status_badge("neutral", f"{len(contacts)} contact{'s' if len(contacts) > 1 else ''}")
                     st.markdown(badge, unsafe_allow_html=True)
 
+                SKIP_LABEL = "Skip — don't enrich"
                 options = []
                 for i, contact in enumerate(contacts):
                     name = f"{contact.get('firstName', '')} {contact.get('lastName', '')}".strip() or "Unknown"
@@ -1006,8 +1010,11 @@ if (
                     options.append((label, contact))
 
                 current_selected = st.session_state.intent_selected_contacts.get(company_id)
-                current_index = 0
-                if current_selected:
+                # Default to 0 (best contact); if previously skipped, select Skip option
+                if current_selected is None:
+                    current_index = len(options)  # Skip option is last
+                else:
+                    current_index = 0
                     for i, (_, contact) in enumerate(options):
                         c_id = contact.get("id") or contact.get("personId")
                         s_id = current_selected.get("id") or current_selected.get("personId")
@@ -1015,24 +1022,44 @@ if (
                             current_index = i
                             break
 
+                radio_options = [opt[0] for opt in options] + [SKIP_LABEL]
                 selected_label = st.radio(
                     f"Select contact for {company_name}",
-                    options=[opt[0] for opt in options],
+                    options=radio_options,
                     index=current_index,
                     key=f"intent_contact_select_{company_id}",
                     label_visibility="collapsed",
                     horizontal=False,
                 )
 
-                for label, contact in options:
-                    if label == selected_label:
-                        st.session_state.intent_selected_contacts[company_id] = contact
-                        break
+                if selected_label == SKIP_LABEL:
+                    st.session_state.intent_selected_contacts.pop(company_id, None)
+                else:
+                    for label, contact in options:
+                        if label == selected_label:
+                            st.session_state.intent_selected_contacts[company_id] = contact
+                            break
 
                 st.markdown("---")
 
         if total_pages > 1:
             pagination_controls(current_page, total_pages, "intent_company_page")
+
+        # Bulk selection actions
+        st.markdown("")
+        bulk_col1, bulk_col2, bulk_col3 = st.columns(3)
+        with bulk_col1:
+            if ui.button(text="Select all best", variant="secondary", key="intent_select_all_btn"):
+                for cid, data in contacts_by_company.items():
+                    if data["contacts"]:
+                        st.session_state.intent_selected_contacts[cid] = data["contacts"][0]
+                st.rerun()
+        with bulk_col2:
+            if ui.button(text="Skip all", variant="secondary", key="intent_skip_all_btn"):
+                st.session_state.intent_selected_contacts = {}
+                st.rerun()
+        with bulk_col3:
+            pass  # spacer
 
         # Enrich confirmation dialog
         @st.dialog("Confirm Enrichment")
@@ -1054,9 +1081,17 @@ if (
         # Enrich button
         st.markdown("")
         selected_contact_count = len(st.session_state.intent_selected_contacts)
+        _total_companies = len(contacts_by_company)
+        _skipped = _total_companies - selected_contact_count
+
+        if selected_contact_count == 0:
+            st.warning("All companies skipped. Select at least one contact to enrich.")
+
         enrich_col1, enrich_col2 = st.columns([1, 3])
         with enrich_col1:
-            if st.session_state.intent_test_mode:
+            if selected_contact_count == 0:
+                st.button(f"Enrich (0 contacts)", disabled=True, use_container_width=True)
+            elif st.session_state.intent_test_mode:
                 # Test mode: skip dialog, go directly
                 if ui.button(text=f"Enrich ({selected_contact_count} contacts)", variant="default", key="intent_enrich_test_btn"):
                     st.session_state.intent_enrich_clicked = True
@@ -1066,6 +1101,8 @@ if (
                     remaining = budget["remaining"] if budget["has_cap"] else None
                     confirm_intent_enrich(selected_contact_count, remaining)
         with enrich_col2:
+            if _skipped > 0:
+                st.caption(f"{selected_contact_count} of {_total_companies} companies selected · {_skipped} skipped")
             if st.session_state.intent_test_mode:
                 st.caption("🧪 Test mode: no credits used")
 
@@ -1176,10 +1213,17 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
     with col1:
         metric_card("Contacts", len(scored))
     with col2:
+        def _company_id(lead):
+            cid = lead.get("companyId")
+            if cid:
+                return str(cid)
+            co = lead.get("company")
+            if isinstance(co, dict) and co.get("id"):
+                return str(co["id"])
+            return ""
+
         companies_with_contacts = len(set(
-            lead.get("companyId") or lead.get("company", {}).get("id", "")
-            for lead in scored
-            if lead.get("companyId") or lead.get("company", {}).get("id")
+            _company_id(lead) for lead in scored if _company_id(lead)
         ))
         selected_count = len(st.session_state.intent_selected_companies)
         metric_card("Companies", f"{companies_with_contacts} of {selected_count}")
@@ -1199,7 +1243,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
                 "_idx": idx,
                 "Name": f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(),
                 "Title": lead.get("jobTitle", ""),
-                "Company": lead.get("companyName", "") or lead.get("company", {}).get("name", ""),
+                "Company": lead.get("companyName", "") or (lead.get("company", {}).get("name", "") if isinstance(lead.get("company"), dict) else ""),
                 "Score": lead.get("_score", 0),
                 "Accuracy": lead.get("contactAccuracyScore", 0),
                 "Priority": lead.get("_priority", ""),

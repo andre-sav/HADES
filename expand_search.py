@@ -116,8 +116,9 @@ def build_contacts_by_company(contacts_list: list) -> dict:
     contacts_by_company = {}
 
     for contact in contacts_list:
-        raw_cid = contact.get("companyId") or contact.get("company", {}).get("id")
-        company_name = contact.get("companyName") or contact.get("company", {}).get("name", "Unknown")
+        co = contact.get("company") if isinstance(contact.get("company"), dict) else {}
+        raw_cid = contact.get("companyId") or co.get("id")
+        company_name = contact.get("companyName") or co.get("name", "Unknown")
         # Normalize to string — API may return int or string IDs
         company_id = str(raw_cid) if raw_cid else None
         if company_id:
@@ -149,7 +150,8 @@ def build_contacts_by_company(contacts_list: list) -> dict:
 
 def get_company_id(contact: dict) -> Optional[str]:
     """Extract company ID from contact (handles nested structure)."""
-    return contact.get("companyId") or contact.get("company", {}).get("id")
+    co = contact.get("company") if isinstance(contact.get("company"), dict) else {}
+    return contact.get("companyId") or co.get("id")
 
 
 # =============================================================================
