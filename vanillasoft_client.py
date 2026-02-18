@@ -95,8 +95,8 @@ def _parse_response(text: str) -> tuple[bool, str | None]:
         reason = root.findtext("ReturnReason", "Unknown error")
         return False, reason
     except Exception:
-        # If response isn't parseable XML, treat as failure
-        if "Success" in text:
+        # If response isn't parseable XML, check for exact success marker
+        if "<ReturnValue>Success</ReturnValue>" in text:
             return True, None
         return False, f"Unparseable response: {text[:200]}"
 
