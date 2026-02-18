@@ -1281,15 +1281,16 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         with col2:
             csv = filtered_df.drop(columns=["_idx"]).to_csv(index=False)
             st.download_button(
-                "📥 Download CSV",
+                "📥 Quick Preview CSV",
                 data=csv,
-                file_name=f"intent_contacts_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                file_name=f"intent_preview_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                 mime="text/csv",
                 use_container_width=True,
+                help="Simple table export for review — not VanillaSoft format",
             )
 
         with col3:
-            st.page_link("pages/4_CSV_Export.py", label="Full Export", icon="📤", use_container_width=True)
+            st.page_link("pages/4_CSV_Export.py", label="VanillaSoft Export", icon="📤", use_container_width=True)
 
         # Store for export page
         if len(filtered_df) > 0:
