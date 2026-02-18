@@ -5,7 +5,7 @@ Streamlit multi-page app for querying ZoomInfo API, scoring leads against ICP cr
 ## Architecture
 
 ```
-Streamlit UI → ZoomInfo API → Scoring Engine → Turso DB → CSV Export
+Streamlit UI → ZoomInfo API → Scoring Engine → Turso DB → VanillaSoft Push / CSV Export
 ```
 
 **Key Components:**
@@ -42,6 +42,7 @@ HADES/
 ├── cost_tracker.py       # Budget controls
 ├── errors.py             # PipelineError base class and exception hierarchy
 ├── export.py             # VanillaSoft CSV generation
+├── vanillasoft_client.py # VanillaSoft Incoming Web Leads push client
 ├── utils.py              # Config loading, phone formatting, ZIP-to-state mapping
 ├── geo.py                # ZIP radius calculations, haversine distance
 ├── config/
@@ -82,6 +83,7 @@ TURSO_DATABASE_URL = "libsql://..."
 TURSO_AUTH_TOKEN = "..."
 ZOOMINFO_CLIENT_ID = "..."
 ZOOMINFO_CLIENT_SECRET = "..."
+VANILLASOFT_WEB_LEAD_ID = "..."  # VanillaSoft Incoming Web Leads profile ID
 ```
 
 ## Testing
@@ -253,7 +255,7 @@ states = get_states_from_zips(zips)
 
 ## Status
 
-- **492 tests passing** (all tests green)
+- **551 tests passing** (all tests green)
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
 - ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).
 - ✅ **Target Contacts Expansion** - Implemented 2026-02-03
