@@ -227,6 +227,9 @@ class TursoDatabase:
                 operator_id INTEGER,
                 batch_id TEXT,
                 exported_at TEXT,
+                push_status TEXT,
+                pushed_at TEXT,
+                push_results_json TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
@@ -267,6 +270,10 @@ class TursoDatabase:
             ("operators", "zoho_id", "ALTER TABLE operators ADD COLUMN zoho_id TEXT UNIQUE"),
             ("operators", "synced_at", "ALTER TABLE operators ADD COLUMN synced_at TIMESTAMP"),
             ("lead_outcomes", "person_id", "ALTER TABLE lead_outcomes ADD COLUMN person_id TEXT"),
+            # Add push tracking columns to staged_exports
+            ("staged_exports", "push_status", "ALTER TABLE staged_exports ADD COLUMN push_status TEXT"),
+            ("staged_exports", "pushed_at", "ALTER TABLE staged_exports ADD COLUMN pushed_at TEXT"),
+            ("staged_exports", "push_results_json", "ALTER TABLE staged_exports ADD COLUMN push_results_json TEXT"),
         ]
 
         for table, column, statement in migrations:
@@ -819,7 +826,8 @@ class TursoDatabase:
         """Get a single staged export with parsed leads."""
         rows = self.execute(
             "SELECT id, workflow_type, leads_json, lead_count, query_params, "
-            "operator_id, batch_id, exported_at, created_at "
+            "operator_id, batch_id, exported_at, created_at, "
+            "push_status, pushed_at, push_results_json "
             "FROM staged_exports WHERE id = ?",
             (export_id,),
         )
@@ -836,6 +844,9 @@ class TursoDatabase:
             "batch_id": r[6],
             "exported_at": r[7],
             "created_at": r[8],
+            "push_status": r[9],
+            "pushed_at": r[10],
+            "push_results_json": r[11],
         }
 
     def mark_staged_exported(self, export_id: int, batch_id: str) -> None:
@@ -843,6 +854,13 @@ class TursoDatabase:
         self.execute_write(
             "UPDATE staged_exports SET batch_id = ?, exported_at = CURRENT_TIMESTAMP WHERE id = ?",
             (batch_id, export_id),
+        )
+
+    def mark_staged_pushed(self, export_id: int, push_status: str, push_results_json: str) -> None:
+        """Record push results on a staged export."""
+        self.execute_write(
+            "UPDATE staged_exports SET push_status = ?, pushed_at = CURRENT_TIMESTAMP, push_results_json = ? WHERE id = ?",
+            (push_status, push_results_json, export_id),
         )
 
     # --- Pipeline Runs ---

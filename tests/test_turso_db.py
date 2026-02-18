@@ -715,3 +715,43 @@ class TestPipelineRuns:
         runs = db.get_pipeline_runs("intent")
         assert runs[0]["status"] == "running"
         assert runs[0]["completed_at"] is None
+
+
+class TestStagedExportPushTracking:
+    """Tests for push tracking columns on staged_exports."""
+
+    def _get_db(self):
+        """Create an in-memory DB with schema using stdlib sqlite3."""
+        import sqlite3
+        db = TursoDatabase.__new__(TursoDatabase)
+        db._conn = sqlite3.connect(":memory:")
+        db.url = ":memory:"
+        db.init_schema()
+        return db
+
+    def test_mark_staged_pushed_complete(self):
+        db = self._get_db()
+        export_id = db.save_staged_export("geography", [{"name": "test"}])
+        results_json = '{"succeeded": 5, "failed": 0}'
+        db.mark_staged_pushed(export_id, "complete", results_json)
+        row = db.get_staged_export(export_id)
+        assert row["push_status"] == "complete"
+        assert row["pushed_at"] is not None
+        assert row["push_results_json"] == results_json
+
+    def test_mark_staged_pushed_partial(self):
+        db = self._get_db()
+        export_id = db.save_staged_export("intent", [{"name": "test"}])
+        results_json = '{"succeeded": 3, "failed": 2, "failed_indices": [1, 4]}'
+        db.mark_staged_pushed(export_id, "partial", results_json)
+        row = db.get_staged_export(export_id)
+        assert row["push_status"] == "partial"
+        assert row["push_results_json"] == results_json
+
+    def test_get_staged_export_includes_push_fields(self):
+        db = self._get_db()
+        export_id = db.save_staged_export("geography", [{"name": "test"}])
+        row = db.get_staged_export(export_id)
+        assert row["push_status"] is None
+        assert row["pushed_at"] is None
+        assert row["push_results_json"] is None
