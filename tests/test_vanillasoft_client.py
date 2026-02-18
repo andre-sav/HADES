@@ -1,9 +1,15 @@
 import pytest
+from unittest.mock import patch, MagicMock
+
+import requests
+
 from vanillasoft_client import (
     PushResult,
     PushSummary,
     VANILLASOFT_XML_FIELDS,
     _build_xml,
+    push_lead,
+    push_leads,
 )
 
 
@@ -77,3 +83,119 @@ def test_build_xml_skips_unmapped_columns():
     assert "SquareFootage" not in xml
     assert "5000" not in xml
     assert "<FirstName>John</FirstName>" in xml
+
+
+@pytest.fixture
+def sample_row():
+    return {
+        "First Name": "Andrew",
+        "Last Name": "Helmer",
+        "Company": "Hershey Entertainment",
+        "Email": "ahelmer@hersheypa.com",
+        "Business": "(717) 534-3828",
+    }
+
+
+class TestPushLead:
+    @patch("vanillasoft_client.requests.post")
+    def test_success(self, mock_post, sample_row):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            text="<ReturnValue>Success</ReturnValue>",
+        )
+        result = push_lead(sample_row, web_lead_id="test-id-123")
+        assert result.success is True
+        assert result.lead_name == "Andrew Helmer"
+        assert result.company == "Hershey Entertainment"
+        assert result.error is None
+        mock_post.assert_called_once()
+        call_args = mock_post.call_args
+        assert "post.aspx" in call_args[0][0]
+        assert "id=test-id-123" in call_args[0][0]
+        assert "typ=XML" in call_args[0][0]
+
+    @patch("vanillasoft_client.requests.post")
+    def test_failure_response(self, mock_post, sample_row):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            text="<ReturnValue>FAILURE</ReturnValue><ReturnReason>Missing required field: Phone</ReturnReason>",
+        )
+        result = push_lead(sample_row, web_lead_id="test-id-123")
+        assert result.success is False
+        assert "Missing required field: Phone" in result.error
+
+    @patch("vanillasoft_client.requests.post")
+    def test_http_error(self, mock_post, sample_row):
+        mock_post.return_value = MagicMock(status_code=500, text="Internal Server Error")
+        result = push_lead(sample_row, web_lead_id="test-id-123")
+        assert result.success is False
+        assert "HTTP 500" in result.error
+
+    @patch("vanillasoft_client.requests.post")
+    def test_timeout(self, mock_post, sample_row):
+        mock_post.side_effect = requests.exceptions.Timeout("Connection timed out")
+        result = push_lead(sample_row, web_lead_id="test-id-123")
+        assert result.success is False
+        assert "timed out" in result.error.lower()
+
+    @patch("vanillasoft_client.requests.post")
+    def test_network_error(self, mock_post, sample_row):
+        mock_post.side_effect = requests.exceptions.ConnectionError("DNS resolution failed")
+        result = push_lead(sample_row, web_lead_id="test-id-123")
+        assert result.success is False
+        assert result.error
+
+
+class TestPushLeads:
+    @patch("vanillasoft_client.requests.post")
+    @patch("vanillasoft_client.time.sleep")
+    def test_all_succeed(self, mock_sleep, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200, text="<ReturnValue>Success</ReturnValue>"
+        )
+        rows = [
+            {"First Name": "A", "Last Name": "One", "Company": "C1"},
+            {"First Name": "B", "Last Name": "Two", "Company": "C2"},
+        ]
+        summary = push_leads(rows, web_lead_id="test-id")
+        assert summary.total == 2
+        assert len(summary.succeeded) == 2
+        assert len(summary.failed) == 0
+
+    @patch("vanillasoft_client.requests.post")
+    @patch("vanillasoft_client.time.sleep")
+    def test_partial_failure(self, mock_sleep, mock_post):
+        mock_post.side_effect = [
+            MagicMock(status_code=200, text="<ReturnValue>Success</ReturnValue>"),
+            MagicMock(status_code=200, text="<ReturnValue>FAILURE</ReturnValue><ReturnReason>bad</ReturnReason>"),
+            MagicMock(status_code=200, text="<ReturnValue>Success</ReturnValue>"),
+        ]
+        rows = [
+            {"First Name": "A", "Last Name": "One", "Company": "C1"},
+            {"First Name": "B", "Last Name": "Two", "Company": "C2"},
+            {"First Name": "C", "Last Name": "Three", "Company": "C3"},
+        ]
+        summary = push_leads(rows, web_lead_id="test-id")
+        assert summary.total == 3
+        assert len(summary.succeeded) == 2
+        assert len(summary.failed) == 1
+        assert summary.failed[0].lead_name == "B Two"
+
+    @patch("vanillasoft_client.requests.post")
+    @patch("vanillasoft_client.time.sleep")
+    def test_progress_callback(self, mock_sleep, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200, text="<ReturnValue>Success</ReturnValue>"
+        )
+        rows = [
+            {"First Name": "A", "Last Name": "One", "Company": "C1"},
+            {"First Name": "B", "Last Name": "Two", "Company": "C2"},
+        ]
+        progress_calls = []
+        summary = push_leads(
+            rows, web_lead_id="test-id",
+            progress_callback=lambda i, total, result: progress_calls.append((i, total, result.success)),
+        )
+        assert len(progress_calls) == 2
+        assert progress_calls[0] == (1, 2, True)
+        assert progress_calls[1] == (2, 2, True)
