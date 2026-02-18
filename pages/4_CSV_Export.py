@@ -9,7 +9,8 @@ import pandas as pd
 from datetime import datetime
 
 from turso_db import get_database
-from export import export_leads_to_csv, get_export_summary
+from export import export_leads_to_csv, get_export_summary, build_vanillasoft_row
+from vanillasoft_client import push_leads
 from dedup import find_duplicates, flag_duplicates_in_list
 from utils import get_call_center_agents
 from ui_components import (
@@ -45,7 +46,7 @@ except Exception as e:
 # =============================================================================
 # HEADER
 # =============================================================================
-page_header("Export", "Download leads in VanillaSoft format")
+page_header("Export", "Push leads to VanillaSoft or download CSV")
 
 
 # =============================================================================
@@ -303,12 +304,17 @@ else:
 
 
 # =============================================================================
-# EXPORT + MARK EXPORTED
+# EXPORT — Push to VanillaSoft + CSV Download
 # =============================================================================
 st.markdown("---")
 
-# Generate (cached to avoid batch_id DB writes on every Streamlit rerun)
+# Check for VanillaSoft push capability
+_vs_web_lead_id = st.secrets.get("VANILLASOFT_WEB_LEAD_ID")
+_vs_push_available = bool(_vs_web_lead_id and _vs_web_lead_id != "your-web-lead-id")
+
 agents = get_call_center_agents()
+
+# Build rows (cached to avoid batch_id DB writes on rerun)
 _export_cache_key = (
     tuple(l.get("personId", l.get("companyId", i)) for i, l in enumerate(leads_to_export)),
     selected_operator.get("id") if selected_operator else None,
@@ -327,58 +333,82 @@ if st.session_state.get("_export_cache_key") != _export_cache_key:
 else:
     csv_content, filename, batch_id = st.session_state["_export_cached"]
 
-# Post-export display (if already exported)
-if st.session_state.last_export_metadata:
+# Build VanillaSoft rows for push (same data as CSV, just dict form)
+vs_rows = []
+for i, lead in enumerate(leads_to_export):
+    contact_owner = agents[i % len(agents)] if agents else ""
+    vs_rows.append(build_vanillasoft_row(
+        lead, selected_operator, batch_id=batch_id, contact_owner=contact_owner,
+    ))
+
+# Post-push/export display
+if st.session_state.get("last_export_metadata"):
     meta = st.session_state.last_export_metadata
     op_name = meta.get("operator") or ""
     op_display = f" for {op_name}" if op_name else ""
     ts = meta.get("timestamp", "")[:16] if meta.get("timestamp") else ""
-
     batch_display = f" · {meta.get('batch_id')}" if meta.get("batch_id") else ""
-    st.success(f"Exported: {meta.get('filename', '')} · {meta.get('count', 0)} leads{op_display}{batch_display} · {ts}")
+    method = meta.get("method", "Exported")
+    st.success(f"{method}: {meta.get('count', 0)} leads{op_display}{batch_display} · {ts}")
 
-
-# Download and mark exported buttons
+# Buttons
 col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
     st.caption(f"Ready: {len(leads_to_export)} leads" + (f" for {selected_operator['operator_name']}" if selected_operator else ""))
 
 with col2:
-    st.download_button(
-        f"Download {filename}",
-        data=csv_content,
-        file_name=filename,
-        mime="text/csv",
+    push_clicked = st.button(
+        "\U0001f4e4 Push to VanillaSoft",
         type="primary",
         use_container_width=True,
+        disabled=not _vs_push_available,
+        help=None if _vs_push_available else "Configure VANILLASOFT_WEB_LEAD_ID in .streamlit/secrets.toml",
     )
 
 with col3:
-    _mark_trigger = ui.button(text="Mark as Exported", variant="outline", key="mark_exported_btn")
-    _mark_confirmed = ui.alert_dialog(
-        show=_mark_trigger,
-        title="Mark as Exported",
-        description=f"Mark {len(leads_to_export)} leads as exported? This updates the query log.",
-        confirm_label="Mark Exported",
-        cancel_label="Cancel",
-        key="mark_exported_dialog",
+    st.download_button(
+        "\U0001f4be Download CSV",
+        data=csv_content,
+        file_name=filename,
+        mime="text/csv",
+        use_container_width=True,
     )
-    if _mark_confirmed:
-        last_query = db.get_last_query(workflow_type)
-        if last_query:
-            db.update_query_exported(last_query["id"], len(leads_to_export))
 
-        # Record lead outcomes for tracking
-        if batch_id:
-            now_iso = datetime.now().isoformat()
-            outcome_rows = []
-            for lead in leads_to_export:
-                # Collect _-prefixed scoring features as JSON
+# Push flow
+if push_clicked and _vs_push_available:
+    progress_bar = st.progress(0, text="Pushing to VanillaSoft...")
+    log_container = st.container()
+
+    def _on_progress(current, total, result):
+        progress_bar.progress(current / total, text=f"Pushing to VanillaSoft... {current}/{total}")
+        icon = "\u2714" if result.success else "\u2716"
+        err = f" ({result.error})" if result.error else ""
+        log_container.caption(f"{icon} {result.lead_name} \u2014 {result.company}{err}")
+
+    summary = push_leads(vs_rows, web_lead_id=_vs_web_lead_id, progress_callback=_on_progress)
+
+    progress_bar.empty()
+
+    # Summary banner
+    if summary.failed:
+        st.warning(f"Push complete: {len(summary.succeeded)}/{summary.total} succeeded, {len(summary.failed)} failed")
+    else:
+        st.success(f"All {summary.total} leads pushed to VanillaSoft")
+
+    # Record outcomes for successful leads only
+    if batch_id:
+        now_iso = datetime.now().isoformat()
+        succeeded_names = {(r.lead_name, r.company) for r in summary.succeeded}
+        outcome_rows = []
+        for lead in leads_to_export:
+            name = f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip()
+            company = lead.get("companyName", "")
+            if (name, company) in succeeded_names:
                 features = {k: v for k, v in lead.items() if k.startswith("_") and v is not None}
                 outcome_rows.append((
                     batch_id,
-                    lead.get("companyName", ""),
+                    company,
                     str(lead.get("companyId", "")) if lead.get("companyId") else None,
                     str(lead.get("personId", "")) if lead.get("personId") else None,
                     lead.get("sicCode") or lead.get("_sic_code"),
@@ -391,25 +421,74 @@ with col3:
                     now_iso,
                     json.dumps(features) if features else None,
                 ))
+        if outcome_rows:
             db.record_lead_outcomes_batch(outcome_rows)
 
-        # Mark staged export as exported (if loaded from DB)
-        staged_id = st.session_state.get("_loaded_staged_id")
-        if staged_id and batch_id:
-            db.mark_staged_exported(staged_id, batch_id)
+    # Update query log
+    last_query = db.get_last_query(workflow_type)
+    if last_query:
+        db.update_query_exported(last_query["id"], len(summary.succeeded))
 
-        st.session_state.last_export_metadata = {
-            "filename": filename,
-            "count": len(leads_to_export),
-            "timestamp": datetime.now().isoformat(),
-            "operator": selected_operator.get("operator_name") if selected_operator else None,
-            "batch_id": batch_id,
-        }
+    # Mark staged export
+    staged_id = st.session_state.get("_loaded_staged_id")
+    push_status = "complete" if not summary.failed else "partial"
+    push_results = json.dumps({
+        "succeeded": [{"name": r.lead_name, "company": r.company} for r in summary.succeeded],
+        "failed": [{"name": r.lead_name, "company": r.company, "error": r.error} for r in summary.failed],
+    })
+    if staged_id and batch_id:
+        db.mark_staged_exported(staged_id, batch_id)
+        db.mark_staged_pushed(staged_id, push_status, push_results)
 
-        # Set exported flag for action bar state
-        if workflow_type == "intent":
-            st.session_state["intent_exported"] = True
-        else:
-            st.session_state["geo_exported"] = True
+    # Store metadata
+    st.session_state.last_export_metadata = {
+        "count": len(summary.succeeded),
+        "timestamp": datetime.now().isoformat(),
+        "operator": selected_operator.get("operator_name") if selected_operator else None,
+        "batch_id": batch_id,
+        "method": "Pushed to VanillaSoft",
+    }
+    if workflow_type == "intent":
+        st.session_state["intent_exported"] = True
+    else:
+        st.session_state["geo_exported"] = True
 
-        st.rerun()
+    # Failed leads — retry + CSV fallback
+    if summary.failed:
+        st.markdown("---")
+        st.markdown(f"**Failed ({len(summary.failed)}):**")
+        for r in summary.failed:
+            st.caption(f"\u2716 {r.lead_name} \u2014 {r.company} ({r.error})")
+
+        fcol1, fcol2 = st.columns(2)
+        with fcol1:
+            if st.button("\U0001f504 Retry Failed", use_container_width=True):
+                failed_names = {(r.lead_name, r.company) for r in summary.failed}
+                retry_rows = [
+                    r for r in vs_rows
+                    if (f"{r.get('First Name', '')} {r.get('Last Name', '')}".strip(), r.get("Company", "")) in failed_names
+                ]
+                st.session_state["_vs_retry_rows"] = retry_rows
+                st.rerun()
+        with fcol2:
+            failed_names = {(r.lead_name, r.company) for r in summary.failed}
+            failed_csv_rows = [
+                r for r in vs_rows
+                if (f"{r.get('First Name', '')} {r.get('Last Name', '')}".strip(), r.get("Company", "")) in failed_names
+            ]
+            if failed_csv_rows:
+                import csv as csv_mod
+                import io
+                from utils import VANILLASOFT_COLUMNS
+                out = io.StringIO()
+                writer = csv_mod.DictWriter(out, fieldnames=VANILLASOFT_COLUMNS)
+                writer.writeheader()
+                for r in failed_csv_rows:
+                    writer.writerow(r)
+                st.download_button(
+                    "\U0001f4be Download Failed as CSV",
+                    data=out.getvalue(),
+                    file_name=f"HADES-failed-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
