@@ -805,10 +805,11 @@ def inject_base_styles():
        ================================================================ */
     .quick-action {{
         background: {COLORS['bg_secondary']};
-        border: 1px solid {COLORS['border']};
+        border: 1px solid {COLORS['border_light']};
         border-radius: var(--radius);
         padding: 1.25rem;
         text-align: center;
+        box-shadow: var(--card-shadow);
         transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
     }}
 

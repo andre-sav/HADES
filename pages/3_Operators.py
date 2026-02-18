@@ -13,6 +13,9 @@ st.set_page_config(page_title="Operators", page_icon="👤", layout="wide")
 # Apply design system styles
 inject_base_styles()
 
+from utils import require_auth
+require_auth()
+
 
 # Initialize
 @st.cache_resource

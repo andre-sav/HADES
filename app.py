@@ -13,6 +13,7 @@ from ui_components import (
     metric_card,
     styled_table,
     empty_state,
+    labeled_divider,
     COLORS,
 )
 
@@ -24,6 +25,9 @@ st.set_page_config(
 
 # Apply design system styles
 inject_base_styles()
+
+from utils import require_auth
+require_auth()
 
 # --- Header ---
 page_header("HADES", "ZoomInfo lead pipeline with ICP filtering and scoring")
@@ -101,7 +105,7 @@ with status_col4:
 # =============================================================================
 # METRICS — operational context, not hero content
 # =============================================================================
-st.markdown("---")
+labeled_divider("Metrics")
 
 col1, col2, col3 = st.columns(3)
 
@@ -122,7 +126,7 @@ with col3:
 # =============================================================================
 # RECENT RUNS
 # =============================================================================
-st.markdown("---")
+labeled_divider("Recent Runs")
 
 recent_display = db.get_recent_queries(limit=10)
 

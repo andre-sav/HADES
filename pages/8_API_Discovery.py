@@ -15,6 +15,9 @@ st.set_page_config(page_title="API Discovery", page_icon="🔬", layout="wide")
 # Apply design system styles
 inject_base_styles()
 
+from utils import require_auth
+require_auth()
+
 page_header("API Field Discovery", "Query ZoomInfo API to discover available search and enrich field names")
 
 st.markdown("---")

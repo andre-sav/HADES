@@ -21,6 +21,7 @@ from ui_components import (
     metric_card,
     styled_table,
     empty_state,
+    labeled_divider,
     COLORS,
 )
 
@@ -28,6 +29,9 @@ st.set_page_config(page_title="Export", page_icon="📤", layout="wide")
 
 # Apply design system styles
 inject_base_styles()
+
+from utils import require_auth
+require_auth()
 
 
 # Initialize
@@ -244,8 +248,7 @@ with col3:
 # =============================================================================
 # PRE-EXPORT VALIDATION
 # =============================================================================
-st.markdown("---")
-st.caption("Export validation")
+labeled_divider("Validation")
 checks = export_validation_checklist(leads_to_export)
 
 # Show warning summary if any checks failed
@@ -260,7 +263,8 @@ elif warning_checks:
 # =============================================================================
 # OPERATOR SELECTION
 # =============================================================================
-st.markdown("---")
+labeled_divider("Operator")
+st.caption("Assigning an operator tags this export for a specific sales territory")
 
 # Pre-select operator from geography workflow if available
 operators = db.get_operators()
@@ -306,7 +310,7 @@ else:
 # =============================================================================
 # EXPORT — Push to VanillaSoft + CSV Download
 # =============================================================================
-st.markdown("---")
+labeled_divider("Export")
 
 # Check for VanillaSoft push capability
 _vs_web_lead_id = st.secrets.get("VANILLASOFT_WEB_LEAD_ID")

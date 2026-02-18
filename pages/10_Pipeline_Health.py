@@ -20,6 +20,9 @@ st.set_page_config(page_title="Pipeline Health", page_icon="🔧", layout="wide"
 
 inject_base_styles()
 
+from utils import require_auth
+require_auth()
+
 
 @st.cache_resource
 def get_db():
@@ -254,7 +257,7 @@ try:
         styled_table(
             rows=run_rows,
             columns=[
-                {"key": "time", "label": "Time"},
+                {"key": "time", "label": "Time", "mono": True},
                 {"key": "workflow", "label": "Workflow"},
                 {"key": "trigger", "label": "Trigger"},
                 {"key": "status", "label": "Status", "pill": {

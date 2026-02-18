@@ -19,6 +19,7 @@ from ui_components import (
     colored_progress_bar,
     metric_card,
     empty_state,
+    labeled_divider,
     COLORS,
 )
 
@@ -26,6 +27,9 @@ st.set_page_config(page_title="Usage", page_icon="📊", layout="wide")
 
 # Apply design system styles
 inject_base_styles()
+
+from utils import require_auth
+require_auth()
 
 
 # Initialize
@@ -143,7 +147,7 @@ if "zi_usage_data" in st.session_state:
         with st.expander("Raw Response", expanded=False):
             st.json(zi_usage)
 
-st.markdown("---")
+labeled_divider("Details")
 
 
 # =============================================================================

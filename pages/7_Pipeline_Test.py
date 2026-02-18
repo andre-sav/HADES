@@ -28,6 +28,9 @@ st.set_page_config(page_title="Pipeline Test", page_icon="🧪", layout="wide")
 # Apply design system styles
 inject_base_styles()
 
+from utils import require_auth
+require_auth()
+
 page_header("Pipeline Test", "Verify the full ZoomInfo pipeline with a single contact (1 credit)")
 
 # --- Session State ---

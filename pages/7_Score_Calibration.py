@@ -16,12 +16,16 @@ from ui_components import (
     metric_card,
     styled_table,
     empty_state,
+    labeled_divider,
     COLORS,
 )
 
 st.set_page_config(page_title="Score Calibration", page_icon="⚖️", layout="wide")
 
 inject_base_styles()
+
+from utils import require_auth
+require_auth()
 
 
 @st.cache_resource
@@ -92,13 +96,12 @@ if active_tab == "Current Weights":
             {"key": "SIC", "label": "SIC Code"},
             {"key": "Industry", "label": "Industry"},
             {"key": "Score", "label": "Score", "align": "right", "mono": True},
-            {"key": "Source", "label": "Source"},
+            {"key": "Source", "label": "Source", "pill": {"calibrated": "success", "default": "muted"}},
         ],
     )
 
     # Employee Scale table
-    st.markdown("---")
-    st.caption("Employee Scale Scores")
+    labeled_divider("Employee Scale")
     emp_rows = []
     for tier in config.get("employee_scale", []):
         label = f"{tier['min']}-{tier['max']}" if tier["max"] < 999999 else f"{tier['min']}+"

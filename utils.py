@@ -7,7 +7,41 @@ import re
 from pathlib import Path
 from functools import lru_cache
 
+import streamlit as st
 import yaml
+
+
+# --- Authentication Gate ---
+
+def require_auth() -> None:
+    """Block page rendering unless the user has entered the correct password.
+
+    Uses ``APP_PASSWORD`` from Streamlit secrets.  If the secret is not
+    configured, the gate is skipped so local development works without a
+    password.  Once authenticated, the flag persists in session state for
+    the browser session.
+    """
+    password = st.secrets.get("APP_PASSWORD")
+    if not password:
+        return  # no secret configured — skip gate (local dev)
+
+    if st.session_state.get("authenticated"):
+        return
+
+    st.markdown(
+        "<div style='max-width:380px;margin:4rem auto;'>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("### Sign in to HADES")
+    entered = st.text_input("Password", type="password", key="_auth_pw")
+    if st.button("Enter", type="primary", use_container_width=True):
+        if entered == password:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password")
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.stop()
 
 
 def safe_company(lead: dict) -> dict:

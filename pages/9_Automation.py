@@ -22,6 +22,9 @@ from ui_components import (
 st.set_page_config(page_title="Automation", page_icon="⚙️", layout="wide")
 inject_base_styles()
 
+from utils import require_auth
+require_auth()
+
 try:
     db = get_database()
 except Exception as e:

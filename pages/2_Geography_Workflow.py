@@ -98,6 +98,9 @@ def generate_team_name(operator_name: str, operator_zip: str) -> str:
 # Apply design system styles
 inject_base_styles()
 
+from utils import require_auth
+require_auth()
+
 
 # Initialize services
 @st.cache_resource
@@ -191,7 +194,11 @@ if not _last_geo and not st.session_state.get("geo_welcome_dismissed"):
         "**Welcome to the Geography Workflow!**\n\n"
         "Search for contacts in an operator's service territory by ZIP code and radius. "
         "Geography searches are **unlimited** — no credit cap.\n\n"
-        "**How it works:** Select an operator → Configure location → Search → Review contacts → Export CSV",
+        "**How it works:**\n"
+        "- Select an operator\n"
+        "- Configure location and filters\n"
+        "- Search and review contacts\n"
+        "- Export CSV or push to VanillaSoft",
         icon="📍",
     )
     if st.button("Got it", key="geo_dismiss_welcome"):
@@ -204,16 +211,23 @@ if not _last_geo and not st.session_state.get("geo_welcome_dismissed"):
 # =============================================================================
 # Calculate current step based on session state
 def get_current_step() -> int:
-    """Determine current workflow step (1-4)."""
+    """Determine current workflow step (1-based).
+
+    Returns ``total`` (3 for autopilot, 4 for manual) when on the final
+    step so the step indicator shows it as *active* rather than marking
+    every step completed.
+    """
+    is_autopilot = st.session_state.geo_mode == "autopilot"
+    total = 3 if is_autopilot else 4
     if st.session_state.geo_enrichment_done:
-        return 4  # Results
+        return total
     if st.session_state.geo_selection_confirmed:
-        return 4  # Enriching/Results
+        return total
     if st.session_state.geo_contacts_by_company:
-        return 3  # Review & Select
+        return 3
     if st.session_state.geo_operator:
-        return 2  # Configure Search
-    return 1  # Select Operator
+        return 2
+    return 1
 
 
 current_step = get_current_step()
@@ -319,7 +333,7 @@ if operator_mode == "Select existing":
         st.info("No operators saved yet. Use manual entry or add operators in the Operators page.")
         st.session_state.geo_operator = None
     else:
-        st.caption(f"{len(operators):,} operators available — select one to search their service territory")
+        st.caption(f"Select the vending company operator for this territory search · {len(operators):,} available")
         operator_options = {
             f"{op['operator_name']}  ·  {op.get('vending_business_name') or 'N/A'}": op
             for op in operators
@@ -1609,7 +1623,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
     preview_count = len(st.session_state.geo_preview_contacts or [])
     companies = len(st.session_state.geo_contacts_by_company or {})
 
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         metric_card("Contacts Enriched", len(enriched_contacts))

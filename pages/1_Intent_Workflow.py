@@ -63,6 +63,9 @@ st.set_page_config(page_title="Intent", page_icon="🎯", layout="wide")
 # Apply design system styles
 inject_base_styles()
 
+from utils import require_auth
+require_auth()
+
 
 # Initialize services
 @st.cache_resource
@@ -354,7 +357,10 @@ else:
             f"**Employees**: {get_employee_minimum():,}–{get_employee_maximum():,}",
             f"**Industries**: {len(get_sic_codes())} SIC codes",
         ]
-        st.caption(" · ".join(_preview_parts))
+        st.markdown(
+            f'<p style="font-size:0.875rem;color:#8b929e;margin:0;">{" · ".join(_preview_parts)}</p>',
+            unsafe_allow_html=True,
+        )
 
     # Target companies input
     target_col1, target_col2, target_col3 = st.columns([1, 1, 2])

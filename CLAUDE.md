@@ -84,6 +84,7 @@ TURSO_AUTH_TOKEN = "..."
 ZOOMINFO_CLIENT_ID = "..."
 ZOOMINFO_CLIENT_SECRET = "..."
 VANILLASOFT_WEB_LEAD_ID = "..."  # VanillaSoft Incoming Web Leads profile ID
+APP_PASSWORD = "..."              # Password gate for Streamlit Community Cloud (optional for local dev)
 ```
 
 ## Testing
