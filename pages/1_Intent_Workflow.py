@@ -28,6 +28,7 @@ from scoring import (
     score_intent_leads,
     score_intent_contacts,
     get_priority_label,
+    get_priority_action,
     calculate_age_days,
 )
 from dedup import dedupe_leads
@@ -51,6 +52,7 @@ from ui_components import (
     paginate_items,
     pagination_controls,
     export_quality_warnings,
+    score_breakdown,
     workflow_run_state,
     action_bar,
     workflow_summary_strip,
@@ -423,6 +425,7 @@ if search_clicked:
             age = calculate_age_days(lead.get("intentDate"))
             lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
             lead["_priority"] = get_priority_label(score)
+            lead["_priority_action"] = get_priority_action(score)
 
         st.session_state.intent_companies = deduped
         st.session_state.intent_search_executed = True
@@ -523,6 +526,7 @@ if search_clicked:
                         age = calculate_age_days(lead.get("intentDate"))
                         lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
                         lead["_priority"] = get_priority_label(score)
+                        lead["_priority_action"] = get_priority_action(score)
 
                     st.session_state.intent_companies = deduped
                     st.session_state.intent_search_executed = True
@@ -1198,6 +1202,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         age = lead.get("_intent_age_days", 0)
         lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
         lead["_priority"] = get_priority_label(score)
+        lead["_priority_action"] = get_priority_action(score)
 
     st.session_state.intent_results = scored
 
@@ -1247,12 +1252,13 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         for idx, lead in enumerate(scored_leads):
             row = {
                 "_idx": idx,
+                "_priority_label": lead.get("_priority", ""),
                 "Name": f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(),
                 "Title": lead.get("jobTitle", ""),
                 "Company": lead.get("companyName", "") or (lead.get("company", {}).get("name", "") if isinstance(lead.get("company"), dict) else ""),
                 "Score": lead.get("_score", 0),
                 "Accuracy": lead.get("contactAccuracyScore", 0),
-                "Priority": lead.get("_priority", ""),
+                "Priority": lead.get("_priority_action", lead.get("_priority", "")),
                 "Phone": lead.get("directPhone", "") or lead.get("phone", ""),
                 "Email": lead.get("email", ""),
                 "Topic": lead.get("_intent_topic", ""),
@@ -1291,7 +1297,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
 
         # Apply filters
         if not df.empty:
-            mask = df["Priority"].isin(priority_filter)
+            mask = df["_priority_label"].isin(priority_filter)
             if state_filter and "State" in df.columns:
                 mask = mask & df["State"].isin(state_filter)
             filtered_df = df[mask]
@@ -1315,11 +1321,21 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
             _col_config["State"] = st.column_config.TextColumn("State", width="small")
 
         st.dataframe(
-            filtered_df.drop(columns=["_idx"]),
+            filtered_df.drop(columns=["_idx", "_priority_label"]),
             use_container_width=True,
             hide_index=True,
             column_config=_col_config,
         )
+
+        # Score breakdown expander
+        with st.expander("Score details", expanded=False):
+            for lead in scored_leads:
+                name = f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip()
+                company = lead.get("companyName", "Unknown")
+                score_val = lead.get("_score", 0)
+                st.markdown(f"**{name}** \u00b7 {company} \u00b7 {score_val}%")
+                st.markdown(score_breakdown(lead, "intent"), unsafe_allow_html=True)
+                st.markdown("---")
 
         # Export section
         st.markdown("---")
@@ -1329,7 +1345,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         col1, col2, col3 = st.columns([2, 1, 1])
 
         with col2:
-            csv = filtered_df.drop(columns=["_idx"]).to_csv(index=False)
+            csv = filtered_df.drop(columns=["_idx", "_priority_label"]).to_csv(index=False)
             st.download_button(
                 "📥 Quick Preview CSV",
                 data=csv,
