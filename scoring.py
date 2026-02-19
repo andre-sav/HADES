@@ -453,7 +453,10 @@ def get_priority_action(score: int) -> str:
 
 
 def generate_score_summary(lead: dict, workflow_type: str) -> str:
-    """Generate a plain-English summary sentence from component scores."""
+    """Generate a plain-English summary sentence from component scores.
+
+    Returns unescaped text — callers rendering as HTML must apply html.escape().
+    """
     from utils import SIC_CODE_DESCRIPTIONS
 
     if workflow_type == "geography":

@@ -2030,7 +2030,11 @@ def score_breakdown(lead: dict, workflow_type: str) -> str:
         return COLORS.get("text_secondary", "#64748b")
 
     bars_html = ""
-    for label, val in components:
+    for label, raw_val in components:
+        try:
+            val = int(raw_val)
+        except (TypeError, ValueError):
+            val = 0
         color = _bar_color(val)
         width = max(2, val)  # min 2% width so bar is visible
         bars_html += (
