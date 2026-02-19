@@ -22,6 +22,7 @@ from ui_components import (
     styled_table,
     empty_state,
     labeled_divider,
+    score_breakdown,
     COLORS,
 )
 
@@ -258,6 +259,19 @@ if error_checks:
     st.warning(f"{len(error_checks)} validation check(s) below threshold. Review before exporting.")
 elif warning_checks:
     st.caption(f"{len(warning_checks)} check(s) with warnings — leads are still exportable.")
+
+
+# =============================================================================
+# SCORE DETAILS
+# =============================================================================
+with st.expander(f"Lead score details ({len(leads_to_export)} leads)", expanded=False):
+    for lead in leads_to_export:
+        name = f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip()
+        company = lead.get("companyName", "Unknown")
+        score = lead.get("_score", 0)
+        st.markdown(f"**{name}** · {company} · {score}%")
+        st.markdown(score_breakdown(lead, workflow_type), unsafe_allow_html=True)
+        st.markdown("---")
 
 
 # =============================================================================
