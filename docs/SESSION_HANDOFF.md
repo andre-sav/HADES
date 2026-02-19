@@ -1,7 +1,81 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-18
-**Status:** All 4 epics implemented (18 stories complete). 551 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft direct push feature added in session 20. Bug fixes and UX improvements in session 21.
+**Status:** All 4 epics implemented (18 stories complete). 551 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft direct push feature added in session 20. Bug fixes and UX improvements in session 21. UI polish, password auth gate, and Damione briefing documents in session 22.
+
+## Session Summary (2026-02-18, Session 22)
+
+### UI Consistency, Auth Gate, Damione Briefings
+
+**UI Consistency Improvements (4 batches from ChatGPT UX review):**
+- Replaced plain `---` dividers with `labeled_divider()` across 5 pages (app.py, CSV Export, Usage Dashboard, Score Calibration)
+- Fixed step indicator bug in Geography autopilot mode — returned 4 for 3-step workflow, causing all steps to show "completed" instead of final step "active"
+- Equal metric columns in Geography results (`st.columns(3)` instead of `[2,1,1]`)
+- Clearer operator caption and bulleted welcome text in Geography Workflow
+- Source column in Score Calibration now shows green "calibrated" / gray "default" pill badges
+- Pipeline Health timestamps use monospace formatting to prevent wrapping
+- Quick-action cards on home page: lighter border (`border_light`) + base `box-shadow` for contrast
+- Intent filter summary text bumped from 12px to 14px (`0.875rem`)
+
+**Password Auth Gate (new feature):**
+- `require_auth()` function in `utils.py` — checks `APP_PASSWORD` from `st.secrets`
+- Gates all 12 pages (app.py + 11 page files) — called right after `inject_base_styles()`
+- Session state persistence — login once per browser session
+- Graceful skip when `APP_PASSWORD` not configured (local dev works unchanged)
+- Added `APP_PASSWORD` to secrets template in CLAUDE.md
+
+**Damione Briefing Documents:**
+- `docs/briefing/HADES_Briefing.pdf` — 12-page product overview with 9 screenshots explaining every page in plain English
+- `docs/briefing/HADES_Development_Complexity.pdf` — 8-page document explaining why development is time-consuming, backed by codebase metrics (17k LOC, 551 tests, 7 integrations, 70 session state vars)
+- Screenshots captured via Playwright MCP automation
+- PDF generation via `fpdf2` build scripts (also committed)
+
+**Beads Created (3 pre-existing issues found by CodeRabbit):**
+- HADES-rac (P3 bug) — Pipeline Health defensive `.get()` access
+- HADES-bs4 (P3 bug) — Pipeline Health timezone mismatch in staleness calc
+- HADES-umc (P2 bug) — CSV Export fragile name+company matching for push results
+
+### Key Files Modified (Session 22)
+```
+ui_components.py               - Quick-action card CSS (border_light + box-shadow)
+app.py                         - 2 labeled dividers, require_auth import
+utils.py                       - require_auth() function (34 lines)
+pages/1_Intent_Workflow.py     - Filter summary font size, require_auth
+pages/2_Geography_Workflow.py  - Equal columns, operator caption, welcome bullets, step indicator fix, require_auth
+pages/3_Operators.py           - require_auth
+pages/4_CSV_Export.py          - 3 labeled dividers, operator helper text, require_auth
+pages/5_Usage_Dashboard.py     - 1 labeled divider, require_auth
+pages/6_Executive_Summary.py   - require_auth
+pages/7_Pipeline_Test.py       - require_auth
+pages/7_Score_Calibration.py   - Source pill badges, labeled divider, require_auth
+pages/8_API_Discovery.py       - require_auth
+pages/9_Automation.py          - require_auth
+pages/10_Pipeline_Health.py    - Time column mono, require_auth
+CLAUDE.md                      - APP_PASSWORD in secrets template
+docs/briefing/*                - 9 screenshots, 2 PDFs, 2 markdown files, 2 build scripts
+```
+
+### Uncommitted Changes
+None — working tree clean, pushed to remote.
+
+### Test Count
+551 tests passing (unchanged)
+
+### What Needs Doing Next Session
+1. **Deploy to Streamlit Community Cloud** — app is code-complete, just needs deployment + secrets config
+2. **Live test VanillaSoft push** — verify end-to-end with real VanillaSoft instance
+3. **Fix HADES-umc (P2)** — CSV Export push matching should use personId, not name+company
+4. **Fix HADES-rac + HADES-bs4 (P3)** — Pipeline Health defensive .get() and timezone (3-line fix)
+5. **Live test Contact Enrich** — API parses correctly, untested with production data
+
+### Open Beads (5)
+- HADES-umc [P2 bug] — CSV Export: fragile name+company matching for push results
+- HADES-bs4 [P3 bug] — Pipeline Health: timezone mismatch in staleness calculation
+- HADES-rac [P3 bug] — Pipeline Health: defensive .get() access
+- HADES-umv [P4 task] — Plan compliance: missing CTA, error log, PII enforcement, doc updates
+- HADES-iic [P4 feature] — Add Zoho CRM dedup check at export time
+
+---
 
 ## Session Summary (2026-02-18, Session 21)
 
