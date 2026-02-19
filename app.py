@@ -5,6 +5,7 @@ HADES - ZoomInfo Lead Pipeline
 import streamlit as st
 import streamlit_shadcn_ui as ui
 import pandas as pd
+from datetime import datetime
 from ui_components import (
     inject_base_styles,
     page_header,
@@ -89,7 +90,6 @@ with status_col1:
 
 with status_col2:
     if last_intent:
-        from datetime import datetime
         try:
             _ts = last_intent.get("created_at", "")
             _dt = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
