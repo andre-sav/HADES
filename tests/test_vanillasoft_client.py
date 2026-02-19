@@ -135,6 +135,17 @@ class TestPushLead:
         assert "typ=XML" in call_args[0][0]
 
     @patch("vanillasoft_client.requests.post")
+    def test_success_uppercase(self, mock_post, sample_row):
+        """VanillaSoft returns SUCCESS in all caps."""
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            text='<ReturnValue>SUCCESS</ReturnValue><ContactID>1199070750</ContactID>',
+        )
+        result = push_lead(sample_row, web_lead_id="test-id-123")
+        assert result.success is True
+        assert result.error is None
+
+    @patch("vanillasoft_client.requests.post")
     def test_failure_response(self, mock_post, sample_row):
         mock_post.return_value = MagicMock(
             status_code=200,

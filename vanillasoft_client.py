@@ -91,13 +91,13 @@ def _parse_response(text: str) -> tuple[bool, str | None]:
         wrapped = f"<Response>{text}</Response>"
         root = fromstring(wrapped)
         return_value = root.findtext("ReturnValue", "")
-        if return_value == "Success":
+        if return_value.upper() == "SUCCESS":
             return True, None
         reason = root.findtext("ReturnReason", "Unknown error")
         return False, reason
     except Exception:
         # If response isn't parseable XML, check for exact success marker
-        if "<ReturnValue>Success</ReturnValue>" in text:
+        if "<ReturnValue>SUCCESS</ReturnValue>" in text or "<ReturnValue>Success</ReturnValue>" in text:
             return True, None
         return False, f"Unparseable response: {text[:200]}"
 
