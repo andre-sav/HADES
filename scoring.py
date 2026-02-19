@@ -450,3 +450,68 @@ def get_priority_action(score: int) -> str:
         return "Good prospect — review details"
     else:
         return "Lower fit — call if capacity allows"
+
+
+def generate_score_summary(lead: dict, workflow_type: str) -> str:
+    """Generate a plain-English summary sentence from component scores."""
+    from utils import SIC_CODE_DESCRIPTIONS
+
+    if workflow_type == "geography":
+        prox = lead.get("_proximity_score", 0)
+        onsite = lead.get("_onsite_score", 0)
+
+        # Proximity phrase
+        dist = lead.get("_distance_miles")
+        if prox >= 70:
+            prox_phrase = f"Nearby ({dist:.0f} mi)" if dist else "Nearby"
+        elif prox >= 40:
+            prox_phrase = f"Moderate distance ({dist:.0f} mi)" if dist else "Moderate distance"
+        else:
+            prox_phrase = f"Far ({dist:.0f} mi)" if dist else "Far from target"
+
+        # Authority phrase
+        mgmt = lead.get("managementLevel", "")
+        if isinstance(mgmt, list):
+            mgmt = mgmt[0] if mgmt else ""
+        auth_phrase = mgmt.lower() if mgmt else "contact"
+
+        # Industry phrase
+        sic = lead.get("sicCode", "")
+        sic_name = SIC_CODE_DESCRIPTIONS.get(sic, "")
+        if onsite >= 70:
+            ind_phrase = f"strong industry fit ({sic_name})" if sic_name else "strong industry fit"
+        elif onsite >= 40:
+            ind_phrase = f"moderate industry fit ({sic_name})" if sic_name else "moderate industry fit"
+        else:
+            ind_phrase = f"low industry fit ({sic_name})" if sic_name else "low industry fit"
+
+        # Company size phrase
+        emps = lead.get("employees") or lead.get("employeeCount") or 0
+        if isinstance(emps, str):
+            emps = int(emps) if emps.isdigit() else 0
+        size_phrase = f"{emps:,} employees" if emps else ""
+
+        parts = [prox_phrase, auth_phrase, size_phrase, ind_phrase]
+        return " · ".join(p for p in parts if p)
+
+    elif workflow_type == "intent":
+        intent = lead.get("_company_intent_score", 0)
+
+        # Signal phrase
+        if intent >= 70:
+            sig_phrase = "Strong intent signal"
+        elif intent >= 40:
+            sig_phrase = "Moderate intent signal"
+        else:
+            sig_phrase = "Weak intent signal"
+
+        # Authority
+        mgmt = lead.get("managementLevel", "")
+        if isinstance(mgmt, list):
+            mgmt = mgmt[0] if mgmt else ""
+        auth_phrase = mgmt.lower() if mgmt else "contact"
+
+        parts = [sig_phrase, auth_phrase]
+        return " · ".join(p for p in parts if p)
+
+    return ""

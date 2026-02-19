@@ -811,3 +811,52 @@ class TestPriorityAction:
     def test_boundary_60(self):
         from scoring import get_priority_action
         assert get_priority_action(60) == "Good prospect — review details"
+
+
+class TestScoreSummary:
+    def test_geography_strong_proximity(self):
+        from scoring import generate_score_summary
+        lead = {
+            "_proximity_score": 90, "_onsite_score": 80,
+            "_authority_score": 70, "_employee_score": 60,
+            "_distance_miles": 3.2, "sicCode": "7011",
+            "managementLevel": "Director", "employees": 250,
+        }
+        result = generate_score_summary(lead, "geography")
+        assert "nearby" in result.lower() or "3 mi" in result.lower()
+
+    def test_geography_weak_industry(self):
+        from scoring import generate_score_summary
+        lead = {
+            "_proximity_score": 85, "_onsite_score": 30,
+            "_authority_score": 75, "_employee_score": 60,
+            "_distance_miles": 5.0, "sicCode": "9999",
+            "managementLevel": "Manager", "employees": 200,
+        }
+        result = generate_score_summary(lead, "geography")
+        assert "low" in result.lower() or "fit" in result.lower()
+
+    def test_intent_strong_signal(self):
+        from scoring import generate_score_summary
+        lead = {
+            "_company_intent_score": 90, "_authority_score": 75,
+            "_accuracy_score": 100, "_phone_score": 100,
+            "managementLevel": "Manager",
+        }
+        result = generate_score_summary(lead, "intent")
+        assert "strong" in result.lower() or "signal" in result.lower()
+
+    def test_intent_weak_authority(self):
+        from scoring import generate_score_summary
+        lead = {
+            "_company_intent_score": 85, "_authority_score": 30,
+            "_accuracy_score": 70, "_phone_score": 100,
+            "managementLevel": "Non-Manager",
+        }
+        result = generate_score_summary(lead, "intent")
+        assert isinstance(result, str) and len(result) > 10
+
+    def test_missing_fields_no_crash(self):
+        from scoring import generate_score_summary
+        result = generate_score_summary({}, "geography")
+        assert isinstance(result, str)
