@@ -25,6 +25,18 @@ def test_push_result_failure():
     assert r.error == "missing phone"
 
 
+def test_push_result_carries_person_id():
+    """PushResult should carry person_id for unique matching."""
+    r = PushResult(success=True, lead_name="John Smith", company="Acme", person_id="123456")
+    assert r.person_id == "123456"
+
+
+def test_push_result_person_id_defaults_none():
+    """PushResult person_id should default to None for backwards compat."""
+    r = PushResult(success=True, lead_name="John Smith", company="Acme")
+    assert r.person_id is None
+
+
 def test_push_summary_counts():
     ok = PushResult(success=True, lead_name="A", company="B", error=None)
     fail = PushResult(success=False, lead_name="C", company="D", error="err")
@@ -83,6 +95,14 @@ def test_build_xml_skips_unmapped_columns():
     assert "SquareFootage" not in xml
     assert "5000" not in xml
     assert "<FirstName>John</FirstName>" in xml
+
+
+def test_build_xml_ignores_person_id_metadata():
+    """_personId metadata should not appear in XML payload."""
+    row = {"First Name": "John", "Company": "Acme", "_personId": "98765"}
+    xml = _build_xml(row)
+    assert "personId" not in xml.lower()
+    assert "98765" not in xml
 
 
 @pytest.fixture
@@ -144,6 +164,28 @@ class TestPushLead:
         result = push_lead(sample_row, web_lead_id="test-id-123")
         assert result.success is False
         assert result.error
+
+    @patch("vanillasoft_client.requests.post")
+    def test_person_id_propagated_from_row(self, mock_post):
+        """push_lead should extract _personId from row and include in PushResult."""
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            text="<ReturnValue>Success</ReturnValue>",
+        )
+        row = {"First Name": "John", "Last Name": "Smith", "Company": "Acme", "_personId": "98765"}
+        result = push_lead(row, web_lead_id="test-id")
+        assert result.person_id == "98765"
+
+    @patch("vanillasoft_client.requests.post")
+    def test_person_id_none_when_missing(self, mock_post):
+        """push_lead should set person_id=None when _personId not in row."""
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            text="<ReturnValue>Success</ReturnValue>",
+        )
+        row = {"First Name": "John", "Last Name": "Smith", "Company": "Acme"}
+        result = push_lead(row, web_lead_id="test-id")
+        assert result.person_id is None
 
 
 class TestPushLeads:

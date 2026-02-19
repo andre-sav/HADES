@@ -137,12 +137,13 @@ elif last_geo:
 if last_query:
     ts = last_query.get("created_at", "")
     ago = time_ago(ts)
-    wf = last_query['workflow_type'].title()
-    leads = last_query['leads_returned']
+    wf = last_query.get('workflow_type', 'unknown').title()
+    leads = last_query.get('leads_returned', 0)
     # Determine staleness — thresholds: <1h green, <6h yellow, >6h red
     try:
-        dt = datetime.fromisoformat(ts)
-        minutes = (datetime.now() - dt).total_seconds() / 60
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        minutes = (now - dt).total_seconds() / 60
         if minutes < 60:
             q_status = "green"
             q_detail = f"{wf} · {leads} leads returned"
@@ -293,8 +294,8 @@ queries = db.get_recent_queries(limit=5)
 if queries:
     for q in queries:
         ts = q.get("created_at", "")[:16].replace("T", " ") if q.get("created_at") else "—"
-        wf = q["workflow_type"].title()
-        leads = q["leads_returned"]
+        wf = q.get("workflow_type", "unknown").title()
+        leads = q.get("leads_returned", 0)
         exported = q.get("leads_exported", 0)
         exp_text = f" · {exported} exported" if exported else ""
         st.caption(f"{ts} — {wf} · {leads} leads{exp_text}")

@@ -178,6 +178,31 @@ class TestBuildVanillasoftRow:
         assert row["Company"] == "Test"
         assert row["Business"] == ""
 
+    def test_person_id_carried_as_metadata(self):
+        """build_vanillasoft_row should carry personId as _personId for push matching."""
+        lead = {"companyName": "Acme", "personId": "123456"}
+        row = build_vanillasoft_row(lead)
+        assert row["_personId"] == "123456"
+
+    def test_person_id_none_when_missing(self):
+        """_personId should be None when lead has no personId."""
+        lead = {"companyName": "Acme"}
+        row = build_vanillasoft_row(lead)
+        assert row.get("_personId") is None
+
+    def test_person_id_coerced_to_string(self):
+        """personId may be int from API — should be coerced to string."""
+        lead = {"companyName": "Acme", "personId": 789012}
+        row = build_vanillasoft_row(lead)
+        assert row["_personId"] == "789012"
+
+    def test_person_id_excluded_from_csv(self):
+        """_personId metadata should not appear as a CSV column."""
+        leads = [{"companyName": "Acme", "personId": "123456"}]
+        csv_content, _, _ = export_leads_to_csv(leads)
+        reader = csv.DictReader(io.StringIO(csv_content))
+        assert "_personId" not in reader.fieldnames
+
     def test_contact_owner_from_parameter(self):
         """Test that Contact Owner is set from contact_owner param, not operator."""
         lead = {"companyName": "Test Co"}

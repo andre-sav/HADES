@@ -400,31 +400,37 @@ if push_clicked and _vs_push_available:
     else:
         st.success(f"All {summary.total} leads pushed to VanillaSoft")
 
-    # Record outcomes for successful leads only
+    # Record outcomes for successful leads only — match by personId (unique), fallback to name+company
     if batch_id:
         now_iso = datetime.now().isoformat()
-        succeeded_names = {(r.lead_name, r.company) for r in summary.succeeded}
+        succeeded_pids = {r.person_id for r in summary.succeeded if r.person_id}
+        succeeded_names = {(r.lead_name, r.company) for r in summary.succeeded if not r.person_id}
         outcome_rows = []
         for lead in leads_to_export:
-            name = f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip()
-            company = lead.get("companyName", "")
-            if (name, company) in succeeded_names:
-                features = {k: v for k, v in lead.items() if k.startswith("_") and v is not None}
-                outcome_rows.append((
-                    batch_id,
-                    company,
-                    str(lead.get("companyId", "")) if lead.get("companyId") else None,
-                    str(lead.get("personId", "")) if lead.get("personId") else None,
-                    lead.get("sicCode") or lead.get("_sic_code"),
-                    lead.get("employees") or lead.get("numberOfEmployees"),
-                    lead.get("_distance_miles"),
-                    lead.get("zip") or lead.get("zipCode"),
-                    lead.get("state"),
-                    lead.get("_score"),
-                    workflow_type,
-                    now_iso,
-                    json.dumps(features) if features else None,
-                ))
+            pid = str(lead["personId"]) if lead.get("personId") is not None else None
+            matched = (pid and pid in succeeded_pids) or (
+                not pid
+                and (f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(), lead.get("companyName", ""))
+                in succeeded_names
+            )
+            if not matched:
+                continue
+            features = {k: v for k, v in lead.items() if k.startswith("_") and v is not None}
+            outcome_rows.append((
+                batch_id,
+                lead.get("companyName", ""),
+                str(lead.get("companyId", "")) if lead.get("companyId") else None,
+                str(lead.get("personId", "")) if lead.get("personId") else None,
+                lead.get("sicCode") or lead.get("_sic_code"),
+                lead.get("employees") or lead.get("numberOfEmployees"),
+                lead.get("_distance_miles"),
+                lead.get("zip") or lead.get("zipCode"),
+                lead.get("state"),
+                lead.get("_score"),
+                workflow_type,
+                now_iso,
+                json.dumps(features) if features else None,
+            ))
         if outcome_rows:
             db.record_lead_outcomes_batch(outcome_rows)
 
@@ -437,8 +443,8 @@ if push_clicked and _vs_push_available:
     staged_id = st.session_state.get("_loaded_staged_id")
     push_status = "complete" if not summary.failed else "partial"
     push_results = json.dumps({
-        "succeeded": [{"name": r.lead_name, "company": r.company} for r in summary.succeeded],
-        "failed": [{"name": r.lead_name, "company": r.company, "error": r.error} for r in summary.failed],
+        "succeeded": [{"name": r.lead_name, "company": r.company, "person_id": r.person_id} for r in summary.succeeded],
+        "failed": [{"name": r.lead_name, "company": r.company, "error": r.error, "person_id": r.person_id} for r in summary.failed],
     })
     if staged_id and batch_id:
         db.mark_staged_exported(staged_id, batch_id)
@@ -464,28 +470,33 @@ if push_clicked and _vs_push_available:
         for r in summary.failed:
             st.caption(f"\u2716 {r.lead_name} \u2014 {r.company} ({r.error})")
 
+        # Match failed rows by personId, fallback to name+company
+        failed_pids = {r.person_id for r in summary.failed if r.person_id}
+        failed_names = {(r.lead_name, r.company) for r in summary.failed if not r.person_id}
+
+        def _is_failed_row(r):
+            pid = r.get("_personId")
+            if pid and pid in failed_pids:
+                return True
+            if not pid:
+                key = (f"{r.get('First Name', '')} {r.get('Last Name', '')}".strip(), r.get("Company", ""))
+                return key in failed_names
+            return False
+
         fcol1, fcol2 = st.columns(2)
         with fcol1:
             if st.button("\U0001f504 Retry Failed", use_container_width=True):
-                failed_names = {(r.lead_name, r.company) for r in summary.failed}
-                retry_rows = [
-                    r for r in vs_rows
-                    if (f"{r.get('First Name', '')} {r.get('Last Name', '')}".strip(), r.get("Company", "")) in failed_names
-                ]
+                retry_rows = [r for r in vs_rows if _is_failed_row(r)]
                 st.session_state["_vs_retry_rows"] = retry_rows
                 st.rerun()
         with fcol2:
-            failed_names = {(r.lead_name, r.company) for r in summary.failed}
-            failed_csv_rows = [
-                r for r in vs_rows
-                if (f"{r.get('First Name', '')} {r.get('Last Name', '')}".strip(), r.get("Company", "")) in failed_names
-            ]
+            failed_csv_rows = [r for r in vs_rows if _is_failed_row(r)]
             if failed_csv_rows:
                 import csv as csv_mod
                 import io
                 from utils import VANILLASOFT_COLUMNS
                 out = io.StringIO()
-                writer = csv_mod.DictWriter(out, fieldnames=VANILLASOFT_COLUMNS)
+                writer = csv_mod.DictWriter(out, fieldnames=VANILLASOFT_COLUMNS, extrasaction="ignore")
                 writer.writeheader()
                 for r in failed_csv_rows:
                     writer.writerow(r)

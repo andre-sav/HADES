@@ -23,6 +23,7 @@ class PushResult:
     lead_name: str
     company: str
     error: str | None = None
+    person_id: str | None = None
 
 
 @dataclass
@@ -105,6 +106,7 @@ def push_lead(row: dict, web_lead_id: str) -> PushResult:
     """Push a single lead to VanillaSoft via Incoming Web Leads endpoint."""
     lead_name = f"{row.get('First Name', '')} {row.get('Last Name', '')}".strip()
     company = row.get("Company", "")
+    person_id = row.get("_personId")
 
     xml_body = _build_xml(row)
     url = f"{BASE_URL}?id={web_lead_id}&typ=XML"
@@ -116,20 +118,20 @@ def push_lead(row: dict, web_lead_id: str) -> PushResult:
             timeout=REQUEST_TIMEOUT,
         )
     except requests.exceptions.Timeout:
-        return PushResult(success=False, lead_name=lead_name, company=company, error="Request timed out")
+        return PushResult(success=False, lead_name=lead_name, company=company, error="Request timed out", person_id=person_id)
     except requests.exceptions.ConnectionError as e:
-        return PushResult(success=False, lead_name=lead_name, company=company, error=f"Connection error: {e}")
+        return PushResult(success=False, lead_name=lead_name, company=company, error=f"Connection error: {e}", person_id=person_id)
     except requests.exceptions.RequestException as e:
-        return PushResult(success=False, lead_name=lead_name, company=company, error=str(e))
+        return PushResult(success=False, lead_name=lead_name, company=company, error=str(e), person_id=person_id)
 
     if resp.status_code != 200:
         return PushResult(
             success=False, lead_name=lead_name, company=company,
-            error=f"HTTP {resp.status_code}: {resp.text[:200]}",
+            error=f"HTTP {resp.status_code}: {resp.text[:200]}", person_id=person_id,
         )
 
     success, reason = _parse_response(resp.text)
-    return PushResult(success=success, lead_name=lead_name, company=company, error=reason)
+    return PushResult(success=success, lead_name=lead_name, company=company, error=reason, person_id=person_id)
 
 
 def push_leads(rows: list[dict], web_lead_id: str, progress_callback=None) -> PushSummary:

@@ -116,6 +116,10 @@ def build_vanillasoft_row(
         notes = f"Batch: {batch_id} | {notes}" if notes else f"Batch: {batch_id}"
     row["Import Notes"] = notes
 
+    # Carry personId as metadata for push result matching (not included in CSV/XML)
+    if lead.get("personId") is not None:
+        row["_personId"] = str(lead["personId"])
+
     # Add operator metadata if provided
     if operator:
         row["Operator Name"] = operator.get("operator_name") or ""
@@ -154,7 +158,7 @@ def export_leads_to_csv(
     batch_id = generate_batch_id(db) if db else None
 
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=VANILLASOFT_COLUMNS)
+    writer = csv.DictWriter(output, fieldnames=VANILLASOFT_COLUMNS, extrasaction="ignore")
     writer.writeheader()
 
     for i, lead in enumerate(leads):
