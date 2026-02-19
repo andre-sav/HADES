@@ -1716,9 +1716,12 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             },
         )
 
-        # Score breakdown expander
+        # Score breakdown expander — only show leads matching current filters
+        _filtered_indices = set(filtered_df["_idx"].tolist())
         with st.expander("Score details", expanded=False):
-            for lead in scored_leads:
+            for idx, lead in enumerate(scored_leads):
+                if idx not in _filtered_indices:
+                    continue
                 name = f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip()
                 company = lead.get("companyName", "Unknown")
                 score_val = lead.get("_score", 0)

@@ -462,12 +462,16 @@ def generate_score_summary(lead: dict, workflow_type: str) -> str:
 
         # Proximity phrase
         dist = lead.get("_distance_miles")
+        try:
+            dist_display = f"{float(dist):.0f}" if dist is not None else None
+        except (TypeError, ValueError):
+            dist_display = str(dist) if dist else None
         if prox >= 70:
-            prox_phrase = f"Nearby ({dist:.0f} mi)" if dist else "Nearby"
+            prox_phrase = f"Nearby ({dist_display} mi)" if dist_display else "Nearby"
         elif prox >= 40:
-            prox_phrase = f"Moderate distance ({dist:.0f} mi)" if dist else "Moderate distance"
+            prox_phrase = f"Moderate distance ({dist_display} mi)" if dist_display else "Moderate distance"
         else:
-            prox_phrase = f"Far ({dist:.0f} mi)" if dist else "Far from target"
+            prox_phrase = f"Far ({dist_display} mi)" if dist_display else "Far from target"
 
         # Authority phrase
         mgmt = lead.get("managementLevel", "")
