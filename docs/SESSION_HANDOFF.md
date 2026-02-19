@@ -1,7 +1,73 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-18
-**Status:** All 4 epics implemented (18 stories complete). 551 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft direct push feature added in session 20. Bug fixes and UX improvements in session 21. UI polish, password auth gate, and Damione briefing documents in session 22.
+**Date:** 2026-02-19
+**Status:** All 4 epics implemented (18 stories complete). 577 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft direct push feature added in session 20. Bug fixes and UX improvements in sessions 21-22. Score Transparency feature in session 23.
+
+## Session Summary (2026-02-19, Session 23)
+
+### Bug Fixes (3) + Score Transparency Feature (7 tasks)
+
+**HADES-umc (P2 bug) — Fragile push result matching FIXED:**
+- VanillaSoft push results matched leads by name+company (fragile — duplicates, typos)
+- Threaded `personId` through entire push pipeline: lead → `build_vanillasoft_row()` → `push_lead()` → `PushResult` → matching
+- Falls back to name+company when personId absent (backwards compatible)
+- 5 new tests in `test_vanillasoft_client.py`, 4 in `test_export.py`
+
+**HADES-rac (P3 bug) — Pipeline Health defensive access FIXED:**
+- `last_query['workflow_type']` → `.get('workflow_type', 'unknown')` (2 locations)
+
+**HADES-bs4 (P3 bug) — Pipeline Health timezone mismatch FIXED:**
+- Staleness calculation used naive datetime comparison; failed in try/except showing gray "Unknown"
+- Fixed to timezone-aware pattern matching `time_ago()` helper
+
+**Score Transparency & Actionable Prioritization (NEW FEATURE):**
+- `get_priority_action(score)` — "Call first — strong match" / "Good prospect — review details" / "Lower fit — call if capacity allows"
+- `generate_score_summary(lead, workflow_type)` — plain-English sentence from component scores (e.g., "Nearby (3 mi) · director · 250 employees · strong industry fit (Hotels)")
+- `score_breakdown(lead, workflow_type)` — HTML horizontal bars per scoring factor, color-coded green/yellow/gray by strength tier
+- Wired into Geography Workflow, Intent Workflow, and CSV Export pages
+- Priority column upgraded to show action phrases (hidden `_priority_label` preserves filter compatibility)
+- Score expander respects active filters (only shows filtered leads)
+- Defensive distance formatting for messy data
+- 17 new tests (6 priority action, 5 summary, 6 breakdown)
+- Design doc: `docs/plans/2026-02-19-score-transparency-design.md`
+
+### Key Files Modified (Session 23)
+```
+vanillasoft_client.py              - PushResult.person_id field
+export.py                          - _personId metadata + extrasaction="ignore"
+pages/4_CSV_Export.py              - personId matching + score breakdown expander
+pages/10_Pipeline_Health.py        - Defensive .get() + timezone fix
+scoring.py                         - get_priority_action(), generate_score_summary(), defensive dist
+ui_components.py                   - score_breakdown() HTML component
+pages/2_Geography_Workflow.py      - Score expander + action phrases + filter sync
+pages/1_Intent_Workflow.py         - Score expander + action phrases + filter sync
+CLAUDE.md                          - Test count 551→577
+tests/test_vanillasoft_client.py   - 5 new tests
+tests/test_export.py               - 4 new tests
+tests/test_scoring.py              - 11 new tests
+tests/test_ui_components.py        - 6 new tests + 1 updated
+docs/plans/                        - 2 new docs (design + plan)
+```
+
+### Uncommitted Changes
+None — working tree clean, pushed to remote.
+
+### Test Count
+577 tests passing (up from 551)
+
+### What Needs Doing Next Session
+1. **Deploy to Streamlit Community Cloud** — app is code-complete, just needs deployment + secrets config
+2. **Live test VanillaSoft push** — verify end-to-end with real VanillaSoft instance
+3. **Live test Contact Enrich** — API parses correctly, untested with production data
+4. **Plan compliance gaps** — HADES-umv (P4, 9 items)
+5. **Zoho CRM dedup check at export** — HADES-iic (P4)
+6. **Configure SMTP secrets** — For GitHub Actions email delivery
+
+### Open Beads (2)
+- HADES-umv [P4 task] — Plan compliance: missing CTA, error log, PII enforcement, doc updates
+- HADES-iic [P4 feature] — Add Zoho CRM dedup check at export time
+
+---
 
 ## Session Summary (2026-02-18, Session 22)
 
