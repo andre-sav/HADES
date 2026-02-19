@@ -440,3 +440,13 @@ def get_priority_label(score: int) -> str:
         return "Low"
     else:
         return "Very Low"
+
+
+def get_priority_action(score: int) -> str:
+    """Get actionable call-to-action phrase based on score."""
+    if score >= 80:
+        return "Call first — strong match"
+    elif score >= 60:
+        return "Good prospect — review details"
+    else:
+        return "Lower fit — call if capacity allows"

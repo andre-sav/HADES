@@ -783,3 +783,31 @@ class TestGeographyScoreClamp:
         }
         result = calculate_geography_score(lead)
         assert result["score"] <= 100
+
+
+class TestPriorityAction:
+    """Tests for actionable priority phrases."""
+
+    def test_high_score_action(self):
+        from scoring import get_priority_action
+        assert get_priority_action(85) == "Call first — strong match"
+
+    def test_medium_score_action(self):
+        from scoring import get_priority_action
+        assert get_priority_action(70) == "Good prospect — review details"
+
+    def test_low_score_action(self):
+        from scoring import get_priority_action
+        assert get_priority_action(45) == "Lower fit — call if capacity allows"
+
+    def test_very_low_score_action(self):
+        from scoring import get_priority_action
+        assert get_priority_action(30) == "Lower fit — call if capacity allows"
+
+    def test_boundary_80(self):
+        from scoring import get_priority_action
+        assert get_priority_action(80) == "Call first — strong match"
+
+    def test_boundary_60(self):
+        from scoring import get_priority_action
+        assert get_priority_action(60) == "Good prospect — review details"
