@@ -256,7 +256,7 @@ states = get_states_from_zips(zips)
 
 ## Status
 
-- **551 tests passing** (all tests green)
+- **577 tests passing** (all tests green)
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
 - ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).
 - ✅ **Target Contacts Expansion** - Implemented 2026-02-03
