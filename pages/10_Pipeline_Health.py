@@ -121,6 +121,15 @@ page_header(
 # HEALTH CHECKS
 # =============================================================================
 
+# Collect health statuses for critical alert
+_health_statuses = []
+
+
+def _track_health(label, status, detail):
+    """Track status for critical alert banner."""
+    _health_statuses.append({"label": label, "status": status, "detail": detail})
+
+
 # 1. Last Successful Query
 last_intent = db.get_last_query("intent")
 last_geo = db.get_last_query("geography")
@@ -134,12 +143,12 @@ elif last_intent:
 elif last_geo:
     last_query = last_geo
 
+# Compute all health statuses first
 if last_query:
     ts = last_query.get("created_at", "")
     ago = time_ago(ts)
     wf = last_query.get('workflow_type', 'unknown').title()
     leads = last_query.get('leads_returned', 0)
-    # Determine staleness — thresholds: <1h green, <6h yellow, >6h red
     try:
         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
@@ -147,7 +156,7 @@ if last_query:
         if minutes < 60:
             q_status = "green"
             q_detail = f"{wf} · {leads} leads returned"
-        elif minutes < 360:  # 6 hours
+        elif minutes < 360:
             q_status = "yellow"
             q_detail = f"{wf} · {leads} leads returned · No queries in over {int(minutes / 60)}h"
         else:
@@ -157,56 +166,59 @@ if last_query:
     except (ValueError, TypeError):
         q_status = "gray"
         q_detail = f"{wf} · {leads} leads returned"
-
-    health_indicator(
-        "Last Query",
-        q_status,
-        q_detail,
-        timestamp=ago,
-    )
+    _track_health("Last Query", q_status, q_detail)
 else:
-    health_indicator("Last Query", "gray", "No queries executed yet")
+    q_status, q_detail, ago = "gray", "No queries executed yet", None
+    _track_health("Last Query", q_status, q_detail)
 
-
-# 2. Cache Freshness
 cache_stats = db.get_cache_stats()
 if cache_stats["total"] > 0:
     active = cache_stats["active"]
     total = cache_stats["total"]
     newest = cache_stats.get("newest")
     cache_status = "green" if active > 0 else "yellow"
-    health_indicator(
-        "Cache",
-        cache_status,
-        f"{active} active / {total} total entries",
-        timestamp=f"Latest: {time_ago(newest)}" if newest else None,
-    )
+    cache_detail = f"{active} active / {total} total entries"
+    _track_health("Cache", cache_status, cache_detail)
 else:
-    health_indicator("Cache", "gray", "No cached results")
+    cache_status, cache_detail, newest = "gray", "No cached results", None
+    _track_health("Cache", cache_status, cache_detail)
 
-
-# 3. Turso Database Connection
 try:
     db.execute("SELECT 1")
-    health_indicator("Database", "green", "Turso connection active")
+    db_status, db_detail = "green", "Turso connection active"
 except Exception as e:
-    health_indicator("Database", "red", f"Connection failed: {str(e)[:80]}")
+    db_status, db_detail = "red", f"Connection failed: {str(e)[:80]}"
+_track_health("Database", db_status, db_detail)
 
-
-# 4. ZoomInfo API Status
 try:
     from zoominfo_client import get_zoominfo_client
     client = get_zoominfo_client()
     if client.access_token:
-        health_indicator(
-            "ZoomInfo API",
-            "green",
-            "Authenticated with valid token",
-        )
+        zi_status, zi_detail = "green", "Authenticated with valid token"
     else:
-        health_indicator("ZoomInfo API", "yellow", "No active token — will authenticate on next query")
+        zi_status, zi_detail = "yellow", "No active token — will authenticate on next query"
 except Exception as e:
-    health_indicator("ZoomInfo API", "red", f"Client error: {str(e)[:80]}")
+    zi_status, zi_detail = "red", f"Client error: {str(e)[:80]}"
+_track_health("ZoomInfo API", zi_status, zi_detail)
+
+# P1: Critical alert at top when any subsystem is red
+_critical = [h for h in _health_statuses if h["status"] == "red"]
+for _c in _critical:
+    st.error(f"Critical: {_c['label']} needs attention — {_c['detail']}")
+
+# P2: 2x2 grid layout for health indicators
+_h_col1, _h_col2 = st.columns(2)
+
+with _h_col1:
+    health_indicator("Last Query", q_status, q_detail, timestamp=ago if last_query else None)
+    health_indicator("Database", db_status, db_detail)
+
+with _h_col2:
+    health_indicator(
+        "Cache", cache_status, cache_detail,
+        timestamp=f"Latest: {time_ago(newest)}" if cache_stats["total"] > 0 and newest else None,
+    )
+    health_indicator("ZoomInfo API", zi_status, zi_detail)
 
 
 # =============================================================================
@@ -292,12 +304,27 @@ st.caption("Recent Query Activity")
 
 queries = db.get_recent_queries(limit=5)
 if queries:
+    _activity_rows = []
     for q in queries:
         ts = q.get("created_at", "")[:16].replace("T", " ") if q.get("created_at") else "—"
         wf = q.get("workflow_type", "unknown").title()
         leads = q.get("leads_returned", 0)
         exported = q.get("leads_exported", 0)
-        exp_text = f" · {exported} exported" if exported else ""
-        st.caption(f"{ts} — {wf} · {leads} leads{exp_text}")
+        _activity_rows.append({
+            "time": ts,
+            "workflow": wf,
+            "leads": leads,
+            "exported": exported,
+        })
+
+    styled_table(
+        rows=_activity_rows,
+        columns=[
+            {"key": "time", "label": "Time", "mono": True},
+            {"key": "workflow", "label": "Workflow", "pill": {"Intent": "info", "Geography": "success"}},
+            {"key": "leads", "label": "Leads", "align": "right", "mono": True},
+            {"key": "exported", "label": "Exported", "align": "right", "mono": True},
+        ],
+    )
 else:
     st.caption("No queries recorded yet")

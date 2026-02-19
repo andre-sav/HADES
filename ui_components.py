@@ -819,6 +819,14 @@ def inject_base_styles():
         transform: translateY(-1px);
     }}
 
+    .quick-action .qa-step {{
+        font-size: 0.625rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: {COLORS['text_muted']};
+        margin-bottom: 0.25rem;
+    }}
+
     .quick-action .icon {{
         font-size: 1.5rem;
         margin-bottom: 0.25rem;

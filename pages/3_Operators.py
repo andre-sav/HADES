@@ -6,7 +6,7 @@ Superhuman-inspired: clean, focused, inline editing.
 import streamlit as st
 import streamlit_shadcn_ui as ui
 from turso_db import get_database
-from ui_components import inject_base_styles, page_header, paginate_items, pagination_controls, empty_state
+from ui_components import inject_base_styles, page_header, paginate_items, pagination_controls, empty_state, labeled_divider
 
 st.set_page_config(page_title="Operators", page_icon="👤", layout="wide")
 
@@ -85,9 +85,10 @@ with st.expander("Sync from Zoho CRM", expanded=False):
         btn_col1, btn_col2 = st.columns(2)
 
         with btn_col1:
-            sync_clicked = st.button("Sync Changes", key="op_sync_btn")
+            sync_clicked = st.button("Sync Changes", type="primary", key="op_sync_btn")
         with btn_col2:
-            _resync_trigger = st.button("Full Resync", type="primary", key="op_resync_btn")
+            _resync_trigger = st.button("Full Resync", key="op_resync_btn")
+            st.caption("Full Resync replaces all records")
 
         _resync_confirmed = ui.alert_dialog(
             show=_resync_trigger,
@@ -347,7 +348,9 @@ else:
                             st.error(f"Failed to delete: {e}")
 
         st.markdown("---")
+        st.markdown("")
 
     # Pagination controls at bottom
     if total_pages > 1:
+        labeled_divider("Pages")
         pagination_controls(current_page, total_pages, page_key="operators_page")

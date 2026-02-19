@@ -50,15 +50,16 @@ except Exception as e:
 col1, col2, col3 = st.columns(3)
 
 _quick_actions = [
-    {"page": "pages/1_Intent_Workflow.py", "icon": "🎯", "title": "Intent Search", "desc": "Companies showing buying signals", "col": col1},
-    {"page": "pages/2_Geography_Workflow.py", "icon": "📍", "title": "Geography Search", "desc": "Contacts in a service territory", "col": col2},
-    {"page": "pages/4_CSV_Export.py", "icon": "📤", "title": "Export Leads", "desc": "Download VanillaSoft CSV", "col": col3},
+    {"page": "pages/1_Intent_Workflow.py", "icon": "🎯", "title": "Intent Search", "desc": "Companies showing buying signals", "step": "Step 1", "col": col1},
+    {"page": "pages/2_Geography_Workflow.py", "icon": "📍", "title": "Geography Search", "desc": "Contacts in a service territory", "step": "Step 1", "col": col2},
+    {"page": "pages/4_CSV_Export.py", "icon": "📤", "title": "Export Leads", "desc": "Download VanillaSoft CSV", "step": "Step 2", "col": col3},
 ]
 
 for qa in _quick_actions:
     with qa["col"]:
         st.markdown(
             f"""<div class="quick-action">
+                <div class="qa-step">{qa['step']}</div>
                 <div class="icon">{qa['icon']}</div>
                 <div class="title">{qa['title']}</div>
                 <div class="desc">{qa['desc']}</div>
@@ -87,10 +88,29 @@ with status_col1:
     st.caption("Database")
 
 with status_col2:
+    if last_intent:
+        from datetime import datetime
+        try:
+            _ts = last_intent.get("created_at", "")
+            _dt = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
+            _hours = (datetime.now() - _dt.replace(tzinfo=None)).total_seconds() / 3600
+            _freshness = status_badge("success", "Active") if _hours < 6 else status_badge("warning", "Stale")
+        except (ValueError, TypeError):
+            _freshness = status_badge("neutral", "Unknown")
+        st.markdown(_freshness, unsafe_allow_html=True)
     st.caption("Intent")
     last_run_indicator(last_intent)
 
 with status_col3:
+    if last_geo:
+        try:
+            _ts = last_geo.get("created_at", "")
+            _dt = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
+            _hours = (datetime.now() - _dt.replace(tzinfo=None)).total_seconds() / 3600
+            _freshness = status_badge("success", "Active") if _hours < 6 else status_badge("warning", "Stale")
+        except (ValueError, TypeError):
+            _freshness = status_badge("neutral", "Unknown")
+        st.markdown(_freshness, unsafe_allow_html=True)
     st.caption("Geography")
     last_run_indicator(last_geo)
 
@@ -111,16 +131,16 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     weekly_credits = db.get_weekly_usage()
-    metric_card("Weekly Credits", weekly_credits)
+    metric_card("Weekly Credits", weekly_credits, help_text="Since Monday")
 
 with col2:
     recent = db.get_recent_queries(limit=100)
     total_leads = sum(q.get("leads_returned", 0) or 0 for q in recent)
-    metric_card("Leads Found", total_leads)
+    metric_card("Leads Found", total_leads, help_text="Last 100 queries")
 
 with col3:
     operators = db.get_operators()
-    metric_card("Operators", len(operators))
+    metric_card("Operators", len(operators), help_text="Active records")
 
 
 # =============================================================================

@@ -20,6 +20,7 @@ from ui_components import (
     metric_card,
     narrative_metric,
     styled_table,
+    workflow_summary_strip,
     COLORS,
 )
 
@@ -64,6 +65,14 @@ page_header(
     action_callback=refresh_data,
 )
 
+# Context strip below header (since action_label precludes right_content)
+_mtd_quick = cost_tracker.get_usage_summary(days=today.day)
+workflow_summary_strip([
+    {"label": "Leads MTD", "value": _mtd_quick.total_leads},
+    {"label": "Credits MTD", "value": _mtd_quick.total_credits},
+    {"label": "Queries MTD", "value": _mtd_quick.total_queries},
+])
+
 
 # =============================================================================
 # TABBED CONTENT
@@ -73,6 +82,20 @@ _exec_active = ui.tabs(options=["Overview", "Trends", "Budget"], default_value="
 # --- OVERVIEW TAB ---
 if _exec_active == "Overview":
     mtd = cost_tracker.get_usage_summary(days=today.day)
+
+    # KPI cards — scannable at a glance
+    _kpi1, _kpi2, _kpi3, _kpi4 = st.columns(4)
+    with _kpi1:
+        metric_card("Leads Exported", mtd.total_leads, help_text="Month to date")
+    with _kpi2:
+        metric_card("Credits Used", mtd.total_credits, help_text="Month to date")
+    with _kpi3:
+        _eff = mtd.total_leads / mtd.total_credits if mtd.total_credits > 0 else 0
+        metric_card("Efficiency", f"{_eff:.2f}", help_text="Leads per credit")
+    with _kpi4:
+        metric_card("Queries", mtd.total_queries, help_text="Month to date")
+
+    st.markdown("")
 
     # Narrative metrics — answers, not raw numbers
     if mtd.total_leads > 0 and mtd.total_credits > 0:
@@ -133,13 +156,14 @@ if _exec_active == "Overview":
                 hovertemplate="<b>%{x}</b><br>Credits: %{y:,}<extra></extra>",
             )])
             fig.update_layout(
+                title=dict(text="Credits by Workflow", font=dict(size=14, color=COLORS["text_secondary"])),
                 height=250,
-                margin=dict(l=0, r=0, t=20, b=0),
+                margin=dict(l=0, r=0, t=40, b=0),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 font=dict(color=COLORS["text_secondary"], family="Urbanist, sans-serif"),
                 xaxis=dict(gridcolor=COLORS["border"], showgrid=False),
-                yaxis=dict(gridcolor="rgba(38,45,58,0.37)", griddash="dot"),
+                yaxis=dict(gridcolor="rgba(38,45,58,0.37)", griddash="dot", title="Credits"),
                 showlegend=False,
                 bargap=0.4,
             )
@@ -165,6 +189,12 @@ if _exec_active == "Overview":
                     {"key": "efficiency", "label": "Efficiency", "align": "right", "mono": True},
                 ],
             )
+
+            # Efficiency callout
+            if table_data:
+                _best = max(table_data, key=lambda r: float(r["efficiency"]) if r["efficiency"] != "0.00" else 0)
+                if float(_best["efficiency"]) > 0:
+                    st.caption(f"Most efficient: {_best['workflow']} ({_best['efficiency']} leads/credit)")
     else:
         st.caption("No workflow data yet")
 
@@ -209,17 +239,17 @@ elif _exec_active == "Trends":
                 hovertemplate="<b>%{x}</b><br>Credits: %{y:,}<extra></extra>",
             ))
             fig_credits.update_layout(
+                title=dict(text="Credits by Week", font=dict(size=14, color=COLORS["text_secondary"])),
                 height=220,
-                margin=dict(l=0, r=0, t=10, b=30),
+                margin=dict(l=0, r=0, t=35, b=30),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 font=dict(color=COLORS["text_secondary"], family="Urbanist, sans-serif"),
                 xaxis=dict(gridcolor=COLORS["border"], showgrid=False, title=""),
-                yaxis=dict(gridcolor="rgba(38,45,58,0.37)", griddash="dot", title=""),
+                yaxis=dict(gridcolor="rgba(38,45,58,0.37)", griddash="dot", title="Credits"),
                 showlegend=False,
             )
             st.plotly_chart(fig_credits, use_container_width=True)
-            st.caption("Credits by week")
 
         with col2:
             fig_leads = go.Figure()
@@ -232,17 +262,17 @@ elif _exec_active == "Trends":
                 hovertemplate="<b>%{x}</b><br>Leads: %{y:,}<extra></extra>",
             ))
             fig_leads.update_layout(
+                title=dict(text="Leads by Week", font=dict(size=14, color=COLORS["text_secondary"])),
                 height=220,
-                margin=dict(l=0, r=0, t=10, b=30),
+                margin=dict(l=0, r=0, t=35, b=30),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 font=dict(color=COLORS["text_secondary"], family="Urbanist, sans-serif"),
                 xaxis=dict(gridcolor=COLORS["border"], showgrid=False, title=""),
-                yaxis=dict(gridcolor="rgba(38,45,58,0.37)", griddash="dot", title=""),
+                yaxis=dict(gridcolor="rgba(38,45,58,0.37)", griddash="dot", title="Leads"),
                 showlegend=False,
             )
             st.plotly_chart(fig_leads, use_container_width=True)
-            st.caption("Leads by week")
     else:
         st.caption("Not enough data for trends")
 

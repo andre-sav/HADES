@@ -105,6 +105,18 @@ if "zi_usage_data" in st.session_state:
                 "description": item.get("description", ""),
             }
 
+        # Identify most constrained limit
+        _constraint_parts = []
+        for _lt in ("requestLimit", "recordLimit", "uniqueIdLimit"):
+            _m = metrics.get(_lt, {})
+            if _m.get("limit", 0) > 0:
+                _pct = _m["used"] / _m["limit"] * 100
+                _constraint_parts.append((_lt, _pct))
+        if _constraint_parts:
+            _most_constrained = max(_constraint_parts, key=lambda x: x[1])
+            _label_map = {"requestLimit": "API Requests", "recordLimit": "Records", "uniqueIdLimit": "Unique IDs"}
+            st.caption(f"Most constrained: {_label_map.get(_most_constrained[0], _most_constrained[0])} ({_most_constrained[1]:.0f}% used)")
+
         col1, col2, col3 = st.columns(3)
 
         # Request Limit
@@ -113,11 +125,11 @@ if "zi_usage_data" in st.session_state:
             used = req.get("used", 0)
             limit = req.get("limit", 0)
             if limit > 0:
-                metric_card("API Requests", f"{used:,} / {limit:,}")
+                metric_card("API Requests", f"{used:,} / {limit:,}", help_text="API calls made")
                 pct = (used / limit * 100) if limit > 0 else 0
                 colored_progress_bar(pct)
             else:
-                metric_card("API Requests", f"{used:,}")
+                metric_card("API Requests", f"{used:,}", help_text="API calls made")
 
         # Record Limit
         with col2:
@@ -125,11 +137,11 @@ if "zi_usage_data" in st.session_state:
             used = rec.get("used", 0)
             limit = rec.get("limit", 0)
             if limit > 0:
-                metric_card("Records", f"{used:,} / {limit:,}")
+                metric_card("Records", f"{used:,} / {limit:,}", help_text="Records retrieved")
                 pct = (used / limit * 100) if limit > 0 else 0
                 colored_progress_bar(pct)
             else:
-                metric_card("Records", f"{used:,}")
+                metric_card("Records", f"{used:,}", help_text="Records retrieved")
 
         # Unique ID Limit
         with col3:
@@ -137,14 +149,14 @@ if "zi_usage_data" in st.session_state:
             used = uid.get("used", 0)
             limit = uid.get("limit", 0)
             if limit > 0:
-                metric_card("Unique IDs", f"{used:,} / {limit:,}")
+                metric_card("Unique IDs", f"{used:,} / {limit:,}", help_text="Unique credits redeemed")
                 pct = (used / limit * 100) if limit > 0 else 0
                 colored_progress_bar(pct)
             else:
-                metric_card("Unique IDs", f"{used:,}")
+                metric_card("Unique IDs", f"{used:,}", help_text="Unique credits redeemed")
 
         # Show raw data in debug mode
-        with st.expander("Raw Response", expanded=False):
+        with st.expander("API Diagnostics", expanded=False):
             st.json(zi_usage)
 
 labeled_divider("Details")
@@ -163,20 +175,20 @@ if _usage_active == "Weekly":
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        metric_card("This Week", total)
+        metric_card("This Week", total, help_text="All workflows combined")
 
     with col2:
         intent = weekly.get("intent", 0)
         budget = cost_tracker.format_budget_display("intent")
         if budget["has_cap"]:
-            metric_card("Intent", f"{intent:,} / {budget['cap']:,}")
+            metric_card("Intent", f"{intent:,} / {budget['cap']:,}", help_text="Weekly cap enforced")
             colored_progress_bar(budget["percent"])
         else:
-            metric_card("Intent", intent)
+            metric_card("Intent", intent, help_text="No weekly cap")
 
     with col3:
         geo = weekly.get("geography", 0)
-        metric_card("Geography", geo)
+        metric_card("Geography", geo, help_text="No weekly cap")
 
     # Weekly context info
     budget = cost_tracker.format_budget_display("intent")

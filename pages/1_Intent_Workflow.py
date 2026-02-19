@@ -48,6 +48,7 @@ from ui_components import (
     status_badge,
     metric_card,
     labeled_divider,
+    parameter_group,
     colored_progress_bar,
     paginate_items,
     pagination_controls,
@@ -289,7 +290,7 @@ if _results_showing:
     with st.expander(f"Pipeline: {_s1_topics} ({_s1_signals}) — {_s1_count} companies, {_sel_count} selected", expanded=False):
         st.caption(f"Topics: {_s1_topics} | Signal: {_s1_signals} | Found: {_s1_count} | Selected: {_sel_count}")
 else:
-    labeled_divider("Step 1: Search Intent Companies")
+    st.subheader("Step 1 — Search Intent Companies")
 
     col1, col2 = st.columns([3, 2])
 
@@ -312,41 +313,40 @@ else:
             placeholder="Select signal strengths...",
         )
 
-    # Filters expander
-    with st.expander("Filters", expanded=False):
-        filter_col1, filter_col2 = st.columns(2)
-        with filter_col1:
-            st.caption("**Intent Search filters:**")
-            st.caption(f"Minimum employees: {get_employee_minimum():,}")
-            st.caption(f"Maximum employees: {get_employee_maximum():,}")
-            sic_with_names = get_sic_codes_with_descriptions()
-            st.caption(f"SIC codes: {len(sic_with_names)} industries")
-            with st.popover("View SIC codes"):
-                for code, desc in sic_with_names:
-                    st.caption(f"**{code}** — {desc}")
-        with filter_col2:
-            st.caption("**Contact Search filters:**")
-            intent_mgmt_levels = st.multiselect(
-                "Management level",
-                options=["Manager", "Director", "VP Level Exec", "C Level Exec"],
-                default=["Manager", "Director", "VP Level Exec"],
-                key="intent_mgmt_levels",
-            )
-            intent_accuracy_min = st.number_input(
-                "Accuracy minimum",
-                min_value=0,
-                max_value=100,
-                value=95,
-                step=5,
-                key="intent_accuracy_min",
-            )
-            intent_phone_fields = st.multiselect(
-                "Required phone fields",
-                options=["mobilePhone", "directPhone", "phone"],
-                default=["mobilePhone", "directPhone", "phone"],
-                key="intent_phone_fields",
-                help="Contact must have at least one selected phone type",
-            )
+    # Intent Search Filters (read-only)
+    _sic_count = len(get_sic_codes_with_descriptions())
+    with parameter_group("Intent Search Filters", f"{get_employee_minimum():,}–{get_employee_maximum():,} employees · {_sic_count} SIC codes"):
+        st.caption(f"Minimum employees: {get_employee_minimum():,}")
+        st.caption(f"Maximum employees: {get_employee_maximum():,}")
+        sic_with_names = get_sic_codes_with_descriptions()
+        st.caption(f"SIC codes: {len(sic_with_names)} industries")
+        with st.popover("View SIC codes"):
+            for code, desc in sic_with_names:
+                st.caption(f"**{code}** — {desc}")
+
+    # Contact Search Filters (editable)
+    with parameter_group("Contact Search Filters", "Manager+ · 95 accuracy · any phone"):
+        intent_mgmt_levels = st.multiselect(
+            "Management level",
+            options=["Manager", "Director", "VP Level Exec", "C Level Exec"],
+            default=["Manager", "Director", "VP Level Exec"],
+            key="intent_mgmt_levels",
+        )
+        intent_accuracy_min = st.number_input(
+            "Accuracy minimum",
+            min_value=0,
+            max_value=100,
+            value=95,
+            step=5,
+            key="intent_accuracy_min",
+        )
+        intent_phone_fields = st.multiselect(
+            "Required phone fields",
+            options=["mobilePhone", "directPhone", "phone"],
+            default=["mobilePhone", "directPhone", "phone"],
+            key="intent_phone_fields",
+            help="Contact must have at least one selected phone type",
+        )
 
     # Query Preview (shown when parameters are selected)
     can_query = len(selected_topics) > 0 and len(signal_strengths) > 0
@@ -709,7 +709,7 @@ if (
     and st.session_state.intent_companies
     and not st.session_state.intent_companies_confirmed
 ):
-    labeled_divider("Step 2: Select Companies")
+    st.subheader("Step 2 — Select Companies")
     companies = st.session_state.intent_companies
 
     st.caption(f"Found **{len(companies)}** companies. Select which to search for contacts.")
@@ -838,9 +838,9 @@ if (
     and not st.session_state.intent_enrichment_done
 ):
     if st.session_state.intent_mode == "manual":
-        labeled_divider("Step 3: Find Contacts")
+        st.subheader("Step 3 — Find Contacts")
     else:
-        labeled_divider("Step 2: Find Contacts")
+        st.subheader("Step 2 — Find Contacts")
 
     selected_companies = st.session_state.intent_selected_companies
     company_ids = list(selected_companies.keys())
@@ -1178,9 +1178,9 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         st.warning("🧪 **TEST MODE** - Data shown is from search preview, not actual enrichment. No credits were used.", icon="⚠️")
 
     if st.session_state.intent_mode == "manual":
-        labeled_divider("Step 4: Results")
+        st.subheader("Step 4 — Results")
     else:
-        labeled_divider("Step 3: Results")
+        st.subheader("Step 3 — Results")
 
     enriched_contacts = st.session_state.intent_enriched_contacts
 

@@ -53,7 +53,7 @@ def _next_scheduled_run() -> tuple[str, str]:
     hours = int(delta.total_seconds() // 3600)
     minutes = int((delta.total_seconds() % 3600) // 60)
 
-    day_label = candidate.strftime("%a %b %-d")  # "Mon Feb 17"
+    day_label = candidate.strftime("%a %b %-d · 7 AM ET")  # "Mon Feb 17 · 7 AM ET"
     if hours < 24:
         countdown = f"{hours}h {minutes}m"
     else:
@@ -127,7 +127,7 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     day_label, countdown = _next_scheduled_run()
-    metric_card("Next Run", day_label, delta=countdown, delta_color="neutral")
+    metric_card("Next Run", countdown, delta=day_label, delta_color="neutral")
 
 with col2:
     if runs:
@@ -233,7 +233,18 @@ else:
                     st.markdown(f"**Completed:** {run.get('completed_at', '—')}")
 
                 if run.get("summary"):
-                    st.json(run["summary"])
+                    summary = run["summary"]
+                    if isinstance(summary, dict):
+                        _kv_parts = []
+                        for _k in ("contacts_exported", "credits_used", "companies_found", "errors"):
+                            if _k in summary:
+                                _kv_parts.append(f"**{_k.replace('_', ' ').title()}:** {summary[_k]}")
+                        if _kv_parts:
+                            st.markdown(" · ".join(_kv_parts))
+                        else:
+                            st.json(summary)
+                    else:
+                        st.json(summary)
                 st.divider()
 
     # Show more indicator
@@ -247,22 +258,23 @@ labeled_divider("Configuration")
 if not auto_config:
     st.warning("No automation config in `config/icp.yaml` under `automation.intent`")
 else:
-    st.caption("Read-only — edit config/icp.yaml to change")
+    with st.expander("Pipeline Configuration (read-only)", expanded=False):
+        st.caption("Edit config/icp.yaml to change")
 
-    cfg1, cfg2, cfg3 = st.columns(3)
-    with cfg1:
-        metric_card("Topics", ", ".join(auto_config.get("topics", [])))
-    with cfg2:
-        metric_card("Target Companies", auto_config.get("target_companies", "—"))
-    with cfg3:
-        strengths = auto_config.get("signal_strengths", [])
-        metric_card("Signal Strengths", ", ".join(strengths))
+        cfg1, cfg2, cfg3 = st.columns(3)
+        with cfg1:
+            metric_card("Topics", ", ".join(auto_config.get("topics", [])))
+        with cfg2:
+            metric_card("Target Companies", auto_config.get("target_companies", "—"))
+        with cfg3:
+            strengths = auto_config.get("signal_strengths", [])
+            metric_card("Signal Strengths", ", ".join(strengths))
 
-    cfg4, cfg5, cfg6 = st.columns(3)
-    with cfg4:
-        levels = auto_config.get("management_levels", [])
-        metric_card("Management Levels", ", ".join(levels))
-    with cfg5:
-        metric_card("Accuracy Min", auto_config.get("accuracy_min", "—"))
-    with cfg6:
-        metric_card("Dedup Days", auto_config.get("dedup_days_back", 180))
+        cfg4, cfg5, cfg6 = st.columns(3)
+        with cfg4:
+            levels = auto_config.get("management_levels", [])
+            metric_card("Management Levels", ", ".join(levels))
+        with cfg5:
+            metric_card("Accuracy Min", auto_config.get("accuracy_min", "—"))
+        with cfg6:
+            metric_card("Dedup Days", auto_config.get("dedup_days_back", 180))

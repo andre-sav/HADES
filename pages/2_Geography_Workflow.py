@@ -255,9 +255,9 @@ with mode_col1:
 
 with mode_col2:
     if st.session_state.geo_mode == "autopilot":
-        st.info("**Autopilot**: Search → Auto-select best per company → Enrich → Export (uses credits)", icon="🤖")
+        st.caption("Autopilot: Search → Auto-select best per company → Enrich → Export")
     else:
-        st.info("**Manual Review**: Search (free preview) → Select contacts (1 per company) → Enrich selected (uses credits) → Export", icon="👤")
+        st.caption("Manual: Search (free preview) → Select contacts → Enrich selected → Export")
 
 with mode_col3:
     _geo_test_sw = ui.switch(default_checked=st.session_state.geo_test_mode, label="Test Mode", key="geo_test_mode_switch")
@@ -317,6 +317,9 @@ if _run_state != "idle":
 # OPERATOR SELECTION
 # =============================================================================
 labeled_divider("Step 1: Select Operator")
+
+if not st.session_state.geo_operator:
+    st.info("Select an operator to search their service territory for ICP-matching contacts.", icon="👤")
 
 _OP_MODE_MAP = {"Existing Operator": "Select existing", "Enter Manually": "Enter manually"}
 _op_mode_tab = ui.tabs(

@@ -13,6 +13,7 @@ from utils import SIC_CODE_DESCRIPTIONS
 from ui_components import (
     inject_base_styles,
     page_header,
+    status_badge,
     metric_card,
     styled_table,
     empty_state,
@@ -47,6 +48,8 @@ CONFIG_PATH = Path(__file__).parent.parent / "config" / "icp.yaml"
 # =============================================================================
 page_header("Score Calibration", "Compare current weights to outcome data")
 
+st.info("Review scoring weights and SIC industry scores that determine lead priority. Calibrate based on delivery outcome data to improve targeting over time.")
+
 # =============================================================================
 # TABS
 # =============================================================================
@@ -67,7 +70,11 @@ if active_tab == "Current Weights":
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        metric_card("Last Calibration", last_cal)
+        if last_cal == "Never":
+            st.markdown(status_badge("warning", "Never calibrated"), unsafe_allow_html=True)
+            st.caption("Last Calibration")
+        else:
+            metric_card("Last Calibration", last_cal)
     with col2:
         all_sics = config.get("hard_filters", {}).get("sic_codes", [])
         metric_card("ICP SIC Codes", len(all_sics))
@@ -83,11 +90,17 @@ if active_tab == "Current Weights":
     sic_default = config.get("onsite_likelihood", {}).get("default", 40)
     all_sics = config.get("hard_filters", {}).get("sic_codes", [])
 
+    _sic_filter = st.text_input("Filter", placeholder="Search by code or industry...", key="sic_table_filter")
+
     sic_rows = []
     for sic in sorted(all_sics):
         score = sic_scores.get(sic, sic_default)
         source = "calibrated" if sic in sic_scores else "default"
         desc = SIC_CODE_DESCRIPTIONS.get(sic, "Unknown")
+        if _sic_filter:
+            _q = _sic_filter.lower()
+            if _q not in sic.lower() and _q not in desc.lower():
+                continue
         sic_rows.append({"SIC": sic, "Industry": desc, "Score": score, "Source": source})
 
     styled_table(
@@ -102,6 +115,7 @@ if active_tab == "Current Weights":
 
     # Employee Scale table
     labeled_divider("Employee Scale")
+    st.caption("Employee score contributes ~25% of total ICP score. Smaller companies convert more often based on delivery data.")
     emp_rows = []
     for tier in config.get("employee_scale", []):
         label = f"{tier['min']}-{tier['max']}" if tier["max"] < 999999 else f"{tier['min']}+"
