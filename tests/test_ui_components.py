@@ -350,14 +350,17 @@ class TestXSSEscaping:
         assert "&lt;img" in html
 
     def test_score_breakdown_escapes_management_level(self):
-        """Management level from API should be HTML-escaped."""
+        """Management level from API should be HTML-escaped via generate_score_summary."""
         contact = {
-            "contactAccuracyScore": 95,
+            "_score": 70,
+            "_proximity_score": 80,
+            "_onsite_score": 60,
+            "_authority_score": 70,
+            "_employee_score": 50,
             "managementLevel": '<b onmouseover="alert(1)">Manager</b>',
         }
-        html = score_breakdown(contact)
+        html = score_breakdown(contact, "geography")
         assert 'onmouseover="alert(1)"' not in html
-        assert "&lt;b" in html
 
 
 class TestExpansionTimeline:
@@ -422,3 +425,69 @@ class TestExpansionTimeline:
         ]
         html = expansion_timeline(steps, target=25, target_met=False)
         assert "10mi" in html
+
+
+class TestScoreBreakdown:
+    """Tests for score_breakdown() horizontal bar component."""
+
+    def test_geography_renders_all_bars(self):
+        from ui_components import score_breakdown
+        lead = {
+            "_score": 78, "_proximity_score": 85, "_onsite_score": 40,
+            "_authority_score": 75, "_employee_score": 60,
+            "_distance_miles": 3.2, "sicCode": "7011",
+            "managementLevel": "Director", "employees": 250,
+        }
+        html = score_breakdown(lead, "geography")
+        assert "Proximity" in html
+        assert "Industry" in html
+        assert "Authority" in html
+        assert "Company Size" in html
+
+    def test_intent_renders_all_bars(self):
+        from ui_components import score_breakdown
+        lead = {
+            "_score": 72, "_company_intent_score": 85,
+            "_authority_score": 60, "_accuracy_score": 100,
+            "_phone_score": 70, "managementLevel": "Manager",
+        }
+        html = score_breakdown(lead, "intent")
+        assert "Intent Signal" in html
+        assert "Authority" in html
+        assert "Accuracy" in html
+        assert "Phone" in html
+
+    def test_bar_color_green_for_high_score(self):
+        from ui_components import score_breakdown
+        lead = {
+            "_score": 90, "_proximity_score": 95, "_onsite_score": 80,
+            "_authority_score": 85, "_employee_score": 75,
+        }
+        html = score_breakdown(lead, "geography")
+        assert "#22c55e" in html
+
+    def test_bar_color_yellow_for_moderate_score(self):
+        from ui_components import score_breakdown
+        lead = {
+            "_score": 55, "_proximity_score": 50, "_onsite_score": 45,
+            "_authority_score": 40, "_employee_score": 55,
+        }
+        html = score_breakdown(lead, "geography")
+        assert "#eab308" in html
+
+    def test_summary_line_included(self):
+        from ui_components import score_breakdown
+        lead = {
+            "_score": 78, "_proximity_score": 85, "_onsite_score": 40,
+            "_authority_score": 75, "_employee_score": 60,
+            "_distance_miles": 3.2, "sicCode": "7011",
+            "managementLevel": "Director", "employees": 250,
+        }
+        html = score_breakdown(lead, "geography")
+        # Summary uses · separator from generate_score_summary
+        assert "\u00b7" in html
+
+    def test_empty_lead_no_crash(self):
+        from ui_components import score_breakdown
+        html = score_breakdown({}, "geography")
+        assert isinstance(html, str)

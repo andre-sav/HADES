@@ -1986,55 +1986,70 @@ def review_controls_bar(
 
 
 # =============================================================================
-# SCORE BREAKDOWN (Phase 3)
+# SCORE BREAKDOWN (Phase 3 — horizontal bar component)
 # =============================================================================
 
-def score_breakdown(contact: dict) -> str:
-    """
-    Generate a score breakdown explanation for a contact.
+def score_breakdown(lead: dict, workflow_type: str) -> str:
+    """Render score breakdown as HTML with horizontal bars per component.
 
     Args:
-        contact: Contact dictionary with scoring fields
+        lead: Lead dict with _score and component score fields
+        workflow_type: "geography" or "intent"
 
     Returns:
-        HTML string showing score breakdown
+        HTML string for rendering with st.markdown(unsafe_allow_html=True)
     """
-    parts = []
+    from scoring import generate_score_summary, get_priority_action
 
-    # Accuracy score contribution
-    accuracy = contact.get("contactAccuracyScore", 0)
-    if accuracy >= 95:
-        parts.append(f"<span style='color:{COLORS['success']}'>Accuracy {accuracy} (+20)</span>")
-    elif accuracy >= 85:
-        parts.append(f"<span style='color:{COLORS['warning']}'>Accuracy {accuracy} (+10)</span>")
+    score = lead.get("_score", 0)
+    action = html_mod.escape(get_priority_action(score))
+    summary = html_mod.escape(generate_score_summary(lead, workflow_type))
+
+    if workflow_type == "geography":
+        components = [
+            ("Proximity", lead.get("_proximity_score", 0)),
+            ("Industry", lead.get("_onsite_score", 0)),
+            ("Authority", lead.get("_authority_score", 0)),
+            ("Company Size", lead.get("_employee_score", 0)),
+        ]
+    elif workflow_type == "intent":
+        components = [
+            ("Intent Signal", lead.get("_company_intent_score", 0)),
+            ("Authority", lead.get("_authority_score", 0)),
+            ("Accuracy", lead.get("_accuracy_score", 0)),
+            ("Phone", lead.get("_phone_score", 0)),
+        ]
     else:
-        parts.append(f"<span style='color:{COLORS['text_muted']}'>Accuracy {accuracy}</span>")
+        components = []
 
-    # Mobile phone bonus
-    if contact.get("mobilePhone"):
-        parts.append(f"<span style='color:{COLORS['success']}'>Mobile ✓ (+15)</span>")
-    else:
-        parts.append(f"<span style='color:{COLORS['text_muted']}'>No mobile</span>")
+    def _bar_color(val: int) -> str:
+        if val >= 70:
+            return "#22c55e"
+        elif val >= 40:
+            return "#eab308"
+        return COLORS.get("text_secondary", "#64748b")
 
-    # Management level
-    mgmt = contact.get("managementLevel", "")
-    if mgmt:
-        safe_mgmt = html_mod.escape(str(mgmt))
-        if mgmt in ("VP", "C-Level"):
-            parts.append(f"<span style='color:{COLORS['success']}'>{safe_mgmt}</span>")
-        elif mgmt == "Director":
-            parts.append(f"<span style='color:{COLORS['warning']}'>{safe_mgmt}</span>")
-        else:
-            parts.append(f"<span style='color:{COLORS['text_muted']}'>{safe_mgmt}</span>")
+    bars_html = ""
+    for label, val in components:
+        color = _bar_color(val)
+        width = max(2, val)  # min 2% width so bar is visible
+        bars_html += (
+            f'<div style="display: flex; align-items: center; gap: 8px; margin: 4px 0;">'
+            f'<span style="width: 100px; font-size: 0.8rem; color: {COLORS.get("text_secondary", "#94a3b8")};">{label}</span>'
+            f'<div style="flex: 1; height: 8px; background: {COLORS.get("bg_primary", "#0d1117")}; border-radius: 4px; overflow: hidden;">'
+            f'<div style="width: {width}%; height: 100%; background: {color}; border-radius: 4px;"></div>'
+            f'</div>'
+            f'<span style="width: 30px; font-size: 0.8rem; font-family: \'IBM Plex Mono\', monospace; color: {COLORS.get("text_primary", "#e2e8f0")}; text-align: right;">{val}</span>'
+            f'</div>'
+        )
 
-    # Location type
-    loc_type = contact.get("_location_type", "")
-    if loc_type == "PersonAndHQ":
-        parts.append(f"<span style='color:{COLORS['success']}'>HQ+Person (+10)</span>")
-    elif loc_type == "Person":
-        parts.append(f"<span style='color:{COLORS['warning']}'>Branch only (+5)</span>")
-
-    return " · ".join(parts)
+    return (
+        f'<div style="padding: 8px 0;">'
+        f'<div style="font-size: 0.85rem; color: {COLORS.get("text_secondary", "#94a3b8")}; margin-bottom: 8px;">{summary}</div>'
+        f'{bars_html}'
+        f'<div style="font-size: 0.8rem; color: {COLORS.get("text_secondary", "#94a3b8")}; margin-top: 6px; font-style: italic;">{action}</div>'
+        f'</div>'
+    )
 
 
 # =============================================================================

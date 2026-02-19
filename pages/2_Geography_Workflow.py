@@ -1283,8 +1283,8 @@ if (
                     # Show score breakdown for best contact (Phase 3 UX)
                     if contacts:
                         best_contact = contacts[0]
-                        breakdown = score_breakdown(best_contact)
-                        st.markdown(f"<small>{breakdown}</small>", unsafe_allow_html=True)
+                        breakdown = score_breakdown(best_contact, "geography")
+                        st.markdown(breakdown, unsafe_allow_html=True)
                         # Company context line: city/state, website, phone
                         ctx_parts = []
                         city = best_contact.get("companyCity", "")
