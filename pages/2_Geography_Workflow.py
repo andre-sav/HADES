@@ -32,7 +32,7 @@ from zoominfo_client import (
     ContactEnrichParams,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
-from scoring import score_geography_leads, get_priority_label
+from scoring import score_geography_leads, get_priority_label, get_priority_action
 from dedup import dedupe_leads
 from export_dedup import apply_export_dedup
 from cost_tracker import CostTracker
@@ -1598,6 +1598,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         radius = st.session_state.geo_query_params.get("radius_miles", 0)
         lead["_lead_source"] = f"ZoomInfo Geo - {zip_codes[0] if zip_codes else ''} - {radius}mi"
         lead["_priority"] = get_priority_label(lead.get("_score", 0))
+        lead["_priority_action"] = get_priority_action(lead.get("_score", 0))
 
     st.session_state.geo_results = scored
 
@@ -1648,6 +1649,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
 
             display_data.append({
                 "_idx": idx,
+                "_priority_label": lead.get("_priority", ""),
                 "Name": f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip(),
                 "Title": lead.get("jobTitle", ""),
                 "Company": lead.get("companyName", "") or (lead.get("company", {}).get("name", "") if isinstance(lead.get("company"), dict) else ""),
@@ -1656,7 +1658,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                 "Loc Type": loc_type_display,
                 "Score": lead.get("_score", 0),
                 "Accuracy": lead.get("contactAccuracyScore", 0),
-                "Priority": lead.get("_priority", ""),
+                "Priority": lead.get("_priority_action", lead.get("_priority", "")),
                 "Phone": lead.get("directPhone", "") or lead.get("phone", ""),
                 "Email": lead.get("email", ""),
             })
@@ -1688,7 +1690,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         # Apply filters
         if not df.empty:
             filtered_df = df[
-                df["Priority"].isin(priority_filter) &
+                df["_priority_label"].isin(priority_filter) &
                 df["State"].isin(state_filter)
             ]
         else:
@@ -1696,7 +1698,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
 
         # Display table
         st.dataframe(
-            filtered_df.drop(columns=["_idx"]),
+            filtered_df.drop(columns=["_idx", "_priority_label"]),
             use_container_width=True,
             hide_index=True,
             column_config={
@@ -1708,11 +1710,21 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                 "Loc Type": st.column_config.TextColumn("Loc Type", width="small", help="HQ+Person = local HQ, Person-only = branch office"),
                 "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, width="small"),
                 "Accuracy": st.column_config.NumberColumn("Accuracy", width="small"),
-                "Priority": st.column_config.TextColumn("Priority", width="small"),
+                "Priority": st.column_config.TextColumn("Priority", width="medium"),
                 "Phone": st.column_config.TextColumn("Phone", width="medium"),
                 "Email": st.column_config.TextColumn("Email", width="medium"),
             },
         )
+
+        # Score breakdown expander
+        with st.expander("Score details", expanded=False):
+            for lead in scored_leads:
+                name = f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip()
+                company = lead.get("companyName", "Unknown")
+                score_val = lead.get("_score", 0)
+                st.markdown(f"**{name}** \u00b7 {company} \u00b7 {score_val}%")
+                st.markdown(score_breakdown(lead, "geography"), unsafe_allow_html=True)
+                st.markdown("---")
 
         # Export section
         st.markdown("---")
@@ -1727,7 +1739,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                 st.caption(f"Export for: **{op.get('operator_name')}** · {op.get('vending_business_name') or 'N/A'}")
 
         with col2:
-            csv = filtered_df.drop(columns=["_idx"]).to_csv(index=False)
+            csv = filtered_df.drop(columns=["_idx", "_priority_label"]).to_csv(index=False)
             st.download_button(
                 "📥 Quick Preview CSV",
                 data=csv,
