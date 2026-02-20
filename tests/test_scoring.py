@@ -794,7 +794,7 @@ class TestPriorityAction:
 
     def test_medium_score_action(self):
         from scoring import get_priority_action
-        assert get_priority_action(70) == "Good prospect — review details"
+        assert get_priority_action(70) == "Good prospect — worth a call"
 
     def test_low_score_action(self):
         from scoring import get_priority_action
@@ -810,7 +810,7 @@ class TestPriorityAction:
 
     def test_boundary_60(self):
         from scoring import get_priority_action
-        assert get_priority_action(60) == "Good prospect — review details"
+        assert get_priority_action(60) == "Good prospect — worth a call"
 
 
 class TestScoreSummary:

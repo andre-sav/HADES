@@ -427,16 +427,17 @@ if push_clicked and _vs_push_available:
             if not matched:
                 continue
             features = {k: v for k, v in lead.items() if k.startswith("_") and v is not None}
+            co = lead.get("company") if isinstance(lead.get("company"), dict) else {}
             outcome_rows.append((
                 batch_id,
-                lead.get("companyName", ""),
-                str(lead.get("companyId", "")) if lead.get("companyId") else None,
+                lead.get("companyName", "") or co.get("name", ""),
+                str(lead.get("companyId") or co.get("id", "")) or None,
                 str(lead.get("personId", "")) if lead.get("personId") else None,
-                lead.get("sicCode") or lead.get("_sic_code"),
-                lead.get("employees") or lead.get("numberOfEmployees"),
+                lead.get("sicCode") or lead.get("_sic_code") or co.get("sicCode"),
+                lead.get("employees") or lead.get("numberOfEmployees") or co.get("employeeCount"),
                 lead.get("_distance_miles"),
-                lead.get("zip") or lead.get("zipCode"),
-                lead.get("state"),
+                lead.get("zip") or lead.get("zipCode") or co.get("zip"),
+                lead.get("state") or co.get("state"),
                 lead.get("_score"),
                 workflow_type,
                 now_iso,

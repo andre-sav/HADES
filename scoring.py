@@ -447,7 +447,7 @@ def get_priority_action(score: int) -> str:
     if score >= 80:
         return "Call first — strong match"
     elif score >= 60:
-        return "Good prospect — review details"
+        return "Good prospect — worth a call"
     else:
         return "Lower fit — call if capacity allows"
 
