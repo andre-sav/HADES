@@ -4,7 +4,6 @@ HADES - ZoomInfo Lead Pipeline
 
 import streamlit as st
 import streamlit_shadcn_ui as ui
-import pandas as pd
 from datetime import datetime
 from ui_components import (
     inject_base_styles,
@@ -12,7 +11,6 @@ from ui_components import (
     status_badge,
     last_run_indicator,
     metric_card,
-    styled_table,
     empty_state,
     labeled_divider,
     COLORS,
@@ -58,16 +56,9 @@ _quick_actions = [
 
 for qa in _quick_actions:
     with qa["col"]:
-        st.markdown(
-            f"""<div class="quick-action">
-                <div class="qa-step">{qa['step']}</div>
-                <div class="icon">{qa['icon']}</div>
-                <div class="title">{qa['title']}</div>
-                <div class="desc">{qa['desc']}</div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-        st.page_link(qa["page"], label=f"Open {qa['title']}", use_container_width=True)
+        st.caption(qa["step"].upper())
+        st.page_link(qa["page"], label=f"{qa['icon']} {qa['title']}", use_container_width=True)
+        st.caption(qa["desc"])
 
 
 # =============================================================================
@@ -94,9 +85,12 @@ with status_col2:
             _ts = last_intent.get("created_at", "")
             _dt = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
             _hours = (datetime.now() - _dt.replace(tzinfo=None)).total_seconds() / 3600
-            _freshness = status_badge("success", "Active") if _hours < 6 else status_badge("warning", "Stale")
+            if _hours < 6:
+                _freshness = status_badge("success", "Active", tooltip="Last run within 6 hours")
+            else:
+                _freshness = status_badge("warning", "Stale", tooltip=f"No queries in {int(_hours)}h — run a new search to refresh")
         except (ValueError, TypeError):
-            _freshness = status_badge("neutral", "Unknown")
+            _freshness = status_badge("neutral", "Unknown", tooltip="Could not determine last run time")
         st.markdown(_freshness, unsafe_allow_html=True)
     st.caption("Intent")
     last_run_indicator(last_intent)
@@ -107,9 +101,12 @@ with status_col3:
             _ts = last_geo.get("created_at", "")
             _dt = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
             _hours = (datetime.now() - _dt.replace(tzinfo=None)).total_seconds() / 3600
-            _freshness = status_badge("success", "Active") if _hours < 6 else status_badge("warning", "Stale")
+            if _hours < 6:
+                _freshness = status_badge("success", "Active", tooltip="Last run within 6 hours")
+            else:
+                _freshness = status_badge("warning", "Stale", tooltip=f"No queries in {int(_hours)}h — run a new search to refresh")
         except (ValueError, TypeError):
-            _freshness = status_badge("neutral", "Unknown")
+            _freshness = status_badge("neutral", "Unknown", tooltip="Could not determine last run time")
         st.markdown(_freshness, unsafe_allow_html=True)
     st.caption("Geography")
     last_run_indicator(last_geo)
@@ -151,34 +148,48 @@ labeled_divider("Recent Runs")
 recent_display = db.get_recent_queries(limit=10)
 
 if recent_display:
-    st.caption("Recent runs")
-
-    table_data = []
     for q in recent_display:
         workflow = q["workflow_type"].title()
         leads = q.get("leads_returned", 0) or 0
         exported = q.get("leads_exported", 0) or 0
         created = q.get("created_at", "")[:16] if q.get("created_at") else ""
-        export_status = "Exported" if exported > 0 else "Not exported"
+        export_tag = "exported" if exported > 0 else "not exported"
+        params = q.get("query_params", {}) or {}
 
-        table_data.append({
-            "time": created,
-            "workflow": workflow,
-            "leads": leads,
-            "exported": exported,
-            "status": export_status,
-        })
-
-    styled_table(
-        rows=table_data,
-        columns=[
-            {"key": "time", "label": "Time"},
-            {"key": "workflow", "label": "Workflow"},
-            {"key": "leads", "label": "Leads", "align": "right", "mono": True},
-            {"key": "exported", "label": "Exported", "align": "right", "mono": True},
-            {"key": "status", "label": "Status", "pill": {"Exported": "success", "Not exported": "muted"}},
-        ],
-    )
+        header = f"{created} · **{workflow}** · {leads} leads · {export_tag}"
+        with st.expander(header):
+            if params:
+                # Format query params as readable key-value pairs
+                _display_keys = {
+                    "zip_codes": "ZIP Codes",
+                    "zip_count": "ZIP Count",
+                    "radius_miles": "Radius (mi)",
+                    "center_zip": "Center ZIP",
+                    "location_mode": "Location Mode",
+                    "states": "States",
+                    "topic": "Topic",
+                    "topics": "Topics",
+                    "signal_strength": "Signal Strength",
+                    "signal_strengths": "Signal Strengths",
+                    "employee_range": "Employee Range",
+                    "management_levels": "Management Levels",
+                    "accuracy_min": "Min Accuracy",
+                    "target_contacts": "Target Contacts",
+                    "target_companies": "Target Companies",
+                    "sic_codes": "SIC Codes",
+                    "sic_codes_count": "SIC Codes Count",
+                    "location_search_type": "Location Search",
+                    "location_type": "Location Type",
+                    "phone_fields": "Required Phone Fields",
+                    "mode": "Workflow Mode",
+                }
+                for key, val in params.items():
+                    label = _display_keys.get(key, key.replace("_", " ").title())
+                    if isinstance(val, list):
+                        val = ", ".join(str(v) for v in val)
+                    st.markdown(f"**{label}:** {val}")
+            else:
+                st.caption("No query details recorded")
 else:
     empty_state(
         "No recent activity",

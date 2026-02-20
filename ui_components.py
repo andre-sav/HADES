@@ -570,6 +570,9 @@ def inject_base_styles():
         line-height: 1;
         min-height: 24px;
     }}
+    .status-badge[title] {{
+        cursor: help;
+    }}
 
     .status-badge-success {{
         background-color: {COLORS['success_bg']};
@@ -1174,6 +1177,7 @@ def status_badge(
     status: StatusType,
     label: str,
     icon: Optional[str] = None,
+    tooltip: Optional[str] = None,
 ) -> str:
     """
     Create a colored status badge (replaces emoji indicators).
@@ -1182,6 +1186,7 @@ def status_badge(
         status: One of "success", "warning", "error", "info", "neutral"
         label: The badge text
         icon: Optional icon character
+        tooltip: Optional hover tooltip text
 
     Returns:
         HTML string for the badge (WCAG AA compliant)
@@ -1190,8 +1195,9 @@ def status_badge(
         st.markdown(status_badge("success", "Active"), unsafe_allow_html=True)
     """
     icon_html = f"{icon} " if icon else ""
+    title_attr = f' title="{tooltip}"' if tooltip else ""
     # Add ARIA role for accessibility
-    return f'<span class="status-badge status-badge-{status}" role="status">{icon_html}{label}</span>'
+    return f'<span class="status-badge status-badge-{status}" role="status"{title_attr}>{icon_html}{label}</span>'
 
 
 def status_badge_from_percent(

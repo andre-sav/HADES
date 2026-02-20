@@ -432,6 +432,11 @@ if search_clicked:
         st.session_state.intent_query_params = {
             "topics": selected_topics,
             "signal_strengths": signal_strengths,
+            "target_companies": target_companies,
+            "management_levels": intent_mgmt_levels,
+            "accuracy_min": intent_accuracy_min,
+            "phone_fields": intent_phone_fields,
+            "mode": st.session_state.intent_mode,
         }
         st.session_state["_intent_dedup_removed"] = removed
 
@@ -533,6 +538,11 @@ if search_clicked:
                     st.session_state.intent_query_params = {
                         "topics": selected_topics,
                         "signal_strengths": signal_strengths,
+                        "target_companies": target_companies,
+                        "management_levels": intent_mgmt_levels,
+                        "accuracy_min": intent_accuracy_min,
+                        "phone_fields": intent_phone_fields,
+                        "mode": st.session_state.intent_mode,
                     }
                     st.session_state["_intent_dedup_removed"] = removed
 
@@ -1183,6 +1193,33 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         st.subheader("Step 3 — Results")
 
     enriched_contacts = st.session_state.intent_enriched_contacts
+
+    # Merge pre-enrichment metadata
+    # Enrichment replaces contact objects entirely, losing search-only fields
+    pre_enrichment = {}
+    for company_id, contact in (st.session_state.intent_selected_contacts or {}).items():
+        pid = str(contact.get("personId") or contact.get("id") or "")
+        if pid:
+            pre_enrichment[pid] = {
+                "companyName": contact.get("companyName", ""),
+                "companyId": contact.get("companyId", ""),
+                "sicCode": contact.get("sicCode", ""),
+                "employees": contact.get("employees") or contact.get("employeeCount", ""),
+                "industry": contact.get("industry", ""),
+                "directPhone": contact.get("directPhone", ""),
+            }
+
+    for contact in enriched_contacts:
+        pid = str(contact.get("id") or contact.get("personId") or "")
+        pre = pre_enrichment.get(pid, {})
+        # Restore fields from pre-enrichment data that enrichment drops
+        for field in ("companyName", "companyId", "sicCode", "employees", "industry", "directPhone"):
+            if not contact.get(field) and pre.get(field):
+                contact[field] = pre[field]
+        # Normalize enrich-specific field names
+        if not contact.get("companyName"):
+            co = contact.get("company")
+            contact["companyName"] = co.get("name", "") if isinstance(co, dict) else ""
 
     # Build company_scores dict for scoring
     company_scores = {}

@@ -1,7 +1,76 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-19
-**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24).
+**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25).
+
+## Session Summary (2026-02-19, Session 25)
+
+### Structural UX Fixes — 6 Issues Found & Fixed
+
+User-driven review caught structural UX issues that cosmetic reviews (sessions 22/24) missed. All fixes verified in browser via Playwright. 578 tests passing.
+
+**Fix 1 — Home page duplication removed:**
+- Quick-action cards + "Open X" buttons were triple-redundant with sidebar navigation
+- Replaced card HTML + button combo with single `st.page_link` per action + captions
+- Removed unused `styled_table` and `pandas` imports from home page
+
+**Fix 2 — Recent Runs now clickable:**
+- Replaced static `styled_table` with `st.expander` rows
+- Each run expandable to show query parameters (ZIPs, radius, states, filters, etc.)
+- Added comprehensive display key mapping for all parameter names
+
+**Fix 3 — Intent query logging enriched:**
+- Was logging only 2 fields (topics, signal_strengths) — now logs 7
+- Added: target_companies, management_levels, accuracy_min, phone_fields, mode
+- Matches Geography workflow's logging depth (9 fields)
+
+**Fix 4 — "Unknown" company name bug fixed:**
+- Intent workflow had NO pre-enrichment field preservation (Geography had it since session 17)
+- Enrich API replaces contact objects, losing `companyName` field
+- Added pre-enrichment save/restore pattern matching Geography workflow
+- Also added nested `company.name` fallback in CSV Export display (2 locations)
+
+**Fix 5 — Stale badge tooltip added:**
+- `status_badge()` now accepts `tooltip` parameter (HTML `title` attribute)
+- Stale badges show "No queries in {N}h — run a new search to refresh"
+- Active badges show "Last run within 6 hours"
+- Added `cursor: help` CSS for badges with tooltips
+
+**Fix 6 — UX review prompt documented:**
+- Created `docs/ux-review-prompt.md` — reusable 4-phase review methodology
+- Phases: User Journey Walkthroughs → Structural Analysis → Cross-Cutting Concerns → Optimization Proposals
+- Designed to catch structural issues that cosmetic reviews miss
+
+### Key Files Modified (Session 25)
+```
+app.py                         - Quick actions consolidated, expander runs, stale tooltips
+pages/1_Intent_Workflow.py     - Pre-enrichment field preservation, enriched query logging
+pages/4_CSV_Export.py          - Nested company.name fallback (2 locations)
+ui_components.py               - status_badge tooltip param, cursor:help CSS
+docs/ux-review-prompt.md       - NEW: reusable UX review prompt
+```
+
+### Uncommitted Changes
+5 files (4 modified + 1 new). Ready to commit.
+
+### Test Count
+578 tests passing (unchanged — UI-only fixes)
+
+### What Needs Doing Next Session
+1. **Deploy to Streamlit Community Cloud** — app is code-complete, secrets need configuring
+2. **Delete test contacts in VanillaSoft** — 4-5 duplicates from testing
+3. **Enable "Update existing contacts" in VanillaSoft** — Set Update Key = Email
+4. **Live test Contact Enrich** — API parses correctly, untested with production data
+5. **Run full UX review** — Use `docs/ux-review-prompt.md` for comprehensive structural review
+6. **Plan compliance gaps** — HADES-umv (P4, 9 items)
+7. **Zoho CRM dedup check at export** — HADES-iic (P4)
+8. **Configure SMTP secrets** — For GitHub Actions email delivery
+
+### Open Beads (2)
+- HADES-umv [P4 task] — Plan compliance: missing CTA, error log, PII enforcement, doc updates
+- HADES-iic [P4 feature] — Add Zoho CRM dedup check at export time
+
+---
 
 ## Session Summary (2026-02-19, Session 24)
 

@@ -178,7 +178,7 @@ if intent_leads and geo_leads:
 
             dup_rows = []
             for i, dup in enumerate(duplicates):
-                company1 = dup["lead1"].get("companyName", "Unknown")
+                company1 = dup["lead1"].get("companyName") or (dup["lead1"].get("company", {}).get("name", "") if isinstance(dup["lead1"].get("company"), dict) else "") or "Unknown"
                 score1 = dup["lead1"].get("_score", 0)
                 score2 = dup["lead2"].get("_score", 0)
                 winner = "current" if score1 >= score2 else other_name.lower()
@@ -267,7 +267,7 @@ elif warning_checks:
 with st.expander(f"Lead score details ({len(leads_to_export)} leads)", expanded=False):
     for lead in leads_to_export:
         name = f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip()
-        company = lead.get("companyName", "Unknown")
+        company = lead.get("companyName") or (lead.get("company", {}).get("name", "") if isinstance(lead.get("company"), dict) else "") or "Unknown"
         score = lead.get("_score", 0)
         st.markdown(f"**{name}** · {company} · {score}%")
         st.markdown(score_breakdown(lead, workflow_type), unsafe_allow_html=True)
