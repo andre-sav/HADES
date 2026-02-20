@@ -1,7 +1,53 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-19
-**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27).
+**Date:** 2026-02-20
+**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28).
+
+## Session Summary (2026-02-20, Session 28)
+
+### Operators Page: Select-Then-Act + Design Overhaul
+
+Replaced per-row shadcn Edit/Delete buttons with a select-then-act pattern to eliminate iframe bloat (~60 iframes → max 3). Rebuilt operator rows as custom HTML for full typographic control. Ran design critique and frontend-design passes to refine density, typography, and visual hierarchy.
+
+**Performance fix:**
+- Each operator row previously rendered 3 shadcn iframes (Edit + Delete + alert_dialog)
+- Now: native `st.button("⋮")` per row, shadcn buttons only for the selected operator
+- 20 operators × 3 iframes = 60 → max 3 iframes on the page
+
+**Design refinements:**
+- Operator rows rendered as custom HTML (`op-row` class) with display font names, inline muted business names, monospace contact info
+- Removed emoji from contact info (📞 ✉️ 📍 🌐) → clean `·` separators with clickable `mailto:` email links
+- Removed per-row dividers + empty spacers → subtle CSS border-bottom, 3x density improvement
+- Tertiary buttons (⋮/✕) styled at 40% opacity, brighten on hover
+- Missing business names omitted instead of showing "—"
+- Visible operators above fold: ~4 → ~12
+
+**Deployment prep:**
+- Verified SCC readiness: requirements.txt, config.toml, data files, secrets.gitignore
+- DEV_MODE pages (Pipeline Test, API Discovery) gated — won't show in production
+- Walked through SCC deployment steps (not yet deployed)
+
+### Key Files Modified (Session 28)
+```
+pages/3_Operators.py   - Select-then-act pattern, custom HTML row rendering
+ui_components.py       - Operator row CSS, tertiary button hover styles
+```
+
+### Beads Closed
+- HADES-wmv: Replace shadcn buttons on Operators page (resolved via select-then-act)
+
+### Uncommitted Changes
+None. All work committed and pushed.
+
+### Test Count
+578 tests passing (unchanged — display-layer changes only)
+
+### What Needs Doing Next Session
+1. **Deploy to Streamlit Community Cloud** — repo connected, secrets need configuring in SCC dashboard
+2. **Remaining UX beads (9 ready)** — HADES-amm (export history), HADES-fvm (auto-fetch usage), HADES-tku (recent operators), HADES-3sw (automation on Home), etc.
+3. **Production testing** — verify app works on SCC with real Turso/ZoomInfo connections
+
+---
 
 ## Session Summary (2026-02-19, Session 27)
 
