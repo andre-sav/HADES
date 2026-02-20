@@ -130,18 +130,31 @@ def _track_health(label, status, detail):
     _health_statuses.append({"label": label, "status": status, "detail": detail})
 
 
-# 1. Last Successful Query
+# 1. Last Activity (manual queries OR automated pipeline runs)
 last_intent = db.get_last_query("intent")
 last_geo = db.get_last_query("geography")
 
-# Pick the most recent
+# Also check pipeline_runs (automated runs log there, not query_history)
+_intent_runs = db.get_pipeline_runs("intent", limit=1)
+_last_intent_run = _intent_runs[0] if _intent_runs else None
+
+# Pick the most recent activity from any source
+_candidates = []
+if last_intent:
+    _candidates.append(("query", last_intent))
+if last_geo:
+    _candidates.append(("query", last_geo))
+if _last_intent_run:
+    # Normalize pipeline_run to look like a query for the staleness check
+    _candidates.append(("run", {
+        "workflow_type": _last_intent_run["workflow_type"],
+        "leads_returned": _last_intent_run.get("leads_exported", 0),
+        "created_at": _last_intent_run.get("completed_at") or _last_intent_run.get("created_at", ""),
+    }))
+
 last_query = None
-if last_intent and last_geo:
-    last_query = last_intent if (last_intent.get("created_at", "") >= last_geo.get("created_at", "")) else last_geo
-elif last_intent:
-    last_query = last_intent
-elif last_geo:
-    last_query = last_geo
+if _candidates:
+    last_query = max(_candidates, key=lambda c: c[1].get("created_at", ""))[1]
 
 # Compute all health statuses first
 if last_query:
