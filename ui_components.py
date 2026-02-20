@@ -1059,6 +1059,71 @@ def inject_base_styles():
     }}
 
     /* ================================================================
+       OPERATOR ROW
+       ================================================================ */
+    /* Tertiary buttons used as row actions (⋮ / ✕) */
+    button[data-testid="stBaseButton-tertiary"] {{
+        opacity: 0.4;
+        transition: opacity var(--transition) !important;
+    }}
+
+    button[data-testid="stBaseButton-tertiary"]:hover {{
+        opacity: 1;
+    }}
+
+    /* ================================================================
+       OPERATOR LIST ROWS
+       ================================================================ */
+    .op-row {{
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: {SPACING['lg']};
+        padding: 10px 0 8px;
+        border-bottom: 1px solid {COLORS['border']}30;
+    }}
+
+    .op-row .op-name {{
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: {FONT_SIZES['base']};
+        color: {COLORS['text_primary']};
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }}
+
+    .op-row .op-biz {{
+        font-size: {FONT_SIZES['xs']};
+        color: {COLORS['text_muted']};
+        margin-left: {SPACING['sm']};
+        font-weight: 400;
+    }}
+
+    .op-row .op-contact {{
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        color: {COLORS['text_secondary']};
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }}
+
+    .op-row .op-contact a {{
+        color: {COLORS['primary_light']};
+        text-decoration: none;
+    }}
+
+    .op-row .op-contact a:hover {{
+        text-decoration: underline;
+    }}
+
+    .op-row .op-contact .sep {{
+        color: {COLORS['border_light']};
+        margin: 0 6px;
+    }}
+
+    /* ================================================================
        SHADCN UI IFRAME
        ================================================================ */
     iframe[title*="streamlit_shadcn_ui"] {{

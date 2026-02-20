@@ -3,6 +3,8 @@ Operators - Manage operator metadata.
 Superhuman-inspired: clean, focused, inline editing.
 """
 
+import html as html_mod
+
 import streamlit as st
 import streamlit_shadcn_ui as ui
 from turso_db import get_database
@@ -47,6 +49,8 @@ if "operators_editing_id" not in st.session_state:
     st.session_state.operators_editing_id = None
 if "operators_adding" not in st.session_state:
     st.session_state.operators_adding = False
+if "operators_selected_id" not in st.session_state:
+    st.session_state.operators_selected_id = None
 
 
 # =============================================================================
@@ -258,6 +262,7 @@ else:
 
     for op in page_items:
         is_editing = st.session_state.operators_editing_id == op["id"]
+        is_selected = st.session_state.operators_selected_id == op["id"]
 
         if is_editing:
             # Edit mode
@@ -300,37 +305,51 @@ else:
                     st.rerun()
 
         else:
-            # Display mode - show all operator fields
-            col1, col2, col3 = st.columns([4, 4, 2])
+            # Build operator row as single HTML block for typographic control
+            safe_name = html_mod.escape(op["operator_name"])
+            biz = op["vending_business_name"]
+            biz_html = f'<span class="op-biz">{html_mod.escape(biz)}</span>' if biz else ""
 
-            with col1:
-                st.markdown(f"**{op['operator_name']}**")
-                st.caption(op["vending_business_name"] or "—")
+            contact_parts = []
+            if op["operator_phone"]:
+                contact_parts.append(html_mod.escape(format_phone(op['operator_phone'])))
+            if op["operator_email"]:
+                email = html_mod.escape(op['operator_email'])
+                contact_parts.append(f'<a href="mailto:{email}">{email}</a>')
+            if op["operator_zip"]:
+                contact_parts.append(html_mod.escape(op['operator_zip']))
 
-            with col2:
-                # Contact info
-                contact_parts = []
-                if op["operator_phone"]:
-                    contact_parts.append(f"📞 {format_phone(op['operator_phone'])}")
-                if op["operator_email"]:
-                    contact_parts.append(f"✉️ {op['operator_email']}")
-                if op["operator_zip"]:
-                    contact_parts.append(f"📍 {op['operator_zip']}")
-                if op.get("operator_website"):
-                    contact_parts.append(f"🌐 {op['operator_website']}")
+            sep = '<span class="sep">&middot;</span>'
+            contact_html = sep.join(contact_parts) if contact_parts else ""
 
-                if contact_parts:
-                    st.caption("  ·  ".join(contact_parts))
-                else:
-                    st.caption("—")
+            row_col, btn_col = st.columns([20, 1])
 
-            with col3:
-                btn_col1, btn_col2 = st.columns(2)
-                with btn_col1:
+            with row_col:
+                st.markdown(
+                    f'<div class="op-row">'
+                    f'<div><span class="op-name">{safe_name}</span>{biz_html}</div>'
+                    f'<div class="op-contact">{contact_html}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+            with btn_col:
+                if st.button("✕" if is_selected else "⋮", key=f"op_select_{op['id']}_btn", type="tertiary"):
+                    if is_selected:
+                        st.session_state.operators_selected_id = None
+                    else:
+                        st.session_state.operators_selected_id = op["id"]
+                    st.rerun()
+
+            # Action bar — only for selected row
+            if is_selected:
+                act1, act2, act3 = st.columns([2, 2, 20])
+                with act1:
                     if ui.button(text="Edit", variant="secondary", key=f"op_edit_{op['id']}_btn"):
                         st.session_state.operators_editing_id = op["id"]
+                        st.session_state.operators_selected_id = None
                         st.rerun()
-                with btn_col2:
+                with act2:
                     _del_trigger = ui.button(text="Delete", variant="destructive", key=f"op_delete_{op['id']}_btn")
                     _del_confirmed = ui.alert_dialog(
                         show=_del_trigger,
@@ -343,12 +362,10 @@ else:
                     if _del_confirmed:
                         try:
                             db.delete_operator(op["id"])
+                            st.session_state.operators_selected_id = None
                             st.rerun()
                         except Exception as e:
                             st.error(f"Failed to delete: {e}")
-
-        st.markdown("---")
-        st.markdown("")
 
     # Pagination controls at bottom
     if total_pages > 1:
