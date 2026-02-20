@@ -93,28 +93,25 @@ if not intent_leads and not geo_leads:
                 {"key": "status", "label": "Status", "pill": {"Exported": "success", "Staged": "muted"}},
             ],
         )
+        st.caption("**Staged** = leads saved from a workflow run, ready to export as CSV.")
 
         st.markdown("")
 
-        # Load buttons — one per staged export
-        cols = st.columns(min(len(staged), 3))
-        for i, s in enumerate(staged):
-            with cols[i % 3]:
-                label = f"{s['workflow_type'].title()} · {s['lead_count']} leads"
-                if s.get("exported_at"):
-                    label += " (re-export)"
-                if st.button(label, key=f"load_staged_{s['id']}", use_container_width=True):
-                    export_row = db.get_staged_export(s["id"])
-                    if export_row and export_row["leads"]:
-                        ss_key = "intent_export_leads" if export_row["workflow_type"] == "intent" else "geo_export_leads"
-                        st.session_state[ss_key] = export_row["leads"]
-                        st.session_state["_loaded_staged_id"] = export_row["id"]
-                        # Restore operator if available
-                        if export_row.get("operator_id"):
-                            op = db.get_operator(export_row["operator_id"])
-                            if op:
-                                st.session_state["geo_operator"] = op
-                        st.rerun()
+        # Load button — most recent staged export
+        most_recent = staged[0]
+        label = f"Load Most Recent · {most_recent['workflow_type'].title()} · {most_recent['lead_count']} leads"
+        if st.button(label, key="load_most_recent_staged", use_container_width=True):
+            export_row = db.get_staged_export(most_recent["id"])
+            if export_row and export_row["leads"]:
+                ss_key = "intent_export_leads" if export_row["workflow_type"] == "intent" else "geo_export_leads"
+                st.session_state[ss_key] = export_row["leads"]
+                st.session_state["_loaded_staged_id"] = export_row["id"]
+                # Restore operator if available
+                if export_row.get("operator_id"):
+                    op = db.get_operator(export_row["operator_id"])
+                    if op:
+                        st.session_state["geo_operator"] = op
+                st.rerun()
 
         st.markdown("---")
 

@@ -9,11 +9,12 @@ from ui_components import (
     inject_base_styles,
     page_header,
     status_badge,
-    last_run_indicator,
     metric_card,
     empty_state,
     labeled_divider,
     COLORS,
+    SPACING,
+    FONT_SIZES,
 )
 
 st.set_page_config(
@@ -46,23 +47,28 @@ except Exception as e:
 # =============================================================================
 # QUICK ACTIONS (focal point — what the user came here to do)
 # =============================================================================
-col1, col2, col3 = st.columns(3)
-
 _quick_actions = [
-    {"page": "pages/1_Intent_Workflow.py", "icon": "🎯", "title": "Intent Search", "desc": "Companies showing buying signals", "step": "Step 1", "col": col1},
-    {"page": "pages/2_Geography_Workflow.py", "icon": "📍", "title": "Geography Search", "desc": "Contacts in a service territory", "step": "Step 1", "col": col2},
-    {"page": "pages/4_CSV_Export.py", "icon": "📤", "title": "Export Leads", "desc": "Download VanillaSoft CSV", "step": "Step 2", "col": col3},
+    {"page": "pages/1_Intent_Workflow.py", "icon": "🎯", "title": "Intent Search", "desc": "Companies showing buying signals"},
+    {"page": "pages/2_Geography_Workflow.py", "icon": "📍", "title": "Geography Search", "desc": "Contacts in a service territory"},
+    {"page": "pages/4_CSV_Export.py", "icon": "📤", "title": "Export Leads", "desc": "Download VanillaSoft CSV"},
 ]
 
-for qa in _quick_actions:
-    with qa["col"]:
-        st.caption(qa["step"].upper())
-        st.page_link(qa["page"], label=f"{qa['icon']} {qa['title']}", use_container_width=True)
-        st.caption(qa["desc"])
+cols = st.columns(3)
+for i, qa in enumerate(_quick_actions):
+    with cols[i]:
+        st.markdown(
+            f'<div class="quick-action">'
+            f'<div class="icon">{qa["icon"]}</div>'
+            f'<div class="title">{qa["title"]}</div>'
+            f'<div class="desc">{qa["desc"]}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.page_link(qa["page"], label=f"Open {qa['title']}", use_container_width=True)
 
 
 # =============================================================================
-# STATUS ROW — staged leads + last runs (contextual, not dominant)
+# STATUS ROW — system health at a glance
 # =============================================================================
 st.markdown("")
 
@@ -72,51 +78,89 @@ intent_staged = len(st.session_state.get("intent_export_leads", []) or [])
 geo_staged = len(st.session_state.get("geo_export_leads", []) or [])
 total_staged = intent_staged + geo_staged
 
-status_col1, status_col2, status_col3, status_col4 = st.columns(4)
 
-with status_col1:
-    badge = status_badge("success", "Connected") if connected else status_badge("error", "Offline")
-    st.markdown(badge, unsafe_allow_html=True)
-    st.caption("Database")
+def _freshness_badge(last_query):
+    """Compute freshness badge from last query timestamp."""
+    if not last_query:
+        return status_badge("neutral", "No runs")
+    try:
+        ts = last_query.get("created_at", "")
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        hours = (datetime.now() - dt.replace(tzinfo=None)).total_seconds() / 3600
+        if hours < 6:
+            return status_badge("success", "Active", tooltip="Last run within 6 hours")
+        else:
+            return status_badge("warning", "Stale", tooltip=f"No queries in {int(hours)}h")
+    except (ValueError, TypeError):
+        return status_badge("neutral", "Unknown")
 
-with status_col2:
-    if last_intent:
-        try:
-            _ts = last_intent.get("created_at", "")
-            _dt = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
-            _hours = (datetime.now() - _dt.replace(tzinfo=None)).total_seconds() / 3600
-            if _hours < 6:
-                _freshness = status_badge("success", "Active", tooltip="Last run within 6 hours")
-            else:
-                _freshness = status_badge("warning", "Stale", tooltip=f"No queries in {int(_hours)}h — run a new search to refresh")
-        except (ValueError, TypeError):
-            _freshness = status_badge("neutral", "Unknown", tooltip="Could not determine last run time")
-        st.markdown(_freshness, unsafe_allow_html=True)
-    st.caption("Intent")
-    last_run_indicator(last_intent)
 
-with status_col3:
-    if last_geo:
-        try:
-            _ts = last_geo.get("created_at", "")
-            _dt = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
-            _hours = (datetime.now() - _dt.replace(tzinfo=None)).total_seconds() / 3600
-            if _hours < 6:
-                _freshness = status_badge("success", "Active", tooltip="Last run within 6 hours")
-            else:
-                _freshness = status_badge("warning", "Stale", tooltip=f"No queries in {int(_hours)}h — run a new search to refresh")
-        except (ValueError, TypeError):
-            _freshness = status_badge("neutral", "Unknown", tooltip="Could not determine last run time")
-        st.markdown(_freshness, unsafe_allow_html=True)
-    st.caption("Geography")
-    last_run_indicator(last_geo)
+def _time_ago(last_query):
+    """Compute human-readable time-ago string."""
+    if not last_query:
+        return ""
+    try:
+        ts = last_query.get("created_at", "")
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        delta = datetime.now() - dt.replace(tzinfo=None)
+        if delta.days > 0:
+            return f"{delta.days}d ago · {last_query.get('leads_returned', 0)} leads"
+        elif delta.seconds >= 3600:
+            return f"{delta.seconds // 3600}h ago · {last_query.get('leads_returned', 0)} leads"
+        else:
+            return f"{delta.seconds // 60}m ago · {last_query.get('leads_returned', 0)} leads"
+    except (ValueError, TypeError):
+        return ""
 
-with status_col4:
-    if total_staged > 0:
-        st.markdown(status_badge("info", f"{total_staged} staged"), unsafe_allow_html=True)
-        st.caption("Ready to export")
-    else:
-        st.caption("No leads staged")
+
+# Build status items as a single unified HTML row
+_status_items = [
+    {
+        "label": "Database",
+        "badge": status_badge("success", "Connected") if connected else status_badge("error", "Offline"),
+        "detail": "",
+    },
+    {
+        "label": "Intent",
+        "badge": _freshness_badge(last_intent),
+        "detail": _time_ago(last_intent),
+    },
+    {
+        "label": "Geography",
+        "badge": _freshness_badge(last_geo),
+        "detail": _time_ago(last_geo),
+    },
+    {
+        "label": "Staged Leads",
+        "badge": status_badge("info", f"{total_staged} staged") if total_staged > 0
+        else status_badge("neutral", "None"),
+        "detail": "Ready to export" if total_staged > 0 else "",
+    },
+]
+
+_status_cells = ""
+for item in _status_items:
+    detail_html = (
+        f'<div style="font-size:{FONT_SIZES["xs"]};color:{COLORS["text_muted"]};margin-top:4px;">'
+        f'{item["detail"]}</div>'
+    ) if item["detail"] else ""
+    _status_cells += (
+        f'<div style="display:flex;flex-direction:column;gap:4px;">'
+        f'{item["badge"]}'
+        f'<span style="font-size:{FONT_SIZES["xs"]};color:{COLORS["text_secondary"]};'
+        f'text-transform:uppercase;letter-spacing:0.04em;font-weight:500;">{item["label"]}</span>'
+        f'{detail_html}'
+        f'</div>'
+    )
+
+st.markdown(
+    f'<div style="display:flex;gap:{SPACING["xl"]};padding:{SPACING["md"]} {SPACING["lg"]};'
+    f'background:{COLORS["bg_secondary"]};border:1px solid {COLORS["border"]};'
+    f'border-radius:10px;margin-bottom:{SPACING["md"]};">'
+    f'{_status_cells}'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 
 
 # =============================================================================
@@ -153,10 +197,11 @@ if recent_display:
         leads = q.get("leads_returned", 0) or 0
         exported = q.get("leads_exported", 0) or 0
         created = q.get("created_at", "")[:16] if q.get("created_at") else ""
-        export_tag = "exported" if exported > 0 else "not exported"
         params = q.get("query_params", {}) or {}
 
-        header = f"{created} · **{workflow}** · {leads} leads · {export_tag}"
+        header = f"{created} · **{workflow}** · {leads} {'lead' if leads == 1 else 'leads'}"
+        if exported > 0:
+            header += " · exported"
         with st.expander(header):
             if params:
                 # Format query params as readable key-value pairs

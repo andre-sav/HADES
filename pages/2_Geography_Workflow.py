@@ -207,6 +207,33 @@ if not _last_geo and not st.session_state.get("geo_welcome_dismissed"):
 
 
 # =============================================================================
+# MODE SELECTOR
+# =============================================================================
+mode_col1, mode_col2, mode_col3 = st.columns([1, 2, 1])
+with mode_col1:
+    _GEO_MODE_MAP = {"Autopilot": "autopilot", "Manual Review": "manual"}
+    _GEO_MODE_REVERSE = {v: k for k, v in _GEO_MODE_MAP.items()}
+    _geo_mode_tab = ui.tabs(
+        options=list(_GEO_MODE_MAP.keys()),
+        default_value=_GEO_MODE_REVERSE.get(st.session_state.geo_mode, "Autopilot"),
+        key="geo_mode_tabs",
+    )
+    st.session_state.geo_mode = _GEO_MODE_MAP.get(_geo_mode_tab, st.session_state.geo_mode)
+
+with mode_col2:
+    if st.session_state.geo_mode == "autopilot":
+        st.caption("Autopilot: Search → Auto-select best per company → Enrich → Export")
+    else:
+        st.caption("Manual: Search (free preview) → Select contacts → Enrich selected → Export")
+
+with mode_col3:
+    _geo_test_sw = ui.switch(default_checked=st.session_state.geo_test_mode, label="Test Mode", key="geo_test_mode_switch")
+    st.session_state.geo_test_mode = bool(_geo_test_sw) if _geo_test_sw is not None else st.session_state.geo_test_mode
+    if st.session_state.geo_test_mode:
+        st.caption("⚠️ Using mock data")
+
+
+# =============================================================================
 # STEP INDICATOR
 # =============================================================================
 # Calculate current step based on session state
@@ -237,33 +264,6 @@ if st.session_state.geo_mode == "autopilot":
     step_indicator(current_step, 3, ["Select Operator", "Configure & Search", "Results"])
 else:
     step_indicator(current_step, 4, ["Select Operator", "Configure Search", "Review & Select", "Results"])
-
-
-# =============================================================================
-# MODE SELECTOR
-# =============================================================================
-mode_col1, mode_col2, mode_col3 = st.columns([1, 2, 1])
-with mode_col1:
-    _GEO_MODE_MAP = {"Autopilot": "autopilot", "Manual Review": "manual"}
-    _GEO_MODE_REVERSE = {v: k for k, v in _GEO_MODE_MAP.items()}
-    _geo_mode_tab = ui.tabs(
-        options=list(_GEO_MODE_MAP.keys()),
-        default_value=_GEO_MODE_REVERSE.get(st.session_state.geo_mode, "Autopilot"),
-        key="geo_mode_tabs",
-    )
-    st.session_state.geo_mode = _GEO_MODE_MAP.get(_geo_mode_tab, st.session_state.geo_mode)
-
-with mode_col2:
-    if st.session_state.geo_mode == "autopilot":
-        st.caption("Autopilot: Search → Auto-select best per company → Enrich → Export")
-    else:
-        st.caption("Manual: Search (free preview) → Select contacts → Enrich selected → Export")
-
-with mode_col3:
-    _geo_test_sw = ui.switch(default_checked=st.session_state.geo_test_mode, label="Test Mode", key="geo_test_mode_switch")
-    st.session_state.geo_test_mode = bool(_geo_test_sw) if _geo_test_sw is not None else st.session_state.geo_test_mode
-    if st.session_state.geo_test_mode:
-        st.caption("⚠️ Using mock data")
 
 
 # =============================================================================

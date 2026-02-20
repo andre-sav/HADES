@@ -13,7 +13,7 @@ st.set_page_config(page_title="Operators", page_icon="👤", layout="wide")
 # Apply design system styles
 inject_base_styles()
 
-from utils import require_auth
+from utils import require_auth, format_phone
 require_auth()
 
 
@@ -311,7 +311,7 @@ else:
                 # Contact info
                 contact_parts = []
                 if op["operator_phone"]:
-                    contact_parts.append(f"📞 {op['operator_phone']}")
+                    contact_parts.append(f"📞 {format_phone(op['operator_phone'])}")
                 if op["operator_email"]:
                     contact_parts.append(f"✉️ {op['operator_email']}")
                 if op["operator_zip"]:

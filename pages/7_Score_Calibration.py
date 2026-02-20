@@ -71,8 +71,14 @@ if active_tab == "Current Weights":
     col1, col2, col3 = st.columns(3)
     with col1:
         if last_cal == "Never":
-            st.markdown(status_badge("warning", "Never calibrated"), unsafe_allow_html=True)
-            st.caption("Last Calibration")
+            # Check if any SIC codes have calibrated scores
+            _cal_scores = config.get("onsite_likelihood", {}).get("sic_scores", {})
+            if _cal_scores:
+                st.markdown(status_badge("success", f"{len(_cal_scores)} of 25 calibrated"), unsafe_allow_html=True)
+                st.caption("SIC Calibration")
+            else:
+                st.markdown(status_badge("warning", "Never calibrated"), unsafe_allow_html=True)
+                st.caption("Last Calibration")
         else:
             metric_card("Last Calibration", last_cal)
     with col2:

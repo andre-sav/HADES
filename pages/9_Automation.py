@@ -69,6 +69,26 @@ _STATUS_MAP = {
 }
 
 
+def _friendly_error(msg: str) -> str:
+    """Map raw error messages to user-friendly labels."""
+    if not msg:
+        return ""
+    _patterns = {
+        "unhashable type": "Data format error",
+        "429": "Rate limit exceeded",
+        "timeout": "Request timed out",
+        "connection": "Connection error",
+        "401": "Authentication failed",
+        "403": "Access denied",
+    }
+    lower = msg.lower()
+    for pattern, label in _patterns.items():
+        if pattern in lower:
+            return label
+    # Truncate long raw messages
+    return msg[:80] + "..." if len(msg) > 80 else msg
+
+
 def _badge_html(status: str) -> str:
     """Return status badge HTML string."""
     badge_type, label = _STATUS_MAP.get(status, ("neutral", status))
@@ -85,9 +105,10 @@ def _run_card_html(run: dict) -> str:
     credits = run.get("credits_used", 0)
     error_html = ""
     if run.get("error_message"):
+        friendly = _friendly_error(run["error_message"])
         error_html = (
             f'<div style="margin-top:{SPACING["xs"]};color:{COLORS["error_light"]};'
-            f'font-size:{FONT_SIZES["xs"]};">{run["error_message"]}</div>'
+            f'font-size:{FONT_SIZES["xs"]};">{friendly}</div>'
         )
 
     return (

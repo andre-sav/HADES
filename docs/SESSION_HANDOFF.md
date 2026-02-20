@@ -1,7 +1,84 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-19
-**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25).
+**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27).
+
+## Session Summary (2026-02-19, Session 27)
+
+### UX Review Fixes (15 planned) + Design Critique
+
+Implemented 15 UX fixes from session 26 review across 4 batches, caught 2 additional state-dependent rendering bugs during visual verification, then ran `interface-design:critique` skill to rebuild the home page composition. 578 tests green throughout.
+
+**Branch:** `ux-fixes-session26` (off main)
+
+**Batch 1 — Text/Display (4 fixes):**
+- Fix 1: `**bold**` → `<strong>bold</strong>` in Intent preview (HTML context)
+- Fix 7: Removed step number labels from Home quick actions
+- Fix 8: Fixed "1 leads" → "1 lead" grammar
+- Fix 9: Added "Staged" tooltip caption on CSV Export page
+
+**Batch 2 — Logic/Thresholds (5 fixes):**
+- Fix 3: Pipeline Health Critical threshold 6h → 26h (business-hours appropriate)
+- Fix 4: Executive Summary efficiency "credits per lead" → "leads per credit"
+- Fix 5: Score Calibration badge shows "N of 25 calibrated" when SIC scores exist
+- Fix 10: ZoomInfo API no-token status: yellow/Stale → green/Ready
+- Fix 14: Removed "not exported" tag from Recent Runs (only show "exported" when true)
+
+**Batch 3 — Structural Layout (3 fixes):**
+- Fix 13: Geography workflow Mode Selector moved above Step Indicator (matches Intent order)
+- Fix 12: CSV Export per-batch button grid → single "Load Most Recent" button
+- Fix 15: Removed redundant `workflow_summary_strip()` from Executive Summary
+
+**Batch 4 — Error Handling + Dev Gating (3 fixes):**
+- Fix 6: `_friendly_error()` mapper for Automation run cards (raw msg kept in expanded details)
+- Fix 2: Operator phone numbers now formatted via `format_phone()`
+- Fix 11: Pipeline Test + API Discovery gated behind `DEV_MODE` secret, titles suffixed "(Dev)"
+
+**Additional fixes caught during visual review:**
+- Home page "No leads staged" floating text → neutral badge + "Staged Leads" caption
+- Intent Workflow preview-to-target spacing gap (added `st.markdown("")` spacer)
+- API Discovery hidden from sidebar via CSS (`display: none` on href match)
+
+**Design Critique Rebuild:**
+- Home page quick actions: bare `st.page_link` → `.quick-action` card components with icon/title/desc hierarchy
+- Status row: 4 floating columns → single grouped HTML card with flex layout
+- Sidebar icons: added entries for pages 9-12 (Score Calibration ⚖️, API Discovery 🔬, Automation ⚙️, Pipeline Health 💚)
+- Quick-action CSS: tightened spacing, display font for titles, increased icon size
+
+### Key Files Modified (Session 27)
+```
+app.py                         - Quick action cards, grouped status row, grammar fixes
+pages/1_Intent_Workflow.py     - HTML bold tags, spacing fix
+pages/2_Geography_Workflow.py  - Mode selector/step indicator order swap
+pages/3_Operators.py           - format_phone() on display
+pages/4_CSV_Export.py          - Staged tooltip, single load button
+pages/6_Executive_Summary.py   - Efficiency framing, removed context strip
+pages/7_Score_Calibration.py   - Calibration badge logic
+pages/7_Pipeline_Test.py       - DEV_MODE gate, (Dev) title
+pages/8_API_Discovery.py       - DEV_MODE gate, (Dev) title
+pages/9_Automation.py          - _friendly_error() helper
+pages/10_Pipeline_Health.py    - Critical threshold 26h, ZoomInfo status green
+ui_components.py               - Sidebar icons 9-12, quick-action CSS, API Discovery hidden
+.streamlit/secrets.toml        - Added DEV_MODE = "1"
+```
+
+### Beads Closed
+- HADES-q2a: Fix sidebar emoji for pages 8-10
+- HADES-ccp: Add badge for 'No leads staged' on Home page
+
+### Uncommitted Changes
+13 files modified on branch `ux-fixes-session26`. Ready to commit.
+
+### Test Count
+578 tests passing (unchanged — all display-layer fixes)
+
+### What Needs Doing Next Session
+1. **Merge `ux-fixes-session26` branch** — review changes, merge to main
+2. **Visual verification** — launch app, walk through all modified pages
+3. **Remaining UX beads** — HADES-3sw (automation on Home), HADES-tku (recent operators), HADES-amm (export history)
+4. **Deploy to Streamlit Community Cloud** — app is code-complete
+
+---
 
 ## Session Summary (2026-02-19, Session 25)
 

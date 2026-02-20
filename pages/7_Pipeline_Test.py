@@ -23,10 +23,14 @@ from cost_tracker import CostTracker
 from turso_db import get_database
 from ui_components import inject_base_styles, page_header, step_indicator
 
-st.set_page_config(page_title="Pipeline Test", page_icon="🧪", layout="wide")
+st.set_page_config(page_title="Pipeline Test (Dev)", page_icon="🧪", layout="wide")
 
 # Apply design system styles
 inject_base_styles()
+
+if not st.secrets.get("DEV_MODE"):
+    st.info("This page is only available in developer mode. Set `DEV_MODE = \"1\"` in `.streamlit/secrets.toml` to enable.")
+    st.stop()
 
 from utils import require_auth
 require_auth()

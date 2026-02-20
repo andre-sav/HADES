@@ -354,15 +354,17 @@ else:
         _strength_to_score_preview = {"High": 90, "Medium": 75, "Low": 60}
         _min_score = min(_strength_to_score_preview.get(s, 60) for s in signal_strengths)
         _preview_parts = [
-            f"**Topics**: {', '.join(selected_topics)}",
-            f"**Signal**: {', '.join(signal_strengths)} (score >= {_min_score})",
-            f"**Employees**: {get_employee_minimum():,}–{get_employee_maximum():,}",
-            f"**Industries**: {len(get_sic_codes())} SIC codes",
+            f"<strong>Topics</strong>: {', '.join(selected_topics)}",
+            f"<strong>Signal</strong>: {', '.join(signal_strengths)} (score >= {_min_score})",
+            f"<strong>Employees</strong>: {get_employee_minimum():,}–{get_employee_maximum():,}",
+            f"<strong>Industries</strong>: {len(get_sic_codes())} SIC codes",
         ]
         st.markdown(
             f'<p style="font-size:0.875rem;color:#8b929e;margin:0;">{" · ".join(_preview_parts)}</p>',
             unsafe_allow_html=True,
         )
+
+    st.markdown("")
 
     # Target companies input
     target_col1, target_col2, target_col3 = st.columns([1, 1, 2])

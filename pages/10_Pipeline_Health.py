@@ -156,13 +156,14 @@ if last_query:
         if minutes < 60:
             q_status = "green"
             q_detail = f"{wf} · {leads} leads returned"
-        elif minutes < 360:
+        elif minutes < 1560:
             q_status = "yellow"
-            q_detail = f"{wf} · {leads} leads returned · No queries in over {int(minutes / 60)}h"
+            hours = int(minutes / 60)
+            q_detail = f"{wf} · {leads} leads returned · No queries in {hours}h"
         else:
             q_status = "red"
             hours = int(minutes / 60)
-            q_detail = f"{wf} · {leads} leads returned · No queries in {hours}h (threshold: 6h)"
+            q_detail = f"{wf} · {leads} leads returned · No queries in {hours}h (threshold: 26h)"
     except (ValueError, TypeError):
         q_status = "gray"
         q_detail = f"{wf} · {leads} leads returned"
@@ -196,7 +197,7 @@ try:
     if client.access_token:
         zi_status, zi_detail = "green", "Authenticated with valid token"
     else:
-        zi_status, zi_detail = "yellow", "No active token — will authenticate on next query"
+        zi_status, zi_detail = "green", "Ready — will authenticate on next query"
 except Exception as e:
     zi_status, zi_detail = "red", f"Client error: {str(e)[:80]}"
 _track_health("ZoomInfo API", zi_status, zi_detail)

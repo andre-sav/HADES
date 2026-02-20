@@ -10,10 +10,14 @@ from errors import PipelineError
 from zoominfo_client import get_zoominfo_client
 from ui_components import inject_base_styles, page_header
 
-st.set_page_config(page_title="API Discovery", page_icon="🔬", layout="wide")
+st.set_page_config(page_title="API Discovery (Dev)", page_icon="🔬", layout="wide")
 
 # Apply design system styles
 inject_base_styles()
+
+if not st.secrets.get("DEV_MODE"):
+    st.info("This page is only available in developer mode. Set `DEV_MODE = \"1\"` in `.streamlit/secrets.toml` to enable.")
+    st.stop()
 
 from utils import require_auth
 require_auth()

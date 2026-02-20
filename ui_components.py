@@ -498,7 +498,10 @@ def inject_base_styles():
     section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(6) a span::before {{ content: "📊"; font-size: 0.85em; }}
     section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(7) a span::before {{ content: "📈"; font-size: 0.85em; }}
     section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(8) a span::before {{ content: "🧪"; font-size: 0.85em; }}
-    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(9) a span::before {{ content: "🔬"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(9) a span::before {{ content: "⚖️"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(10) a span::before {{ content: "🔬"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(11) a span::before {{ content: "⚙️"; font-size: 0.85em; }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:nth-child(12) a span::before {{ content: "💚"; font-size: 0.85em; }}
 
     /* ================================================================
        NATIVE WIDGET OVERRIDES - DIVIDER
@@ -808,12 +811,13 @@ def inject_base_styles():
        ================================================================ */
     .quick-action {{
         background: {COLORS['bg_secondary']};
-        border: 1px solid {COLORS['border_light']};
+        border: 1px solid {COLORS['border']};
         border-radius: var(--radius);
-        padding: 1.25rem;
+        padding: 1.25rem 1.25rem 1rem;
         text-align: center;
         box-shadow: var(--card-shadow);
         transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+        margin-bottom: {SPACING['sm']};
     }}
 
     .quick-action:hover {{
@@ -822,25 +826,17 @@ def inject_base_styles():
         transform: translateY(-1px);
     }}
 
-    .quick-action .qa-step {{
-        font-size: 0.625rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: {COLORS['text_muted']};
-        margin-bottom: 0.25rem;
-    }}
-
     .quick-action .icon {{
-        font-size: 1.5rem;
-        margin-bottom: 0.25rem;
-        opacity: 0.85;
+        font-size: 1.75rem;
+        margin-bottom: {SPACING['xs']};
     }}
 
     .quick-action .title {{
-        font-weight: 600;
+        font-family: var(--font-display);
+        font-weight: 700;
         color: {COLORS['text_primary']};
-        margin-bottom: 0.125rem;
-        font-size: {FONT_SIZES['base']};
+        margin-bottom: 2px;
+        font-size: {FONT_SIZES['lg']};
     }}
 
     .quick-action .desc {{
@@ -1113,6 +1109,11 @@ def inject_base_styles():
         clip: rect(0, 0, 0, 0);
         white-space: nowrap;
         border: 0;
+    }}
+
+    /* Hide dev-only pages from sidebar navigation */
+    [data-testid="stSidebarNav"] a[href*="API_Discovery"] {{
+        display: none !important;
     }}
 </style>
 """, unsafe_allow_html=True)

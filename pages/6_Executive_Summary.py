@@ -20,7 +20,6 @@ from ui_components import (
     metric_card,
     narrative_metric,
     styled_table,
-    workflow_summary_strip,
     COLORS,
 )
 
@@ -65,14 +64,6 @@ page_header(
     action_callback=refresh_data,
 )
 
-# Context strip below header (since action_label precludes right_content)
-_mtd_quick = cost_tracker.get_usage_summary(days=today.day)
-workflow_summary_strip([
-    {"label": "Leads MTD", "value": _mtd_quick.total_leads},
-    {"label": "Credits MTD", "value": _mtd_quick.total_credits},
-    {"label": "Queries MTD", "value": _mtd_quick.total_queries},
-])
-
 
 # =============================================================================
 # TABBED CONTENT
@@ -99,9 +90,8 @@ if _exec_active == "Overview":
 
     # Narrative metrics — answers, not raw numbers
     if mtd.total_leads > 0 and mtd.total_credits > 0:
-        cpl = mtd.total_credits / mtd.total_leads
         narrative_metric(
-            f"{{value}} leads exported this month at {cpl:.2f} credits per lead",
+            f"{{value}} leads exported this month at {_eff:.2f} leads per credit",
             highlight_value=f"{mtd.total_leads:,}",
             subtext=f"{mtd.total_credits:,} credits used across {mtd.total_queries} queries",
         )
