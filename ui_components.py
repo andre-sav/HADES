@@ -1358,17 +1358,15 @@ def metric_card(
         delta_html = f'<span class="metric-card-delta metric-delta-{delta_color}">{delta_text}</span>'
 
     # Render
+    help_attr = f' title="{help_text}"' if help_text else ""
     html = f"""
-    <div class="metric-card">
+    <div class="metric-card"{help_attr}>
         <p class="metric-card-label">{label}</p>
         <p class="metric-card-value">{formatted_value}{delta_html}</p>
     </div>
     """
 
-    if help_text:
-        st.markdown(html, unsafe_allow_html=True, help=help_text)
-    else:
-        st.markdown(html, unsafe_allow_html=True)
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # =============================================================================
