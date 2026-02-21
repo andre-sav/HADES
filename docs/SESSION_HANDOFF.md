@@ -1,7 +1,46 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-20
-**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28).
+**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29).
+
+## Session Summary (2026-02-20, Session 29)
+
+### Deployed App Testing + Bug Fixes
+
+Tested all 9 pages on the live Streamlit Community Cloud deployment (hades-hlm.streamlit.app). Found and fixed 4 issues, all committed and pushed.
+
+**Fixes shipped:**
+- **`:help[]` artifacts on metric cards** — `st.markdown()` doesn't support the `help` param; was rendering raw `:help[]` text on SCC's Streamlit version. Moved help text to HTML `title` attribute. Affected: Homepage, Usage Dashboard, Executive Summary.
+- **Pipeline Health false Critical alert** — Staleness check only read `query_history` (manual UI runs), missing `pipeline_runs` (automated scheduled runs). Now considers both sources, uses whichever is most recent.
+- **Blank SIC in Score Calibration outcomes** — CSV Export outcome recording didn't check nested `company` dict for SIC code. Added fallback to `lead["company"]["sicCode"]`, matching the automation script's pattern. Also fixed company name, employee count, ZIP, state fallbacks.
+- **Misleading "review details" label** — `get_priority_action()` returned "Good prospect — review details" which looked like a clickable link. Changed to "Good prospect — worth a call".
+- **Orange "Stale" badges on homepage** — Intent/Geography status showed alarming "Stale" warnings for normal usage gaps. Replaced with neutral gray badges showing time-ago ("2d ago") with lead count in detail line.
+
+**Also produced:** Comprehensive self-prompt for deep engineering + UX audit (not yet executed).
+
+### Key Files Modified (Session 29)
+```
+ui_components.py                - metric_card help param fix
+pages/10_Pipeline_Health.py     - staleness check includes pipeline_runs
+pages/4_CSV_Export.py           - outcome recording checks nested company dict
+scoring.py                      - "review details" → "worth a call"
+tests/test_scoring.py           - updated priority action test assertions
+app.py                          - neutral recency badges replacing Stale/Active
+```
+
+### Uncommitted Changes
+None. All work committed and pushed.
+
+### Test Count
+578 tests passing (unchanged)
+
+### What Needs Doing Next Session
+1. **Execute deep audit** — self-prompt produced this session covers engineering + UX across all modules
+2. **Remaining UX beads (9 ready)** — HADES-amm (export history), HADES-fvm (auto-fetch usage), HADES-tku (recent operators), HADES-3sw (automation on Home), etc.
+3. **Existing SIC data** — 5 leads in lead_outcomes have blank SIC from before the fix; could backfill if ZoomInfo data is available
+4. **Weekend staleness** — Pipeline Health 26h threshold will still fire over weekends (Fri→Mon = 63h); consider weekday-aware threshold
+
+---
 
 ## Session Summary (2026-02-20, Session 28)
 
