@@ -1,7 +1,48 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-20
-**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30).
+**Date:** 2026-02-21
+**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31).
+
+## Session Summary (2026-02-21, Session 31)
+
+### Deep Engineering & UX Audit v2
+
+Re-executed the comprehensive audit with 4 parallel research agents (codebase mapping, reliability/security, performance/debt, UI/UX) plus manual file verification. Produced 8 deliverables with 45 verified findings (vs 35 in session 30).
+
+**New findings not in session 30 (10 new):**
+- `record_lead_outcomes_batch` has no UNIQUE constraint — duplicate outcomes inflate calibration stats (P0)
+- `execute_many` is a Python loop, not a true batch — 25 round-trips per export
+- `time.sleep(retry_after)` blocks Streamlit UI thread for up to 120s during 429 recovery
+- No circuit breaker on ZoomInfo API calls
+- Fragile pagination stop condition in contact search
+- Error hierarchy split between `errors.py` (1 class) and `zoominfo_client.py` (5 classes)
+- Migration checks use exception message string matching
+- Mixed `st.button` vs `ui.button` across all pages — no documented rule
+- `text_muted` color below WCAG AA contrast ratio (3.8:1 vs required 4.5:1)
+- Trends tab week boundaries use rolling windows, not calendar weeks
+
+**Output:** `docs/audit-report-session31.md` (full 8-deliverable report with 45 findings)
+
+### Key Files Created (Session 31)
+```
+docs/audit-report-session31.md   - Full audit report v2 (45 findings, 8 deliverables)
+```
+
+### Uncommitted Changes
+`docs/audit-report-session31.md` and `docs/SESSION_HANDOFF.md`
+
+### Test Count
+578 tests passing (unchanged — audit was read-only)
+
+### What Needs Doing Next Session
+1. **Fix P0 issues** — Confirmation dialogs (Push + Run Now), concurrent-run guard, UNIQUE constraint on lead_outcomes
+2. **Batch Step 3** — Change N+1 enrich loop to single batch call (saves ~24 credits/run)
+3. **Centralize config** — Reduce 7 sources of truth for accuracy=95 to 1
+4. **Add CI test workflow** — pytest on push/PR in GitHub Actions
+5. **Fix timing-unsafe password comparison** — `hmac.compare_digest` + attempt counter
+6. **Remaining UX beads (9 ready)** — HADES-amm, HADES-fvm, HADES-tku, HADES-3sw, etc.
+
+---
 
 ## Session Summary (2026-02-20, Session 30)
 
