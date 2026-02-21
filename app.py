@@ -86,31 +86,24 @@ def _freshness_badge(last_query):
     try:
         ts = last_query.get("created_at", "")
         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        hours = (datetime.now() - dt.replace(tzinfo=None)).total_seconds() / 3600
-        if hours < 6:
-            return status_badge("success", "Active", tooltip="Last run within 6 hours")
+        delta = datetime.now() - dt.replace(tzinfo=None)
+        if delta.days > 0:
+            ago = f"{delta.days}d ago"
+        elif delta.seconds >= 3600:
+            ago = f"{delta.seconds // 3600}h ago"
         else:
-            return status_badge("warning", "Stale", tooltip=f"No queries in {int(hours)}h")
+            ago = "Just now"
+        return status_badge("neutral", ago)
     except (ValueError, TypeError):
         return status_badge("neutral", "Unknown")
 
 
-def _time_ago(last_query):
-    """Compute human-readable time-ago string."""
+def _detail_text(last_query):
+    """Show lead count from last run."""
     if not last_query:
         return ""
-    try:
-        ts = last_query.get("created_at", "")
-        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        delta = datetime.now() - dt.replace(tzinfo=None)
-        if delta.days > 0:
-            return f"{delta.days}d ago · {last_query.get('leads_returned', 0)} leads"
-        elif delta.seconds >= 3600:
-            return f"{delta.seconds // 3600}h ago · {last_query.get('leads_returned', 0)} leads"
-        else:
-            return f"{delta.seconds // 60}m ago · {last_query.get('leads_returned', 0)} leads"
-    except (ValueError, TypeError):
-        return ""
+    leads = last_query.get("leads_returned", 0)
+    return f"{leads} leads" if leads else ""
 
 
 # Build status items as a single unified HTML row
@@ -123,12 +116,12 @@ _status_items = [
     {
         "label": "Intent",
         "badge": _freshness_badge(last_intent),
-        "detail": _time_ago(last_intent),
+        "detail": _detail_text(last_intent),
     },
     {
         "label": "Geography",
         "badge": _freshness_badge(last_geo),
-        "detail": _time_ago(last_geo),
+        "detail": _detail_text(last_geo),
     },
     {
         "label": "Staged Leads",
