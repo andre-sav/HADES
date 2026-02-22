@@ -1,7 +1,38 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-22
-**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32).
+**Status:** All 4 epics implemented (18 stories complete). 581 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards implemented (session 33).
+
+## Session Summary (2026-02-22, Session 33)
+
+### P0 Safety Guards (HADES-dd6) — CLOSED
+
+Implemented all 5 safety guards from the audit findings:
+
+1. **Confirmation dialog on VanillaSoft Push** (`pages/4_CSV_Export.py`) — `@st.dialog` shows lead count, operator, irreversibility warning. Push gated on `vs_push_confirmed` flag.
+2. **Confirmation dialog on Run Now** (`pages/9_Automation.py`) — `@st.dialog` shows pipeline config and credit warning. Execution gated on `auto_run_confirmed` flag.
+3. **Concurrent-run guard** (`scripts/run_intent_pipeline.py`) — `has_running_pipeline()` DB check before `start_pipeline_run()`. Returns early if pipeline already running.
+4. **UNIQUE constraint on lead_outcomes** (`turso_db.py`) — `UNIQUE(batch_id, person_id)` index + `INSERT OR IGNORE`. Prevents duplicate outcome rows from inflating calibration stats.
+5. **auto_run_triggered try/finally** (`pages/9_Automation.py`) — Flag now resets in `finally` block so button doesn't stay disabled after errors.
+
+**Also fixed:** `person_id TEXT` column was missing from `CREATE TABLE lead_outcomes` in `init_schema()` (existed via ALTER TABLE migration but not in schema definition).
+
+**Now unblocked:** HADES-ect (Batch Step 3 enrich N+1) and HADES-io6 (Outcome recording consolidation).
+
+### Test Count
+581 tests passing (+3 new: UNIQUE constraint test, has_running_pipeline test, concurrent guard abort test)
+
+### Uncommitted Changes
+None. All changes committed and pushed.
+
+### What Needs Doing Next Session
+1. **HADES-ect** [P1] — Batch Step 3 enrich N+1 fix + exclude_org_exported (NOW UNBLOCKED)
+2. **HADES-pt0** [P1] — Security hardening (hmac, XSS, .env, error messages)
+3. **HADES-28z** [P1] — CI test workflow + pin dependencies
+4. **HADES-io6** [P2] — Outcome recording consolidation (NOW UNBLOCKED)
+5. **HADES-3bo** [P2] — Config centralization
+
+---
 
 ## Session Summary (2026-02-22, Session 32)
 
