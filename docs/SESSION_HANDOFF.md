@@ -1,7 +1,45 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-21
-**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31).
+**Date:** 2026-02-22
+**Status:** All 4 epics implemented (18 stories complete). 578 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32).
+
+## Session Summary (2026-02-22, Session 32)
+
+### Audit Bead Creation
+
+Created 12 beads from the 45 audit findings in `docs/audit-report-session31.md`, grouping related findings into actionable work items.
+
+**Beads created (12):**
+- **HADES-dd6** [P0/bug] — Safety guards: confirmation dialogs (Push + Run Now), concurrent-run guard, UNIQUE on lead_outcomes, auto_run_triggered finally
+- **HADES-ect** [P1/bug] — Batch Step 3 enrich N+1 + fix exclude_org_exported no-op (blocked by dd6)
+- **HADES-pt0** [P1/bug] — Security hardening: hmac.compare_digest, rate limiting, XSS, .env gitignore, raw exceptions, JWT
+- **HADES-28z** [P1/task] — CI test workflow + pin dependencies
+- **HADES-3bo** [P2/task] — Centralize configuration (7→1 sources of truth)
+- **HADES-mxm** [P2/task] — ZoomInfo API resilience: non-blocking retry, circuit breaker, pagination
+- **HADES-io6** [P2/bug] — Outcome recording consolidation + credits_used + transactions (blocked by dd6)
+- **HADES-oa8** [P2/feature] — UX: 1-click Geo search, contact mini-cards, Push button explanation
+- **HADES-03x** [P3/task] — DB performance: indexes, operators pagination, ZIP caching, migrations
+- **HADES-0xw** [P3/task] — Test quality: vacuous tests, time_ago extraction, Zoho test suite
+- **HADES-v3y** [P3/task] — UI polish: CSS typo, button standardization, WCAG contrast, sidebar icons
+- **HADES-wuq** [P4/task] — Architecture: turso_db split, PII retention, enrich fields, error hierarchy
+
+**Dependencies set:** HADES-ect and HADES-io6 both depend on HADES-dd6 (safety guards first).
+
+### Uncommitted Changes
+None. Audit report committed in session 31. Bead state synced via bd sync.
+
+### Test Count
+578 tests passing (unchanged — no code changes this session)
+
+### What Needs Doing Next Session
+1. **HADES-dd6** [P0] — Add safety guards (confirmation dialogs, concurrent-run, UNIQUE, finally)
+2. **HADES-pt0** [P1] — Security hardening (hmac, XSS, .env, error messages)
+3. **HADES-28z** [P1] — CI test workflow + pin dependencies
+4. **HADES-ect** [P1] — Batch enrich N+1 fix (unblocked after dd6)
+5. **HADES-3bo** [P2] — Config centralization
+6. **HADES-io6** [P2] — Outcome recording fix (unblocked after dd6)
+
+---
 
 ## Session Summary (2026-02-21, Session 31)
 
