@@ -251,37 +251,57 @@ class ZoomInfoClient:
             return None
 
     def _load_persisted_token(self) -> None:
-        """Load cached token from database."""
+        """Load and decrypt cached token from database."""
         try:
             rows = self._token_store.execute(
                 "SELECT value FROM sync_metadata WHERE key = ?",
                 ("zoominfo_token",),
             )
-            if rows:
-                data = json.loads(rows[0][0])
-                token = data.get("jwt")
-                expires_at_str = data.get("expires_at")
-                if token and expires_at_str:
-                    expires_at = datetime.fromisoformat(expires_at_str)
-                    if datetime.now() < expires_at - timedelta(minutes=5):
-                        self.access_token = token
-                        self.token_expires_at = expires_at
+            if not rows:
+                return
+
+            stored_value = rows[0][0]
+            fernet = self._get_fernet()
+
+            if fernet:
+                # Decrypt with 1-hour TTL enforcement
+                decrypted = fernet.decrypt(stored_value.encode(), ttl=3600)
+                data = json.loads(decrypted.decode())
+            else:
+                # No encryption key — cannot read encrypted data, skip
+                logger.debug("No ZOOMINFO_TOKEN_KEY — cannot decrypt persisted token")
+                return
+
+            token = data.get("jwt")
+            expires_at_str = data.get("expires_at")
+            if token and expires_at_str:
+                expires_at = datetime.fromisoformat(expires_at_str)
+                if datetime.now() < expires_at - timedelta(minutes=5):
+                    self.access_token = token
+                    self.token_expires_at = expires_at
         except Exception as e:
             logger.debug(f"Could not load persisted token: {e}")
 
     def _persist_token(self) -> None:
-        """Save current token to database."""
+        """Encrypt and save current token to database."""
         if not self._token_store or not self.access_token:
             return
+
+        fernet = self._get_fernet()
+        if not fernet:
+            logger.warning("No ZOOMINFO_TOKEN_KEY — skipping token persistence (would be plaintext)")
+            return
+
         try:
-            data = json.dumps({
+            plaintext = json.dumps({
                 "jwt": self.access_token,
                 "expires_at": self.token_expires_at.isoformat(),
             })
+            encrypted = fernet.encrypt(plaintext.encode()).decode()
             self._token_store.execute_write(
                 "INSERT INTO sync_metadata (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-                ("zoominfo_token", data),
+                ("zoominfo_token", encrypted),
             )
         except Exception as e:
             logger.debug(f"Could not persist token: {e}")

@@ -1444,3 +1444,111 @@ class TestJWTEncryption:
             mock_st.secrets = {"ZOOMINFO_TOKEN_KEY": "not-a-valid-key"}
             f = client._get_fernet()
             assert f is None
+
+    def test_persist_token_encrypts_when_fernet_available(self, client, fernet_key):
+        """_persist_token() should write encrypted data, not plaintext JSON."""
+        from cryptography.fernet import Fernet
+        from datetime import datetime, timedelta
+        import json
+
+        mock_store = MagicMock()
+        client._token_store = mock_store
+        client.access_token = "secret-jwt-token"
+        client.token_expires_at = datetime.now() + timedelta(hours=1)
+
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {"ZOOMINFO_TOKEN_KEY": fernet_key}
+            client._persist_token()
+
+        # Verify something was written
+        mock_store.execute_write.assert_called_once()
+        call_args = mock_store.execute_write.call_args
+        written_value = call_args[0][1][1]  # second positional arg, second tuple element
+
+        # The written value should NOT be parseable as the original JSON
+        # (it's encrypted, so it should be a Fernet token starting with "gAAAAA")
+        assert written_value.startswith("gAAAAA"), f"Expected Fernet token, got: {written_value[:50]}"
+
+        # But it should be decryptable back to the original data
+        f = Fernet(fernet_key.encode())
+        decrypted = json.loads(f.decrypt(written_value.encode()))
+        assert decrypted["jwt"] == "secret-jwt-token"
+
+    def test_load_persisted_token_decrypts_round_trip(self, client, fernet_key):
+        """Encrypt -> persist -> load should recover the original token."""
+        from cryptography.fernet import Fernet
+        from datetime import datetime, timedelta
+        import json
+
+        original_jwt = "round-trip-jwt-token"
+        expires_at = datetime.now() + timedelta(hours=1)
+
+        # Encrypt the token as _persist_token would
+        f = Fernet(fernet_key.encode())
+        plaintext = json.dumps({
+            "jwt": original_jwt,
+            "expires_at": expires_at.isoformat(),
+        })
+        encrypted = f.encrypt(plaintext.encode()).decode()
+
+        mock_store = MagicMock()
+        mock_store.execute.return_value = [(encrypted,)]
+        client._token_store = mock_store
+
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {"ZOOMINFO_TOKEN_KEY": fernet_key}
+            client._load_persisted_token()
+
+        assert client.access_token == original_jwt
+
+    def test_load_persisted_token_rejects_tampered_ciphertext(self, client, fernet_key):
+        """Tampered ciphertext should fail decryption -- token stays None."""
+        mock_store = MagicMock()
+        mock_store.execute.return_value = [("gAAAAABcorrupted-data-here!!!",)]
+        client._token_store = mock_store
+
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {"ZOOMINFO_TOKEN_KEY": fernet_key}
+            client._load_persisted_token()
+
+        assert client.access_token is None
+
+    def test_load_persisted_token_rejects_expired_fernet_ttl(self, client, fernet_key):
+        """Fernet TTL enforcement should reject tokens encrypted >1 hour ago."""
+        from cryptography.fernet import Fernet
+        from datetime import datetime, timedelta
+        import json
+
+        f = Fernet(fernet_key.encode())
+        plaintext = json.dumps({
+            "jwt": "old-jwt",
+            "expires_at": (datetime.now() + timedelta(hours=1)).isoformat(),
+        })
+        encrypted = f.encrypt(plaintext.encode()).decode()
+
+        mock_store = MagicMock()
+        mock_store.execute.return_value = [(encrypted,)]
+        client._token_store = mock_store
+
+        # Patch Fernet.decrypt to simulate TTL expiry
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {"ZOOMINFO_TOKEN_KEY": fernet_key}
+            with patch("cryptography.fernet.Fernet.decrypt", side_effect=Exception("TTL expired")):
+                client._load_persisted_token()
+
+        assert client.access_token is None
+
+    def test_persist_skips_when_no_fernet_key(self, client):
+        """Without ZOOMINFO_TOKEN_KEY, _persist_token should skip (not write plaintext)."""
+        from datetime import datetime, timedelta
+
+        mock_store = MagicMock()
+        client._token_store = mock_store
+        client.access_token = "secret-jwt"
+        client.token_expires_at = datetime.now() + timedelta(hours=1)
+
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {}
+            client._persist_token()
+
+        mock_store.execute_write.assert_not_called()
