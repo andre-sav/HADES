@@ -1403,3 +1403,44 @@ class TestTokenPersistenceAndThreadSafety:
         import threading
         assert hasattr(client, "_lock")
         assert isinstance(client._lock, type(threading.Lock()))
+
+
+class TestJWTEncryption:
+    """Tests for Fernet encryption of persisted JWT tokens."""
+
+    @pytest.fixture
+    def fernet_key(self):
+        """A valid Fernet key for testing."""
+        from cryptography.fernet import Fernet
+        return Fernet.generate_key().decode()
+
+    @pytest.fixture
+    def client(self):
+        return ZoomInfoClient(client_id="test-id", client_secret="test-secret")
+
+    @pytest.fixture
+    def mock_session(self, client):
+        mock = MagicMock()
+        client._session = mock
+        return mock
+
+    def test_get_fernet_returns_instance_when_key_available(self, client, fernet_key):
+        """_get_fernet() returns Fernet instance when ZOOMINFO_TOKEN_KEY is set."""
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {"ZOOMINFO_TOKEN_KEY": fernet_key}
+            f = client._get_fernet()
+            assert f is not None
+
+    def test_get_fernet_returns_none_when_key_missing(self, client):
+        """_get_fernet() returns None when ZOOMINFO_TOKEN_KEY is not in secrets."""
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {}
+            f = client._get_fernet()
+            assert f is None
+
+    def test_get_fernet_returns_none_when_key_invalid(self, client):
+        """_get_fernet() returns None when ZOOMINFO_TOKEN_KEY is not a valid Fernet key."""
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {"ZOOMINFO_TOKEN_KEY": "not-a-valid-key"}
+            f = client._get_fernet()
+            assert f is None

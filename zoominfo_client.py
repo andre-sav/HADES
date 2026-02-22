@@ -238,6 +238,18 @@ class ZoomInfoClient:
             self._authenticate()
             return self.access_token
 
+    def _get_fernet(self) -> Any | None:
+        """Return Fernet instance from ZOOMINFO_TOKEN_KEY secret, or None if unavailable."""
+        try:
+            from cryptography.fernet import Fernet
+            key = st.secrets.get("ZOOMINFO_TOKEN_KEY")
+            if not key:
+                return None
+            return Fernet(key.encode() if isinstance(key, str) else key)
+        except Exception as e:
+            logger.debug(f"Could not initialize Fernet: {e}")
+            return None
+
     def _load_persisted_token(self) -> None:
         """Load cached token from database."""
         try:
