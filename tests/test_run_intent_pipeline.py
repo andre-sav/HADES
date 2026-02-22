@@ -212,6 +212,7 @@ class TestFullPipeline:
 
         # Mock DB
         db = MockDB.return_value
+        db.has_running_pipeline.return_value = False
         db.get_company_ids_bulk.return_value = {}  # No cache hits
         db.get_exported_company_ids.return_value = {}  # No previous exports
         db.execute_write = MagicMock()
@@ -242,6 +243,8 @@ class TestFullPipeline:
         config = _make_config()
         creds = _make_creds()
 
+        MockDB.return_value.has_running_pipeline.return_value = False
+
         budget = MagicMock()
         budget.alert_level = "exceeded"
         budget.alert_message = "Weekly cap reached"
@@ -270,6 +273,7 @@ class TestFullPipeline:
         client.search_intent_all_pages.return_value = []
 
         db = MockDB.return_value
+        db.has_running_pipeline.return_value = False
         db.init_schema = MagicMock()
 
         result = run_pipeline(config, creds)
@@ -302,6 +306,7 @@ class TestFullPipeline:
         ]
 
         db = MockDB.return_value
+        db.has_running_pipeline.return_value = False
         # c1 was previously exported
         db.get_exported_company_ids.return_value = {
             "c1": {"company_name": "Acme Corp", "exported_at": "2026-02-01", "workflow_type": "intent"},
@@ -463,6 +468,7 @@ class TestPipelineRunLogging:
         ]
 
         db = MockDB.return_value
+        db.has_running_pipeline.return_value = False
         db.get_company_ids_bulk.return_value = {}
         db.get_exported_company_ids.return_value = {}
         db.execute_write = MagicMock()
@@ -490,6 +496,7 @@ class TestPipelineRunLogging:
         MockCostTracker.return_value.check_budget.return_value = budget
 
         db = MockDB.return_value
+        db.has_running_pipeline.return_value = False
         db.start_pipeline_run.return_value = 7
 
         result = run_pipeline(config, creds, trigger="scheduled")
@@ -506,6 +513,7 @@ class TestPipelineRunLogging:
         config = _make_config()
         creds = _make_creds()
         external_db = MagicMock()
+        external_db.has_running_pipeline.return_value = False
         external_db.start_pipeline_run.return_value = 1
 
         budget = MagicMock()
@@ -519,3 +527,20 @@ class TestPipelineRunLogging:
         MockDB.assert_not_called()
         # Should have used external_db
         external_db.start_pipeline_run.assert_called_once()
+
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_concurrent_run_guard_aborts(self, MockClient, MockDB, MockCostTracker):
+        """Pipeline aborts if another run is already in progress."""
+        config = _make_config()
+        creds = _make_creds()
+
+        db = MockDB.return_value
+        db.has_running_pipeline.return_value = True
+
+        result = run_pipeline(config, creds)
+
+        assert result["success"] is False
+        assert result["error"] == "Pipeline already running"
+        db.start_pipeline_run.assert_not_called()

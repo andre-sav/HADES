@@ -734,6 +734,17 @@ class TestPipelineRuns:
         assert runs[0]["status"] == "running"
         assert runs[0]["completed_at"] is None
 
+    def test_has_running_pipeline(self):
+        """Detect if a pipeline run is already in progress."""
+        db = self._get_db()
+        assert db.has_running_pipeline("intent") is False
+
+        run_id = db.start_pipeline_run("intent", "scheduled", {})
+        assert db.has_running_pipeline("intent") is True
+
+        db.complete_pipeline_run(run_id, "success", {}, None, 0, 0, None)
+        assert db.has_running_pipeline("intent") is False
+
 
 class TestStagedExportPushTracking:
     """Tests for push tracking columns on staged_exports."""

@@ -922,6 +922,14 @@ class TursoDatabase:
             for r in rows
         ]
 
+    def has_running_pipeline(self, workflow_type: str) -> bool:
+        """Check if any pipeline run is currently in 'running' status."""
+        rows = self.execute(
+            "SELECT id FROM pipeline_runs WHERE workflow_type = ? AND status = 'running' LIMIT 1",
+            (workflow_type,),
+        )
+        return len(rows) > 0
+
 
 @st.cache_resource(ttl=3600)  # Refresh connection every hour to prevent stale connections
 def get_database() -> TursoDatabase:

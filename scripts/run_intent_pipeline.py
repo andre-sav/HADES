@@ -100,6 +100,14 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
 
     cost_tracker = CostTracker(db)
 
+    # --- Concurrent-run guard ---
+    if db.has_running_pipeline("intent"):
+        logger.warning("Pipeline already running — aborting to prevent overlap")
+        return {
+            "success": False, "csv_content": None, "csv_filename": None,
+            "batch_id": None, "summary": summary, "error": "Pipeline already running",
+        }
+
     # --- Log pipeline start ---
     run_id = db.start_pipeline_run("intent", trigger, config)
 
