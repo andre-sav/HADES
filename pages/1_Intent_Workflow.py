@@ -40,6 +40,9 @@ from utils import (
     get_sic_codes_with_descriptions,
     get_employee_minimum,
     get_employee_maximum,
+    get_default_accuracy,
+    get_default_management_levels,
+    get_default_phone_fields,
 )
 from ui_components import (
     inject_base_styles,
@@ -274,8 +277,8 @@ _results_showing = st.session_state.intent_enrichment_done and st.session_state.
 selected_topics = []
 signal_strengths = []
 intent_mgmt_levels = ["Manager"]
-intent_accuracy_min = 95
-intent_phone_fields = ["mobilePhone", "directPhone", "phone"]
+intent_accuracy_min = get_default_accuracy()
+intent_phone_fields = get_default_phone_fields()
 target_companies = 25
 search_clicked = False
 
@@ -327,21 +330,21 @@ else:
         intent_mgmt_levels = st.multiselect(
             "Management level",
             options=["Manager", "Director", "VP Level Exec", "C Level Exec"],
-            default=["Manager", "Director", "VP Level Exec"],
+            default=get_default_management_levels(),
             key="intent_mgmt_levels",
         )
         intent_accuracy_min = st.number_input(
             "Accuracy minimum",
             min_value=0,
             max_value=100,
-            value=95,
+            value=get_default_accuracy(),
             step=5,
             key="intent_accuracy_min",
         )
         intent_phone_fields = st.multiselect(
             "Required phone fields",
             options=["mobilePhone", "directPhone", "phone"],
-            default=["mobilePhone", "directPhone", "phone"],
+            default=get_default_phone_fields(),
             key="intent_phone_fields",
             help="Contact must have at least one selected phone type",
         )
@@ -915,9 +918,9 @@ if (
 
                     params = ContactQueryParams(
                         company_ids=numeric_ids,
-                        management_levels=intent_mgmt_levels if intent_mgmt_levels is not None else ["Manager", "Director", "VP Level Exec"],
+                        management_levels=intent_mgmt_levels if intent_mgmt_levels is not None else get_default_management_levels(),
                         contact_accuracy_score_min=intent_accuracy_min,
-                        required_fields=intent_phone_fields or ["mobilePhone", "directPhone", "phone"],
+                        required_fields=intent_phone_fields or get_default_phone_fields(),
                         required_fields_operator="or",
                     )
 

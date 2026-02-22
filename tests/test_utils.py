@@ -18,6 +18,12 @@ from utils import (
     get_sic_codes,
     get_sic_codes_with_descriptions,
     get_employee_minimum,
+    get_employee_maximum,
+    get_default_accuracy,
+    get_default_management_levels,
+    get_default_phone_fields,
+    get_default_target_contacts,
+    get_default_radius,
     get_state_from_zip,
     remove_phone_extension,
     normalize_phone,
@@ -59,6 +65,33 @@ class TestConfigLoading:
         """Test employee minimum."""
         minimum = get_employee_minimum()
         assert minimum == 50
+
+    def test_get_employee_maximum(self):
+        """Test employee maximum."""
+        maximum = get_employee_maximum()
+        assert maximum == 5000
+
+    def test_get_default_accuracy(self):
+        """Test default accuracy score from config."""
+        assert get_default_accuracy() == 95
+
+    def test_get_default_management_levels(self):
+        """Test default management levels from config."""
+        levels = get_default_management_levels()
+        assert levels == ["Manager", "Director", "VP Level Exec"]
+
+    def test_get_default_phone_fields(self):
+        """Test default phone fields from config."""
+        fields = get_default_phone_fields()
+        assert fields == ["mobilePhone", "directPhone", "phone"]
+
+    def test_get_default_target_contacts(self):
+        """Test default target contact count from config."""
+        assert get_default_target_contacts() == 25
+
+    def test_get_default_radius(self):
+        """Test default search radius from config."""
+        assert get_default_radius() == 15
 
     def test_get_sic_codes_with_descriptions(self):
         """Test SIC codes return with descriptions."""

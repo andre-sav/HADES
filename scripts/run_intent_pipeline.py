@@ -49,7 +49,7 @@ from export import export_leads_to_csv
 from export_dedup import get_previously_exported, filter_previously_exported
 from expand_search import build_contacts_by_company
 from cost_tracker import CostTracker
-from utils import get_call_center_agents, get_sic_codes, get_employee_minimum
+from utils import get_call_center_agents, get_sic_codes, get_employee_minimum, get_default_phone_fields
 
 logger = logging.getLogger("intent_pipeline")
 
@@ -237,7 +237,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             company_ids=numeric_ids,
             management_levels=config.get("management_levels", ["Manager", "Director", "VP Level Exec"]),
             contact_accuracy_score_min=config.get("accuracy_min", 95),
-            required_fields=config.get("phone_fields", ["mobilePhone", "directPhone", "phone"]),
+            required_fields=config.get("phone_fields", get_default_phone_fields()),
             required_fields_operator="or",
         )
 

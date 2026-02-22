@@ -251,6 +251,37 @@ def get_employee_maximum() -> int:
     return config.get("hard_filters", {}).get("employee_count", {}).get("maximum", 5000)
 
 
+def get_search_defaults() -> dict:
+    """Get search defaults (single source of truth for UI and expansion)."""
+    config = load_config()
+    return config.get("search_defaults", {})
+
+
+def get_default_accuracy() -> int:
+    """Get default contact accuracy score minimum."""
+    return get_search_defaults().get("accuracy_min", 95)
+
+
+def get_default_management_levels() -> list[str]:
+    """Get default management level filter."""
+    return get_search_defaults().get("management_levels", ["Manager", "Director", "VP Level Exec"])
+
+
+def get_default_phone_fields() -> list[str]:
+    """Get default required phone fields."""
+    return get_search_defaults().get("phone_fields", ["mobilePhone", "directPhone", "phone"])
+
+
+def get_default_target_contacts() -> int:
+    """Get default target contact count for search."""
+    return get_search_defaults().get("target_contacts", 25)
+
+
+def get_default_radius() -> float:
+    """Get default search radius in miles."""
+    return get_search_defaults().get("radius_miles", 15)
+
+
 # ZIP code prefix to state mapping (first 3 digits)
 ZIP_PREFIX_TO_STATE = {
     # Alabama (350-369)

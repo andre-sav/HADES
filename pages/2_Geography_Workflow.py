@@ -39,6 +39,11 @@ from utils import (
     get_employee_minimum,
     get_employee_maximum,
     get_state_from_zip,
+    get_default_accuracy,
+    get_default_management_levels,
+    get_default_phone_fields,
+    get_default_radius,
+    get_default_target_contacts,
 )
 from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, haversine_distance
 from expand_search import (
@@ -140,12 +145,12 @@ defaults = {
     "geo_dedup_result": None,
     # Filter persistence (Phase 1 UX improvement)
     "geo_last_filters": {
-        "radius": 15.0,
-        "accuracy_min": 95,
+        "radius": get_default_radius(),
+        "accuracy_min": get_default_accuracy(),
         "location_type": "PersonAndHQ",
         "current_only": True,
-        "management_levels": ["Manager", "Director", "VP Level Exec"],
-        "target_contacts": 25,
+        "management_levels": get_default_management_levels(),
+        "target_contacts": get_default_target_contacts(),
         "stop_early": True,
     },
     # Query state tracking (Phase 2 UX - stale detection)
@@ -625,7 +630,7 @@ if has_operator:
                 "Min Accuracy Score",
                 min_value=0,
                 max_value=100,
-                value=last_filters.get("accuracy_min", 95),
+                value=last_filters.get("accuracy_min", get_default_accuracy()),
                 help="Minimum contact accuracy score (0-100)",
             )
 
@@ -685,7 +690,7 @@ if has_operator:
             required_fields = st.multiselect(
                 "Required Phone Fields",
                 options=list(PHONE_FIELD_OPTIONS.keys()),
-                default=["mobilePhone", "directPhone", "phone"],
+                default=get_default_phone_fields(),
                 format_func=lambda x: PHONE_FIELD_OPTIONS.get(x, x),
                 help="Contact must have at least one of these phone types (OR logic)",
             )
@@ -709,7 +714,7 @@ if has_operator:
             management_levels = st.multiselect(
                 "Management Level",
                 options=MANAGEMENT_LEVELS,
-                default=last_filters.get("management_levels", ["Manager", "Director", "VP Level Exec"]),
+                default=last_filters.get("management_levels", get_default_management_levels()),
                 help="Filter by job title/role level. Manager targets facility managers and operations managers.",
             )
 

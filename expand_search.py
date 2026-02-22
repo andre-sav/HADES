@@ -33,7 +33,14 @@ from typing import Any, Callable, Optional
 
 from zoominfo_client import ContactQueryParams
 from geo import get_zips_in_radius, get_states_from_zips
-from utils import get_employee_minimum
+from utils import (
+    get_employee_minimum,
+    get_employee_maximum,
+    get_default_accuracy,
+    get_default_management_levels,
+    get_default_target_contacts,
+    get_default_radius,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +82,12 @@ EXPANSION_STEPS = [
     {"radius": 20.0},
 ]
 
-# Default starting values
-DEFAULT_TARGET_CONTACTS = 25
-DEFAULT_START_RADIUS = 10.0
-DEFAULT_START_ACCURACY = 95
-DEFAULT_START_MANAGEMENT = ["Manager", "Director", "VP Level Exec"]
-DEFAULT_START_EMPLOYEE_MAX = 5000
+# Default starting values — loaded from config/icp.yaml via utils.py getters
+DEFAULT_TARGET_CONTACTS = get_default_target_contacts()
+DEFAULT_START_RADIUS = get_default_radius()
+DEFAULT_START_ACCURACY = get_default_accuracy()
+DEFAULT_START_MANAGEMENT = get_default_management_levels()
+DEFAULT_START_EMPLOYEE_MAX = get_employee_maximum()
 
 
 # =============================================================================
