@@ -2,7 +2,6 @@
 
 import sys
 import os
-import tempfile
 from unittest.mock import MagicMock
 
 # Mock Streamlit before importing modules

@@ -7,7 +7,6 @@ import logging
 
 import streamlit as st
 import streamlit_shadcn_ui as ui
-import pandas as pd
 from datetime import datetime
 
 from turso_db import get_database
@@ -18,14 +17,12 @@ from utils import get_call_center_agents
 from ui_components import (
     inject_base_styles,
     page_header,
-    status_badge,
     export_validation_checklist,
     metric_card,
     styled_table,
     empty_state,
     labeled_divider,
     score_breakdown,
-    COLORS,
 )
 
 logger = logging.getLogger(__name__)

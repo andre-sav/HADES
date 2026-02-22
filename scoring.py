@@ -3,7 +3,6 @@ Lead scoring engine for Intent and Geography workflows.
 """
 
 from datetime import datetime, date
-from typing import Any
 
 from utils import (
     get_scoring_weights,

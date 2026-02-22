@@ -13,7 +13,6 @@ from pathlib import Path
 
 import yaml
 
-from utils import load_config
 
 SCORE_MIN = 20
 SCORE_MAX = 100

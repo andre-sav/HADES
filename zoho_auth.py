@@ -5,7 +5,6 @@ Zoho OAuth 2.0 Authentication Module
 """
 
 import httpx
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional

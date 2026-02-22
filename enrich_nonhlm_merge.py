@@ -80,7 +80,7 @@ def main():
     else:
         print(f"\n  WARNING: {CHATGPT_PATH} not found.")
         print(f"  Download the ChatGPT output CSV and save it as {CHATGPT_PATH}")
-        print(f"  Proceeding with keyword classifications only.\n")
+        print("  Proceeding with keyword classifications only.\n")
 
     # Merge
     print("\nMerging...")
@@ -117,7 +117,7 @@ def main():
     print(f"\n  Total:     {stats['total']:,}")
     print(f"  Enriched:  {stats['matched']:,} ({rate:.1f}%)")
     print(f"  Missing:   {stats['unmatched']:,} ({100 - rate:.1f}%)")
-    print(f"\n  By source:")
+    print("\n  By source:")
     for src, cnt in source_counts.most_common():
         print(f"    {src:15s} {cnt:,}")
 
@@ -137,7 +137,7 @@ def main():
         print(f"\n  ICP coverage: {in_target:,}/{total_classified:,} delivered records ({in_target/total_classified*100:.1f}%) match current 22 target SICs")
         new_sics = {sic for sic in del_sics if sic not in TARGET_SICS and del_sics[sic] >= 10}
         if new_sics:
-            print(f"\n  Candidate SICs to ADD to ICP (10+ deliveries, not in current 22):")
+            print("\n  Candidate SICs to ADD to ICP (10+ deliveries, not in current 22):")
             for sic in sorted(new_sics, key=lambda s: -del_sics[s]):
                 desc = next((r["sic_description"] for r in delivered if r["sic_code"] == sic and r["sic_description"]), "")
                 print(f"    {sic} {desc:45s} {del_sics[sic]:,} deliveries")

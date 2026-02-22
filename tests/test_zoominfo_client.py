@@ -5,7 +5,7 @@ Run with: pytest tests/test_zoominfo_client.py -v
 """
 
 import sys
-from unittest.mock import MagicMock, patch, Mock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -612,8 +612,8 @@ class TestContactSearch:
         assert body["requiredFields"] == "email"  # Comma-separated string
         assert body["contactAccuracyScoreMin"] == "80"  # API expects string
 
-    def test_search_contacts_no_required_fields(self, client):
-        """Test contact search without requiredFields filter."""
+    def test_search_contacts_no_required_fields_omits_key(self, client):
+        """Test contact search without requiredFields filter omits the key."""
         mock_response = {"data": [], "totalResults": 0}
 
         with patch.object(client, "_request", return_value=mock_response) as mock_req:

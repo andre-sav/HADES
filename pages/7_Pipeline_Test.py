@@ -21,7 +21,7 @@ from utils import get_sic_codes, get_employee_minimum, get_employee_maximum
 from geo import get_zips_in_radius, get_states_from_zips
 from cost_tracker import CostTracker
 from turso_db import get_database
-from ui_components import inject_base_styles, page_header, step_indicator
+from ui_components import inject_base_styles, page_header
 
 st.set_page_config(page_title="Pipeline Test (Dev)", page_icon="🧪", layout="wide")
 

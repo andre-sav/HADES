@@ -4,9 +4,7 @@ Tests for utility functions.
 Run with: pytest tests/test_utils.py -v
 """
 
-import hmac
 import pytest
-from unittest.mock import patch, MagicMock
 from utils import (
     load_config,
     get_hard_filters,

@@ -1643,7 +1643,7 @@ def parameter_group(
     summary: str,
     expanded: bool = False,
     key: Optional[str] = None,
-) -> "streamlit.expander":
+):
     """
     Create a collapsible parameter group with a summary line.
 

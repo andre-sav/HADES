@@ -179,7 +179,6 @@ def main():
         print("Set via environment or .streamlit/secrets.toml")
         sys.exit(1)
 
-    import libsql_experimental as libsql
     from turso_db import TursoDatabase
 
     db = TursoDatabase(url=db_url, auth_token=db_token)

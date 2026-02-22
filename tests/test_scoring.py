@@ -5,7 +5,6 @@ Run with: pytest tests/test_scoring.py -v
 """
 
 from datetime import date, timedelta
-import pytest
 
 from scoring import (
     calculate_intent_score,

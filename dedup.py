@@ -4,7 +4,6 @@ Deduplication logic for phone numbers and cross-workflow leads.
 
 import re
 from functools import lru_cache
-from typing import Any
 
 from rapidfuzz.fuzz import token_sort_ratio
 from utils import load_config, normalize_phone

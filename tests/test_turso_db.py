@@ -7,7 +7,7 @@ Run with: pytest tests/test_turso_db.py -v
 import json
 import sys
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 # Mock external dependencies before importing turso_db
 sys.modules["libsql_experimental"] = MagicMock()

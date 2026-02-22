@@ -4,7 +4,6 @@ Tests for deduplication logic.
 Run with: pytest tests/test_dedup.py -v
 """
 
-import pytest
 
 from dedup import (
     normalize_company_name,

@@ -17,7 +17,6 @@ Usage:
 
 import csv
 import re
-import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -554,7 +553,7 @@ def main():
     print(f"\n  Total: {stats['total']:,}")
     print(f"  Matched: {stats['matched']:,} ({rate:.1f}%)")
     print(f"  Unmatched: {stats['unmatched']:,} ({100 - rate:.1f}%)")
-    print(f"\n  Match methods:")
+    print("\n  Match methods:")
     for method, count in sorted(method_counts.items(), key=lambda x: -x[1]):
         print(f"    {method}: {count:,}")
 
@@ -565,7 +564,7 @@ def main():
         if stage in outcomes:
             outcomes[stage].append(row)
 
-    print(f"\n  Outcome match rates:")
+    print("\n  Outcome match rates:")
     total_outcome = 0
     total_outcome_matched = 0
     for stage, rows in outcomes.items():

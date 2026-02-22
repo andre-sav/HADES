@@ -12,8 +12,6 @@ from turso_db import get_database
 from ui_components import (
     inject_base_styles,
     page_header,
-    status_badge,
-    metric_card,
     styled_table,
     empty_state,
     COLORS,

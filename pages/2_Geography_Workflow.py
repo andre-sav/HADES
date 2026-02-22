@@ -28,12 +28,9 @@ from turso_db import get_database
 from errors import PipelineError
 from zoominfo_client import (
     get_zoominfo_client,
-    ContactQueryParams,
-    ContactEnrichParams,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
 from scoring import score_geography_leads, get_priority_label, get_priority_action
-from dedup import dedupe_leads
 from export_dedup import apply_export_dedup
 from cost_tracker import CostTracker
 from utils import (
@@ -62,10 +59,8 @@ from ui_components import (
     status_badge,
     metric_card,
     labeled_divider,
-    parameter_group,
     query_summary_bar,
     export_quality_warnings,
-    review_controls_bar,
     score_breakdown,
     paginate_items,
     pagination_controls,
@@ -74,7 +69,6 @@ from ui_components import (
     workflow_summary_strip,
     last_run_indicator,
     expansion_timeline,
-    COLORS,
 )
 
 st.set_page_config(page_title="Geography", page_icon="📍", layout="wide")
@@ -992,7 +986,7 @@ if has_operator:
                 job.result = result
             except PipelineError as e:
                 job.error = e.user_message
-            except Exception as e:
+            except Exception:
                 logger.exception("Geography search failed")
                 job.error = "Search failed unexpectedly. Check application logs."
             job.done.set()
@@ -1435,7 +1429,7 @@ if (
 
     with confirm_col1:
         if selected_count == 0:
-            st.button(f"Enrich Selected (0 contacts)", type="primary", use_container_width=True, disabled=True)
+            st.button("Enrich Selected (0 contacts)", type="primary", use_container_width=True, disabled=True)
         elif st.session_state.geo_test_mode:
             # Test mode: skip dialog
             if st.button(f"Enrich Selected ({selected_count} contacts)", type="primary", use_container_width=True, key="geo_enrich_test_btn"):
@@ -1502,7 +1496,7 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                     st.rerun()
                 except PipelineError as e:
                     st.error(f"Enrichment failed: {e.user_message}")
-                except Exception as e:
+                except Exception:
                     logger.exception("Geography enrichment failed")
                     st.error("Enrichment failed unexpectedly. Check application logs.")
     else:

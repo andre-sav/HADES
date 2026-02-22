@@ -5,7 +5,6 @@ Turso database connection and operations for the ZoomInfo Lead Pipeline.
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Any
 
 import libsql_experimental as libsql
 import streamlit as st

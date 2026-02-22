@@ -5,7 +5,6 @@ HADES - ZoomInfo Lead Pipeline
 import logging
 
 import streamlit as st
-import streamlit_shadcn_ui as ui
 from datetime import datetime
 from ui_components import (
     inject_base_styles,

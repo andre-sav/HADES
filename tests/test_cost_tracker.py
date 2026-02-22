@@ -10,8 +10,6 @@ from unittest.mock import MagicMock, patch
 from cost_tracker import (
     CostTracker,
     BudgetExceededError,
-    BudgetStatus,
-    UsageSummary,
 )
 
 

@@ -78,7 +78,7 @@ if st.button("🔍 Probe Lookup Endpoints", type="primary"):
 
     except PipelineError as e:
         st.error(f"Failed to connect to ZoomInfo: {e.user_message}")
-    except Exception as e:
+    except Exception:
         st.error("Failed to connect to ZoomInfo. Check application logs.")
 
 st.markdown("---")
@@ -137,7 +137,7 @@ if st.button("🧪 Test Minimal Search"):
 
     except PipelineError as e:
         st.error(f"Connection error: {e.user_message}")
-    except Exception as e:
+    except Exception:
         st.error("Connection error. Check application logs.")
 
 st.markdown("---")

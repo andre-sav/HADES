@@ -20,7 +20,6 @@ from ui_components import (
     styled_table,
     empty_state,
     labeled_divider,
-    COLORS,
 )
 
 logger = logging.getLogger(__name__)

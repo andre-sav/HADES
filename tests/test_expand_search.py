@@ -1,7 +1,6 @@
 """Tests for expand_search functionality in Geography Workflow."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from expand_search import build_contacts_by_company
 

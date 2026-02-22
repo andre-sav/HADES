@@ -1,0 +1,21 @@
+# Ruff linter configuration
+# https://docs.astral.sh/ruff/
+
+line-length = 120
+
+[lint]
+select = ["E", "F"]
+ignore = [
+    "E501",  # line too long — not enforcing on existing codebase
+    "E741",  # ambiguous variable names (l, O, I) — used intentionally
+]
+
+[lint.per-file-ignores]
+# Streamlit pages must call st.set_page_config() before other imports
+"pages/*.py" = ["E402"]
+# Scripts set env vars before importing project modules
+"scripts/*.py" = ["E402"]
+# app.py has require_auth() after inject_base_styles()
+"app.py" = ["E402"]
+# Tests mock modules before importing, and use `except Exception as e` without reading e
+"tests/*.py" = ["E402", "F841"]

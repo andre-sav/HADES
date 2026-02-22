@@ -5,8 +5,7 @@ Run with: pytest tests/test_ui_components.py -v
 """
 
 import sys
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 # Mock streamlit before importing
 mock_st = MagicMock()

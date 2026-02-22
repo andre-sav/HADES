@@ -43,13 +43,13 @@ from zoominfo_client import (
     ContactQueryParams,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
-from scoring import score_intent_leads, score_intent_contacts, get_priority_label, calculate_age_days
+from scoring import score_intent_leads, score_intent_contacts, get_priority_label
 from dedup import dedupe_leads
 from export import export_leads_to_csv
 from export_dedup import get_previously_exported, filter_previously_exported
 from expand_search import build_contacts_by_company
 from cost_tracker import CostTracker
-from utils import get_call_center_agents, get_sic_codes, get_employee_minimum, get_employee_maximum
+from utils import get_call_center_agents, get_sic_codes, get_employee_minimum
 
 logger = logging.getLogger("intent_pipeline")
 
@@ -364,7 +364,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
     except PipelineError as e:
         db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, e.user_message)
         raise
-    except Exception as e:
+    except Exception:
         db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, "Unexpected pipeline error")
         raise
 

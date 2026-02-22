@@ -1,10 +1,8 @@
 """Tests for scripts/run_intent_pipeline.py — Automated Intent Pipeline."""
 
-import json
 import sys
 from datetime import datetime
-from email.mime.multipart import MIMEMultipart
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 # Mock Streamlit and libsql before importing modules
 sys.modules["streamlit"] = MagicMock()

@@ -154,7 +154,7 @@ def main():
 
     # Show keyword breakdown
     sic_counts = Counter(r["sic_code"] for r in keyword_results)
-    print(f"\n  Keyword SIC breakdown:")
+    print("\n  Keyword SIC breakdown:")
     for sic, cnt in sic_counts.most_common():
         desc = next(r["sic_description"] for r in keyword_results if r["sic_code"] == sic)
         print(f"    {sic} {desc:45s} {cnt:,}")

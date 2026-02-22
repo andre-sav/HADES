@@ -218,13 +218,13 @@ class ZohoClient:
             # Check for more pages
             info = result.get("info", {})
             if not info.get("more_records", False):
-                logger.info(f"  No more pages available")
+                logger.info("  No more pages available")
                 break
 
             # Use page_token for subsequent requests (required for >2000 records)
             page_token = info.get("next_page_token")
             if not page_token:
-                logger.info(f"  No next_page_token, stopping")
+                logger.info("  No next_page_token, stopping")
                 break
 
             page += 1

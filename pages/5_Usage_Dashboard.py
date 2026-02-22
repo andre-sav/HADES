@@ -8,8 +8,6 @@ import logging
 import streamlit as st
 import streamlit_shadcn_ui as ui
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 from turso_db import get_database
@@ -22,7 +20,6 @@ from ui_components import (
     metric_card,
     empty_state,
     labeled_divider,
-    COLORS,
 )
 
 logger = logging.getLogger(__name__)

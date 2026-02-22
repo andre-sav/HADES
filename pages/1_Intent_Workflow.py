@@ -47,9 +47,7 @@ from ui_components import (
     step_indicator,
     status_badge,
     metric_card,
-    labeled_divider,
     parameter_group,
-    colored_progress_bar,
     paginate_items,
     pagination_controls,
     export_quality_warnings,
@@ -58,7 +56,6 @@ from ui_components import (
     action_bar,
     workflow_summary_strip,
     last_run_indicator,
-    COLORS,
 )
 
 st.set_page_config(page_title="Intent", page_icon="🎯", layout="wide")
@@ -585,7 +582,7 @@ if search_clicked:
                 st.session_state["_intent_api_error"] = str(e.user_message)
                 st.session_state["_intent_api_exchange"] = getattr(client, "last_exchange", None)
                 st.error(e.user_message)
-            except Exception as e:
+            except Exception:
                 st.session_state["_intent_api_error"] = "An unexpected error occurred"
                 try:
                     st.session_state["_intent_api_exchange"] = getattr(client, "last_exchange", None)
@@ -955,7 +952,7 @@ if (
             except PipelineError as e:
                 search_status.update(label="❌ API Error", state="error")
                 st.error(e.user_message)
-            except Exception as e:
+            except Exception:
                 search_status.update(label="❌ Contact search failed", state="error")
                 logger.exception("Contact search failed")
                 st.error("Contact search failed unexpectedly. Check application logs.")
@@ -1113,7 +1110,7 @@ if (
         enrich_col1, enrich_col2 = st.columns([1, 3])
         with enrich_col1:
             if selected_contact_count == 0:
-                st.button(f"Enrich (0 contacts)", disabled=True, use_container_width=True)
+                st.button("Enrich (0 contacts)", disabled=True, use_container_width=True)
             elif st.session_state.intent_test_mode:
                 # Test mode: skip dialog, go directly
                 if ui.button(text=f"Enrich ({selected_contact_count} contacts)", variant="default", key="intent_enrich_test_btn"):
@@ -1178,7 +1175,7 @@ if (
                             st.rerun()
                         except PipelineError as e:
                             st.error(f"Enrichment failed: {e.user_message}")
-                        except Exception as e:
+                        except Exception:
                             logger.exception("Enrichment failed")
                             st.error("Enrichment failed unexpectedly. Check application logs.")
 

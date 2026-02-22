@@ -6,7 +6,6 @@ Separate from dedup.py which handles in-memory, within-session dedup.
 """
 
 import logging
-from typing import Any
 
 from dedup import normalize_company_name
 

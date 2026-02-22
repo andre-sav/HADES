@@ -154,7 +154,7 @@ with st.expander("Sync from Zoho CRM", expanded=False):
                         parts.append(f"{result['linked']} linked")
                     if result['skipped']:
                         parts.append(f"{result['skipped']} skipped")
-                    st.success(f"Full sync: " + (", ".join(parts) if parts else "no changes"))
+                    st.success("Full sync: " + (", ".join(parts) if parts else "no changes"))
                     st.rerun()
                 except Exception as e:
                     logger.error(f"Sync failed: {e}")
