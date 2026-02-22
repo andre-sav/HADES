@@ -735,9 +735,7 @@ class TestContactSearch:
         assert body["jobTitle"] == "Facility Manager,Operations Manager"
 
     def test_search_contacts_exclude_org_exported(self, client):
-        """Test contact search param exists but field not in API (not sent)."""
-        # Note: excludeOrgExportedContacts is not a valid ZoomInfo API field
-        # The param exists in ContactQueryParams but is not included in request
+        """Test exclude_org_exported is sent to ZoomInfo API when True (default)."""
         mock_response = {"data": [], "totalResults": 0}
 
         with patch.object(client, "_request", return_value=mock_response) as mock_req:
@@ -750,11 +748,10 @@ class TestContactSearch:
 
         call_args = mock_req.call_args
         body = call_args[1]["json"]
-        # This field is not in the official API, so we don't send it
-        assert "excludeOrgExportedContacts" not in body
+        assert body["excludeOrgExportedContacts"] is True
 
     def test_search_contacts_include_org_exported(self, client):
-        """Test contact search can include org exported contacts."""
+        """Test exclude_org_exported=False omits the field from request."""
         mock_response = {"data": [], "totalResults": 0}
 
         with patch.object(client, "_request", return_value=mock_response) as mock_req:

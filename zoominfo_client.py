@@ -827,6 +827,10 @@ class ZoomInfoClient:
         if params.job_titles:
             request_body["jobTitle"] = ",".join(params.job_titles)
 
+        # Exclude contacts already exported by this org
+        if params.exclude_org_exported:
+            request_body["excludeOrgExportedContacts"] = True
+
         response = self._request("POST", "/search/contact", json=request_body, params=query_params)
 
         result = {
