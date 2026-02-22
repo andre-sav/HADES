@@ -85,6 +85,7 @@ ZOOMINFO_CLIENT_ID = "..."
 ZOOMINFO_CLIENT_SECRET = "..."
 VANILLASOFT_WEB_LEAD_ID = "..."  # VanillaSoft Incoming Web Leads profile ID
 APP_PASSWORD = "..."              # Password gate for Streamlit Community Cloud (optional for local dev)
+ZOOMINFO_TOKEN_KEY = "..."        # Fernet key for encrypting JWT at rest (generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 ```
 
 ## Testing
