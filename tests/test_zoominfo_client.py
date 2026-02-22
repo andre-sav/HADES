@@ -1352,20 +1352,27 @@ class TestTokenPersistenceAndThreadSafety:
     def test_get_token_expired_checks_db_before_reauth(self, client, mock_session):
         """When in-memory token is expired, should try DB before re-authenticating."""
         from datetime import datetime, timedelta
+        from cryptography.fernet import Fernet
         import json
 
         client.access_token = "expired-token"
         client.token_expires_at = datetime.now() - timedelta(minutes=10)
 
-        mock_store = MagicMock()
-        valid_token_data = json.dumps({
+        # Create encrypted token data (as _persist_token would)
+        key = Fernet.generate_key()
+        f = Fernet(key)
+        valid_token_data = f.encrypt(json.dumps({
             "jwt": "persisted-token",
             "expires_at": (datetime.now() + timedelta(hours=1)).isoformat(),
-        })
+        }).encode()).decode()
+
+        mock_store = MagicMock()
         mock_store.execute.return_value = [(valid_token_data,)]
         client._token_store = mock_store
 
-        token = client._get_token()
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {"ZOOMINFO_TOKEN_KEY": key.decode()}
+            token = client._get_token()
 
         assert token == "persisted-token"
         mock_store.execute.assert_called_once()
@@ -1374,16 +1381,21 @@ class TestTokenPersistenceAndThreadSafety:
     def test_get_token_expired_reauths_when_db_also_expired(self, client, mock_session):
         """When both in-memory and DB tokens are expired, should re-authenticate."""
         from datetime import datetime, timedelta
+        from cryptography.fernet import Fernet
         import json
 
         client.access_token = "expired-token"
         client.token_expires_at = datetime.now() - timedelta(minutes=10)
 
-        mock_store = MagicMock()
-        expired_token_data = json.dumps({
+        # Create encrypted but app-level-expired token
+        key = Fernet.generate_key()
+        f = Fernet(key)
+        expired_token_data = f.encrypt(json.dumps({
             "jwt": "also-expired",
             "expires_at": (datetime.now() - timedelta(hours=1)).isoformat(),
-        })
+        }).encode()).decode()
+
+        mock_store = MagicMock()
         mock_store.execute.return_value = [(expired_token_data,)]
         client._token_store = mock_store
 
@@ -1392,7 +1404,9 @@ class TestTokenPersistenceAndThreadSafety:
         mock_response.json.return_value = {"jwt": "fresh-token", "expiresIn": 3600}
         mock_session.post.return_value = mock_response
 
-        token = client._get_token()
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {"ZOOMINFO_TOKEN_KEY": key.decode()}
+            token = client._get_token()
 
         assert token == "fresh-token"
         mock_store.execute.assert_called_once()
@@ -1500,6 +1514,8 @@ class TestJWTEncryption:
             client._load_persisted_token()
 
         assert client.access_token == original_jwt
+        assert client.token_expires_at is not None
+        assert abs((client.token_expires_at - expires_at).total_seconds()) < 1
 
     def test_load_persisted_token_rejects_tampered_ciphertext(self, client, fernet_key):
         """Tampered ciphertext should fail decryption -- token stays None."""
@@ -1552,3 +1568,26 @@ class TestJWTEncryption:
             client._persist_token()
 
         mock_store.execute_write.assert_not_called()
+
+    def test_load_skips_when_no_fernet_key(self, client, fernet_key):
+        """Without ZOOMINFO_TOKEN_KEY, _load_persisted_token should skip (not attempt decryption)."""
+        from cryptography.fernet import Fernet
+        from datetime import datetime, timedelta
+        import json
+
+        # Store encrypted data in mock DB
+        f = Fernet(fernet_key.encode())
+        encrypted = f.encrypt(json.dumps({
+            "jwt": "should-not-load",
+            "expires_at": (datetime.now() + timedelta(hours=1)).isoformat(),
+        }).encode()).decode()
+
+        mock_store = MagicMock()
+        mock_store.execute.return_value = [(encrypted,)]
+        client._token_store = mock_store
+
+        with patch("zoominfo_client.st") as mock_st:
+            mock_st.secrets = {}  # No ZOOMINFO_TOKEN_KEY
+            client._load_persisted_token()
+
+        assert client.access_token is None
