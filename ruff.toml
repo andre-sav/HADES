@@ -19,3 +19,5 @@ ignore = [
 "app.py" = ["E402"]
 # Tests mock modules before importing, and use `except Exception as e` without reading e
 "tests/*.py" = ["E402", "F841"]
+# PDF build scripts use intermediate variables for readability
+"docs/briefing/*.py" = ["F841"]
