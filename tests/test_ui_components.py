@@ -12,7 +12,7 @@ mock_st = MagicMock()
 mock_st.session_state = {}
 sys.modules["streamlit"] = mock_st
 
-from ui_components import workflow_run_state, export_validation_checklist, narrative_metric, company_card_header, score_breakdown, expansion_timeline
+from ui_components import workflow_run_state, export_validation_checklist, narrative_metric, company_card_header, score_breakdown, expansion_timeline, format_contact_label
 
 
 class TestWorkflowRunState:
@@ -490,3 +490,57 @@ class TestScoreBreakdown:
         from ui_components import score_breakdown
         html = score_breakdown({}, "geography")
         assert isinstance(html, str)
+
+
+class TestFormatContactLabel:
+    """Tests for format_contact_label() structured radio labels."""
+
+    def test_basic_contact(self):
+        contact = {"firstName": "John", "lastName": "Smith", "jobTitle": "VP Operations", "contactAccuracyScore": 95}
+        label = format_contact_label(contact)
+        assert "John Smith" in label
+        assert "VP Operations" in label
+        assert "Score: 95" in label
+        assert label.count("\n") == 1  # Two lines
+
+    def test_best_pick_star(self):
+        contact = {"firstName": "Jane", "lastName": "Doe"}
+        label = format_contact_label(contact, is_best=True)
+        assert label.startswith("★ ")
+        label_no_best = format_contact_label(contact, is_best=False)
+        assert not label_no_best.startswith("★")
+
+    def test_management_level_shown_when_not_in_title(self):
+        contact = {"firstName": "A", "lastName": "B", "jobTitle": "Facilities Coordinator", "managementLevel": "Manager"}
+        label = format_contact_label(contact)
+        assert "[Manager]" in label
+
+    def test_management_level_hidden_when_in_title(self):
+        contact = {"firstName": "A", "lastName": "B", "jobTitle": "Regional Manager", "managementLevel": "Manager"}
+        label = format_contact_label(contact)
+        assert "[Manager]" not in label
+
+    def test_phone_and_email_on_line2(self):
+        contact = {"firstName": "A", "lastName": "B", "directPhone": "(555) 123-4567", "email": "a@b.com"}
+        label = format_contact_label(contact)
+        assert "(555) 123-4567" in label
+        assert "a@b.com" in label
+
+    def test_location_type_shown(self):
+        contact = {"firstName": "A", "lastName": "B", "_location_type": "PersonAndHQ"}
+        label = format_contact_label(contact, show_location_type=True)
+        assert "HQ+Person" in label
+
+    def test_location_type_hidden_by_default(self):
+        contact = {"firstName": "A", "lastName": "B", "_location_type": "PersonAndHQ"}
+        label = format_contact_label(contact, show_location_type=False)
+        assert "HQ+Person" not in label
+
+    def test_unknown_name_fallback(self):
+        label = format_contact_label({})
+        assert "Unknown" in label
+
+    def test_zip_shown(self):
+        contact = {"firstName": "A", "lastName": "B", "zipCode": "75201"}
+        label = format_contact_label(contact)
+        assert "ZIP: 75201" in label

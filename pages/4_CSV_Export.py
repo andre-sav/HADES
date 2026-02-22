@@ -397,8 +397,9 @@ with col2:
         type="primary",
         use_container_width=True,
         disabled=not _vs_push_available,
-        help=None if _vs_push_available else "Configure VANILLASOFT_WEB_LEAD_ID in .streamlit/secrets.toml",
     )
+    if not _vs_push_available:
+        st.caption("VanillaSoft push unavailable — configure `VANILLASOFT_WEB_LEAD_ID` in secrets.")
 
 with col3:
     st.download_button(

@@ -59,6 +59,7 @@ from ui_components import (
     action_bar,
     workflow_summary_strip,
     last_run_indicator,
+    format_contact_label,
 )
 
 st.set_page_config(page_title="Intent", page_icon="🎯", layout="wide")
@@ -1017,19 +1018,7 @@ if (
                 SKIP_LABEL = "Skip — don't enrich"
                 options = []
                 for i, contact in enumerate(contacts):
-                    name = f"{contact.get('firstName', '')} {contact.get('lastName', '')}".strip() or "Unknown"
-                    title = contact.get("jobTitle", "")
-                    score = contact.get("contactAccuracyScore", 0)
-                    phone = contact.get("directPhone", "") or contact.get("phone", "")
-
-                    label = f"{name}"
-                    if title:
-                        label += f" - {title}"
-                    label += f" (Score: {score})"
-                    if phone:
-                        label += f" | {phone}"
-                    if i == 0:
-                        label = "Best: " + label
+                    label = format_contact_label(contact, is_best=(i == 0))
                     options.append((label, contact))
 
                 current_selected = st.session_state.intent_selected_contacts.get(company_id)

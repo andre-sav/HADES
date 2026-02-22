@@ -2547,3 +2547,53 @@ def styled_table(
 
     html = f'<table class="styled-table"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>'
     st.markdown(html, unsafe_allow_html=True)
+
+
+# =============================================================================
+# CONTACT MINI-CARD (for radio label replacement)
+# =============================================================================
+
+def format_contact_label(contact: dict, is_best: bool = False, show_location_type: bool = False) -> str:
+    """Build a short, structured radio label for a contact.
+
+    Format:
+        ★ John Smith — VP Operations [Manager]
+        Score: 95 · (555) 123-4567 · ZIP: 75201
+
+    Much more readable than the old single-line format.
+    """
+    name = f"{contact.get('firstName', '')} {contact.get('lastName', '')}".strip() or "Unknown"
+    title = contact.get("jobTitle", "")
+    mgmt = contact.get("managementLevel", "")
+
+    # Line 1: name + title + management level
+    line1 = f"{'★ ' if is_best else ''}{name}"
+    if title:
+        line1 += f" — {title}"
+    if mgmt and mgmt.lower() not in (title or "").lower():
+        line1 += f" [{mgmt}]"
+
+    # Line 2: score + phone + email + ZIP + location type
+    parts = []
+    score = contact.get("contactAccuracyScore", 0)
+    if score:
+        parts.append(f"Score: {score}")
+    phone = contact.get("directPhone", "") or contact.get("mobilePhone", "") or contact.get("phone", "")
+    if phone:
+        parts.append(phone)
+    email = contact.get("email", "")
+    if email:
+        parts.append(email)
+    contact_zip = contact.get("zipCode", "")
+    if contact_zip:
+        parts.append(f"ZIP: {contact_zip}")
+    if show_location_type:
+        loc_type = contact.get("_location_type", "")
+        if loc_type == "PersonAndHQ":
+            parts.append("HQ+Person")
+        elif loc_type == "Person":
+            parts.append("Person-only")
+
+    line2 = " · ".join(parts)
+
+    return f"{line1}\n{line2}" if line2 else line1

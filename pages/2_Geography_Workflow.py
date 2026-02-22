@@ -74,6 +74,7 @@ from ui_components import (
     workflow_summary_strip,
     last_run_indicator,
     expansion_timeline,
+    format_contact_label,
 )
 
 st.set_page_config(page_title="Geography", page_icon="📍", layout="wide")
@@ -856,22 +857,48 @@ if has_operator:
         query_summary_bar(summary_params, query_state, result_count=result_count)
     elif query_state == "stale":
         query_summary_bar(summary_params, query_state)
-        st.caption("⚠️ Parameters changed since last search. Click Preview to search with new settings.")
+        st.caption("⚠️ Parameters changed since last search. Click Search to update results.")
     else:
         query_summary_bar(summary_params, query_state)
 
-    # Preview Request Button
-    st.markdown("")
-    preview_col1, preview_col2, preview_col3 = st.columns([1, 1, 2])
+    # Optional API request preview (power-user feature)
+    if can_preview and not st.session_state.geo_search_executed:
+        with st.expander("API Request Preview"):
+            if location_mode == "radius" and center_zip_clean:
+                mode_note = f"Calculated {len(zip_codes)} ZIPs within {radius} miles of {center_zip_clean}"
+            else:
+                mode_note = f"{len(zip_codes)} ZIP codes (explicit list)"
 
-    with preview_col1:
-        if st.button("👁️ Preview Request", type="secondary", use_container_width=True, disabled=not can_preview):
+            st.caption(mode_note)
+            st.markdown("**POST** `https://api.zoominfo.com/search/contact`")
+
+            display_request = full_request_body.copy()
+            if len(zip_codes) > 10:
+                display_request["zipCode"] = display_request["zipCode"][:10]
+                display_request["_note"] = f"Showing 10 of {len(zip_codes)} ZIP codes"
+
+            st.code(json.dumps(display_request, indent=2), language="json")
+
+            if len(zip_codes) > 10:
+                st.caption(f"Full request includes all {len(zip_codes)} ZIP codes")
+
+    # Search + Reset buttons
+    st.markdown("")
+    search_col1, search_col2, search_col3 = st.columns([1, 1, 2])
+
+    with search_col1:
+        search_clicked = st.button(
+            "Search",
+            type="primary",
+            use_container_width=True,
+            disabled=not can_preview,
+        )
+        if search_clicked:
             st.session_state.geo_request_previewed = True
             st.session_state.geo_pending_search_params = pending_params
-            st.rerun()
 
-    with preview_col2:
-        if st.session_state.geo_preview_contacts or st.session_state.geo_request_previewed:
+    with search_col2:
+        if st.session_state.geo_preview_contacts or st.session_state.geo_search_executed:
             if ui.button(text="Clear / Reset", variant="destructive", key="geo_reset_btn"):
                 # Cancel any running search thread
                 existing_job = st.session_state.get("geo_search_job")
@@ -892,38 +919,9 @@ if has_operator:
                 st.session_state._geo_progress_log = None
                 st.rerun()
 
-    # --- API Request Preview (after clicking Preview) ---
-    if st.session_state.geo_request_previewed and not st.session_state.geo_search_executed:
-        st.markdown("---")
-        st.subheader("Review API Request")
-
-        if location_mode == "radius" and center_zip_clean:
-            mode_note = f"Calculated {len(zip_codes)} ZIPs within {radius} miles of {center_zip_clean}"
-        else:
-            mode_note = f"{len(zip_codes)} ZIP codes (explicit list)"
-
-        st.caption(mode_note)
-        st.markdown("**POST** `https://api.zoominfo.com/search/contact`")
-
-        # Show request with truncated ZIP list for readability
-        display_request = full_request_body.copy()
-        if len(zip_codes) > 10:
-            display_request["zipCode"] = display_request["zipCode"][:10]
-            display_request["_note"] = f"Showing 10 of {len(zip_codes)} ZIP codes"
-
-        st.code(json.dumps(display_request, indent=2), language="json")
-
-        if len(zip_codes) > 10:
-            st.caption(f"📋 Full request includes all {len(zip_codes)} ZIP codes")
-
-        st.info("📋 **Search is free** - no credits used. Credits are only used when enriching contacts.")
-
-        # Confirm & Search button
-        confirm_col1, confirm_col2 = st.columns([1, 3])
-        with confirm_col1:
-            search_clicked = st.button("✅ Confirm & Search", type="primary", use_container_width=True)
-    else:
-        search_clicked = False
+    with search_col3:
+        if not st.session_state.geo_search_executed:
+            st.caption("Search is free — no credits used until enrichment.")
 
     # --- Execute Search (after confirmation) ---
     if search_clicked:
@@ -1313,38 +1311,11 @@ if (
                 # Build options for radio
                 options = []
                 for i, contact in enumerate(contacts):
-                    name = f"{contact.get('firstName', '')} {contact.get('lastName', '')}".strip() or "Unknown"
-                    title = contact.get("jobTitle", "")
-                    score = contact.get("contactAccuracyScore", 0)
-                    phone = contact.get("directPhone", "") or contact.get("phone", "")
-                    contact_zip = contact.get("zipCode", "")
-                    location_type = contact.get("_location_type", "")
-
-                    mgmt_level = contact.get("managementLevel", "")
-                    email = contact.get("email", "")
-
-                    # Build structured label
-                    label = f"{name}"
-                    if title:
-                        label += f" - {title}"
-                    if mgmt_level and mgmt_level.lower() not in (title or "").lower():
-                        label += f" [{mgmt_level}]"
-                    label += f" (Score: {score})"
-                    if email:
-                        label += f" | {email}"
-                    if contact_zip:
-                        label += f" | ZIP: {contact_zip}"
-                    if phone:
-                        label += f" | {phone}"
-                    # Show location type demarcation when combined search is enabled
-                    if location_type:
-                        type_label = "HQ+Person" if location_type == "PersonAndHQ" else "Person-only"
-                        label += f" | [{type_label}]"
-
-                    # Mark best pick
-                    if i == 0:
-                        label = "Best: " + label
-
+                    label = format_contact_label(
+                        contact,
+                        is_best=(i == 0),
+                        show_location_type=True,
+                    )
                     options.append((label, contact))
 
                 # Current selection
