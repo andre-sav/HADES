@@ -30,8 +30,22 @@ Implemented all 5 safety guards from the audit findings:
 ### Uncommitted Changes
 None. All changes committed and pushed.
 
+### HADES-pt0 (P1) — Security Hardening — EXPLORED, NOT STARTED
+
+Explored all 7 audit findings in this bead. Scoped 6 quick wins + 1 deferred:
+
+1. `hmac.compare_digest` for password check (`utils.py:38` — currently `==`)
+2. Rate limiting on login attempts (`utils.py:16-44` — no lockout or delay)
+3. XSS escape in `health_indicator()` detail (`10_Pipeline_Health.py:96`)
+4. XSS escape in `_friendly_error()` output (`9_Automation.py:72-89`)
+5. `.env` not in `.gitignore` — add `.env` and `*.env`
+6. Raw `{e}` in `st.error()` — 15+ locations exposing DB URLs/hostnames
+7. JWT persisted unencrypted in DB (`zoominfo_client.py:265-275`) — **decision pending**: stop persisting (recommended, simplest) vs encrypt at rest vs defer
+
+User was exploring the JWT encryption trade-offs when session ended. Resume this discussion next session.
+
 ### What Needs Doing Next Session
-1. **HADES-pt0** [P1] — Security hardening (hmac, XSS, .env, error messages)
+1. **HADES-pt0** [P1] — Security hardening: finish JWT decision, then implement all items
 2. **HADES-28z** [P1] — CI test workflow + pin dependencies
 3. **HADES-io6** [P2] — Outcome recording consolidation (NOW UNBLOCKED)
 4. **HADES-3bo** [P2] — Config centralization
