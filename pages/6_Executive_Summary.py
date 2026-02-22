@@ -3,6 +3,8 @@ Summary - High-level metrics and trends.
 Superhuman-inspired: clean dashboards, clear insights.
 """
 
+import logging
+
 import streamlit as st
 import streamlit_shadcn_ui as ui
 import pandas as pd
@@ -23,6 +25,8 @@ from ui_components import (
     COLORS,
 )
 
+logger = logging.getLogger(__name__)
+
 st.set_page_config(page_title="Summary", page_icon="📈", layout="wide")
 
 # Apply design system styles
@@ -42,7 +46,8 @@ def get_services():
 try:
     db, cost_tracker = get_services()
 except Exception as e:
-    st.error(f"Failed to initialize: {e}")
+    logger.error(f"Failed to initialize: {e}")
+    st.error("Failed to initialize. Please refresh the page.")
     st.stop()
 
 

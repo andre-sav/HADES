@@ -2,6 +2,8 @@
 HADES - ZoomInfo Lead Pipeline
 """
 
+import logging
+
 import streamlit as st
 import streamlit_shadcn_ui as ui
 from datetime import datetime
@@ -16,6 +18,8 @@ from ui_components import (
     SPACING,
     FONT_SIZES,
 )
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="HADES",
@@ -39,7 +43,8 @@ try:
     connected = True
 except Exception as e:
     connected = False
-    st.error(f"Database connection failed: {e}")
+    logger.error(f"Database connection failed: {e}")
+    st.error("Database connection failed. Please try again.")
     st.caption("Check `.streamlit/secrets.toml` configuration")
     st.stop()
 

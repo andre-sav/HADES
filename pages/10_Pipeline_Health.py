@@ -2,6 +2,9 @@
 Pipeline Health - Operational status indicators for API, cache, and database.
 """
 
+import html
+import logging
+
 import streamlit as st
 from datetime import datetime
 
@@ -15,6 +18,8 @@ from ui_components import (
     empty_state,
     COLORS,
 )
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Pipeline Health", page_icon="🔧", layout="wide")
 
@@ -32,7 +37,8 @@ def get_db():
 try:
     db = get_db()
 except Exception as e:
-    st.error(f"Failed to connect: {e}")
+    logger.error(f"Failed to connect: {e}")
+    st.error("Failed to connect. Please try again.")
     st.stop()
 
 
@@ -93,7 +99,7 @@ def health_indicator(label: str, status: str, detail: str, timestamp: str | None
             <span style="color: {COLORS['text_secondary']}; font-size: 0.85rem; margin-left: auto;">{status_label}</span>
         </div>
         <div style="color: {COLORS['text_secondary']}; font-size: 0.9rem;">
-            {detail} {ts_html}
+            {html.escape(str(detail))} {ts_html}
         </div>
     </div>
     ''', unsafe_allow_html=True)

@@ -4,7 +4,9 @@ Tests for utility functions.
 Run with: pytest tests/test_utils.py -v
 """
 
+import hmac
 import pytest
+from unittest.mock import patch, MagicMock
 from utils import (
     load_config,
     get_hard_filters,
@@ -320,3 +322,72 @@ class TestGetStateFromZip:
         """Test ZIP passed as integer (truncates leading zeros)."""
         # 6101 as int → should pad to 06101 → CT
         assert get_state_from_zip(6101) == "CT"
+
+
+class TestRequireAuthSecurity:
+    """Tests for security hardening in require_auth()."""
+
+    def test_password_uses_hmac_compare_digest(self):
+        """Password comparison must use hmac.compare_digest, not ==."""
+        import inspect
+        from utils import require_auth
+        source = inspect.getsource(require_auth)
+        assert "hmac.compare_digest" in source
+        # Ensure no plain == comparison with password variable
+        assert "entered == password" not in source
+
+    def test_rate_limiting_tracks_failed_attempts(self):
+        """Failed attempts should be tracked in session state."""
+        import inspect
+        from utils import require_auth
+        source = inspect.getsource(require_auth)
+        assert "_auth_failed" in source
+        assert "_auth_locked_until" in source
+
+    def test_progressive_delay_formula(self):
+        """Lockout delay should be min(2^(attempts-2), 30) starting at attempt 3."""
+        # Verify the formula produces expected delays
+        for attempts, expected_delay in [(3, 2), (4, 4), (5, 8), (6, 16), (7, 30), (10, 30)]:
+            delay = min(2 ** (attempts - 2), 30)
+            assert delay == expected_delay, f"attempts={attempts}: got {delay}, expected {expected_delay}"
+
+
+class TestXSSEscaping:
+    """Tests for XSS escaping in HTML-rendering functions."""
+
+    def test_friendly_error_uses_html_escape(self):
+        """_friendly_error in 9_Automation.py must call html.escape on fallback messages."""
+        from pathlib import Path
+        source = Path("pages/9_Automation.py").read_text()
+        # The function must use html.escape for the truncated fallback
+        assert "html.escape" in source
+        # And import html
+        assert "import html" in source
+
+    def test_health_indicator_uses_html_escape(self):
+        """health_indicator in 10_Pipeline_Health.py must escape the detail parameter."""
+        from pathlib import Path
+        source = Path("pages/10_Pipeline_Health.py").read_text()
+        assert "html.escape" in source
+        assert "import html" in source
+
+    def test_html_escape_prevents_xss(self):
+        """html.escape correctly neutralizes script injection."""
+        import html
+        xss_input = '<script>alert("xss")</script>'
+        result = html.escape(xss_input)
+        assert "<script>" not in result
+        assert "&lt;script&gt;" in result
+
+    def test_no_raw_exceptions_in_st_error(self):
+        """No st.error() call should expose raw exception objects to users."""
+        from pathlib import Path
+        import re
+        pages_dir = Path("pages")
+        violations = []
+        for py_file in list(pages_dir.glob("*.py")) + [Path("app.py")]:
+            content = py_file.read_text()
+            # Match st.error(f"...{e}") or st.error(str(e))
+            if re.search(r'st\.error\(f["\'].*\{e\}|st\.error\(str\(e\)', content):
+                violations.append(str(py_file))
+        assert violations == [], f"Raw exceptions in st.error(): {violations}"

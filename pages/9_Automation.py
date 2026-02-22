@@ -1,5 +1,7 @@
 """Automation - Pipeline scheduling and run history."""
 
+import html
+import logging
 from datetime import datetime, timedelta, timezone
 
 import streamlit as st
@@ -19,6 +21,8 @@ from ui_components import (
     SPACING,
 )
 
+logger = logging.getLogger(__name__)
+
 st.set_page_config(page_title="Automation", page_icon="⚙️", layout="wide")
 inject_base_styles()
 
@@ -28,7 +32,8 @@ require_auth()
 try:
     db = get_database()
 except Exception as e:
-    st.error(f"Failed to connect to database: {e}")
+    logger.error(f"Failed to connect to database: {e}")
+    st.error("Failed to connect to database. Please try again.")
     st.stop()
 
 
@@ -85,8 +90,9 @@ def _friendly_error(msg: str) -> str:
     for pattern, label in _patterns.items():
         if pattern in lower:
             return label
-    # Truncate long raw messages
-    return msg[:80] + "..." if len(msg) > 80 else msg
+    # Truncate long raw messages and escape for HTML safety
+    truncated = msg[:80] + "..." if len(msg) > 80 else msg
+    return html.escape(truncated)
 
 
 def _badge_html(status: str) -> str:
@@ -230,7 +236,8 @@ if st.session_state.pop("auto_run_confirmed", False) and not st.session_state.ge
             else:
                 st.error(f"Pipeline failed: {result.get('error', 'Unknown error')}")
     except Exception as e:
-        st.error(f"Pipeline error: {e}")
+        logger.error(f"Pipeline error: {e}")
+        st.error("Pipeline error. Please try again or check the logs.")
     finally:
         st.session_state["auto_run_triggered"] = False
     st.rerun()

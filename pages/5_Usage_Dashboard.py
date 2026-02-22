@@ -3,6 +3,8 @@ Usage - Credit usage and query history.
 Superhuman-inspired: clean metrics, scannable tables.
 """
 
+import logging
+
 import streamlit as st
 import streamlit_shadcn_ui as ui
 import pandas as pd
@@ -22,6 +24,8 @@ from ui_components import (
     labeled_divider,
     COLORS,
 )
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Usage", page_icon="📊", layout="wide")
 
@@ -51,7 +55,8 @@ def fetch_zoominfo_usage():
 try:
     db, cost_tracker = get_services()
 except Exception as e:
-    st.error(f"Failed to initialize: {e}")
+    logger.error(f"Failed to initialize: {e}")
+    st.error("Failed to initialize. Please refresh the page.")
     st.stop()
 
 

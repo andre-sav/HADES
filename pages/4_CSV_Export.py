@@ -3,6 +3,8 @@ CSV Export - Export leads with operator metadata, validation, and tracking.
 """
 
 import json
+import logging
+
 import streamlit as st
 import streamlit_shadcn_ui as ui
 import pandas as pd
@@ -26,6 +28,8 @@ from ui_components import (
     COLORS,
 )
 
+logger = logging.getLogger(__name__)
+
 st.set_page_config(page_title="Export", page_icon="📤", layout="wide")
 
 # Apply design system styles
@@ -44,7 +48,8 @@ def get_db():
 try:
     db = get_db()
 except Exception as e:
-    st.error(f"Failed to connect: {e}")
+    logger.error(f"Failed to connect: {e}")
+    st.error("Failed to connect. Please try again.")
     st.stop()
 
 

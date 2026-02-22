@@ -3,7 +3,9 @@ Utility functions for the ZoomInfo Lead Pipeline.
 Includes config loading, phone cleaning, and column mapping.
 """
 
+import hmac
 import re
+import time
 from pathlib import Path
 from functools import lru_cache
 
@@ -34,11 +36,28 @@ def require_auth() -> None:
     )
     st.markdown("### Sign in to HADES")
     entered = st.text_input("Password", type="password", key="_auth_pw")
-    if st.button("Enter", type="primary", use_container_width=True):
-        if entered == password:
+    # Rate limiting: progressive delay after failed attempts
+    failed_attempts = st.session_state.get("_auth_failed", 0)
+    locked_until = st.session_state.get("_auth_locked_until", 0)
+    now = time.time()
+
+    if now < locked_until:
+        remaining = int(locked_until - now) + 1
+        st.warning(f"Too many attempts. Try again in {remaining}s.")
+        st.button("Enter", type="primary", use_container_width=True, disabled=True)
+    elif st.button("Enter", type="primary", use_container_width=True):
+        if hmac.compare_digest(entered, password):
             st.session_state["authenticated"] = True
+            st.session_state.pop("_auth_failed", None)
+            st.session_state.pop("_auth_locked_until", None)
             st.rerun()
         else:
+            failed_attempts += 1
+            st.session_state["_auth_failed"] = failed_attempts
+            # Progressive lockout: 2s, 4s, 8s, 16s, 30s max
+            if failed_attempts >= 3:
+                delay = min(2 ** (failed_attempts - 2), 30)
+                st.session_state["_auth_locked_until"] = now + delay
             st.error("Incorrect password")
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()

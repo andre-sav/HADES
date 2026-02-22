@@ -4,11 +4,14 @@ Superhuman-inspired: clean, focused, inline editing.
 """
 
 import html as html_mod
+import logging
 
 import streamlit as st
 import streamlit_shadcn_ui as ui
 from turso_db import get_database
 from ui_components import inject_base_styles, page_header, paginate_items, pagination_controls, empty_state, labeled_divider
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Operators", page_icon="👤", layout="wide")
 
@@ -40,7 +43,8 @@ def has_zoho_credentials() -> bool:
 try:
     db = get_db()
 except Exception as e:
-    st.error(f"Failed to connect: {e}")
+    logger.error(f"Failed to connect: {e}")
+    st.error("Failed to connect. Please try again.")
     st.stop()
 
 
@@ -129,7 +133,8 @@ with st.expander("Sync from Zoho CRM", expanded=False):
                         st.success(msg + ", ".join(parts) if parts else msg + "no changes")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Sync failed: {e}")
+                    logger.error(f"Sync failed: {e}")
+                    st.error("Sync failed. Please try again.")
 
         if _resync_confirmed:
             with st.spinner("Full resync from Zoho CRM..."):
@@ -152,7 +157,8 @@ with st.expander("Sync from Zoho CRM", expanded=False):
                     st.success(f"Full sync: " + (", ".join(parts) if parts else "no changes"))
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Sync failed: {e}")
+                    logger.error(f"Sync failed: {e}")
+                    st.error("Sync failed. Please try again.")
 
 st.markdown("---")
 
@@ -237,7 +243,8 @@ if st.session_state.operators_adding:
                     if "UNIQUE" in str(e):
                         st.error("Operator already exists")
                     else:
-                        st.error(str(e))
+                        logger.error(f"Operator error: {e}")
+                        st.error("Operation failed. Please try again.")
 
     with col2:
         if ui.button(text="Cancel", variant="outline", key="op_cancel_new_btn"):
@@ -365,7 +372,8 @@ else:
                             st.session_state.operators_selected_id = None
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Failed to delete: {e}")
+                            logger.error(f"Failed to delete: {e}")
+                            st.error("Failed to delete. Please try again.")
 
     # Pagination controls at bottom
     if total_pages > 1:

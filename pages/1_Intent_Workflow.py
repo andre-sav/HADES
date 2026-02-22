@@ -80,7 +80,8 @@ def get_services():
 try:
     db, cost_tracker = get_services()
 except Exception as e:
-    st.error(f"Failed to initialize: {e}")
+    logger.error(f"Failed to initialize: {e}")
+    st.error("Failed to initialize. Please refresh the page.")
     st.stop()
 
 

@@ -2,6 +2,8 @@
 Score Calibration - View current scoring weights, run calibration, review outcomes.
 """
 
+import logging
+
 import streamlit as st
 import streamlit_shadcn_ui as ui
 import yaml
@@ -21,6 +23,8 @@ from ui_components import (
     COLORS,
 )
 
+logger = logging.getLogger(__name__)
+
 st.set_page_config(page_title="Score Calibration", page_icon="⚖️", layout="wide")
 
 inject_base_styles()
@@ -37,7 +41,8 @@ def get_db():
 try:
     db = get_db()
 except Exception as e:
-    st.error(f"Failed to connect: {e}")
+    logger.error(f"Failed to connect: {e}")
+    st.error("Failed to connect. Please try again.")
     st.stop()
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "icp.yaml"
@@ -238,7 +243,8 @@ elif active_tab == "Calibration Report":
                 st.success(f"Applied {len(selected_updates)} score update(s) to icp.yaml")
                 st.rerun()
             except Exception as e:
-                st.error(f"Failed to apply calibration: {e}")
+                logger.error(f"Failed to apply calibration: {e}")
+                st.error("Failed to apply calibration. Please try again.")
     else:
         st.caption("Select scores above to apply updates")
 
