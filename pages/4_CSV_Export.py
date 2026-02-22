@@ -366,6 +366,23 @@ if st.session_state.get("last_export_metadata"):
     method = meta.get("method", "Exported")
     st.success(f"{method}: {meta.get('count', 0)} leads{op_display}{batch_display} · {ts}")
 
+# Confirmation dialog for VanillaSoft push
+@st.dialog("Confirm Push to VanillaSoft")
+def confirm_push_dialog(lead_count, operator_name):
+    st.write(f"Push **{lead_count}** leads to VanillaSoft?")
+    if operator_name:
+        st.write(f"Operator: **{operator_name}**")
+    st.caption("This creates real CRM records that cannot be undone.")
+    st.markdown("")
+    col_yes, col_no = st.columns(2)
+    with col_yes:
+        if st.button("Push", type="primary", use_container_width=True):
+            st.session_state["vs_push_confirmed"] = True
+            st.rerun()
+    with col_no:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun()
+
 # Buttons
 col1, col2, col3 = st.columns([2, 1, 1])
 
@@ -390,8 +407,13 @@ with col3:
         use_container_width=True,
     )
 
-# Push flow
+# Open confirmation dialog on button click
 if push_clicked and _vs_push_available:
+    _op_name = selected_operator.get("operator_name") if selected_operator else None
+    confirm_push_dialog(len(leads_to_export), _op_name)
+
+# Push flow — only fires after dialog confirmation (pop ensures single execution)
+if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
     progress_bar = st.progress(0, text="Pushing to VanillaSoft...")
     log_container = st.container()
 
