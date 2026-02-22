@@ -414,7 +414,7 @@ class TestLeadOutcomes:
         return db, mock_conn
 
     def test_record_lead_outcomes_batch(self, mock_db):
-        """Test batch inserting lead outcomes (13-element tuples with person_id)."""
+        """Test batch inserting lead outcomes uses multi-row INSERT."""
         db, mock_conn = mock_db
 
         params = [
@@ -425,18 +425,21 @@ class TestLeadOutcomes:
         ]
         db.record_lead_outcomes_batch(params)
 
-        # Should have called execute for each param tuple + commit
-        assert mock_conn.execute.call_count == 2
+        # Multi-row INSERT: single execute call with all rows + commit
+        assert mock_conn.execute.call_count == 1
         mock_conn.commit.assert_called_once()
 
-        # Verify the INSERT includes person_id column
+        # Verify the INSERT includes person_id column and 2 value groups (26 placeholders)
         insert_sql = mock_conn.execute.call_args_list[0][0][0]
         assert "person_id" in insert_sql
-        # Verify 13 placeholders
-        assert insert_sql.count("?") == 13
+        assert insert_sql.count("?") == 26  # 13 columns × 2 rows
+
+        # Verify flat params contain all values
+        flat_params = mock_conn.execute.call_args_list[0][0][1]
+        assert len(flat_params) == 26
 
     def test_record_lead_outcomes_with_person_id(self, mock_db):
-        """Test that person_id is correctly passed as 4th tuple element."""
+        """Test that person_id is correctly passed in flat params."""
         db, mock_conn = mock_db
 
         params = [
@@ -445,9 +448,9 @@ class TestLeadOutcomes:
         ]
         db.record_lead_outcomes_batch(params)
 
-        # Verify the tuple passed to execute includes person_id
-        call_params = mock_conn.execute.call_args_list[0][0][1]
-        assert call_params[3] == "person-abc-123"
+        # Multi-row flat params: person_id is the 4th element (index 3)
+        flat_params = mock_conn.execute.call_args_list[0][0][1]
+        assert flat_params[3] == "person-abc-123"
 
     def test_record_lead_outcomes_rejects_duplicates(self):
         """Duplicate (batch_id, person_id) rows are silently ignored."""
@@ -631,6 +634,149 @@ class TestLeadOutcomes:
 
         mock_conn.execute.assert_called_once()
         mock_conn.commit.assert_called_once()
+
+
+class TestBuildOutcomeRow:
+    """Tests for the consolidated build_outcome_row helper."""
+
+    def test_basic_fields(self):
+        """Test basic field extraction from a lead dict."""
+        lead = {
+            "companyName": "Acme Corp",
+            "companyId": 123,
+            "personId": "p-456",
+            "sicCode": "7011",
+            "employeeCount": 200,
+            "_distance_miles": 12.5,
+            "zipCode": "75201",
+            "state": "TX",
+            "_score": 85,
+        }
+        row = TursoDatabase.build_outcome_row(lead, "batch-1", "geography", "2026-01-01T10:00:00")
+
+        assert row[0] == "batch-1"           # batch_id
+        assert row[1] == "Acme Corp"         # company_name
+        assert row[2] == "123"               # company_id (coerced to str)
+        assert row[3] == "p-456"             # person_id
+        assert row[4] == "7011"              # sic_code
+        assert row[5] == 200                 # employee_count
+        assert row[6] == 12.5               # distance_miles
+        assert row[7] == "75201"             # zip_code
+        assert row[8] == "TX"                # state
+        assert row[9] == 85                  # hades_score
+        assert row[10] == "geography"        # workflow_type
+        assert row[11] == "2026-01-01T10:00:00"  # exported_at
+        assert row[12] is None               # source_features (not provided)
+
+    def test_company_dict_fallback(self):
+        """Test field fallback to nested company dict."""
+        lead = {
+            "company": {"name": "Beta Inc", "id": "c-789", "sicCode": "8211",
+                        "employeeCount": 300, "zip": "75202", "state": "CA"},
+            "personId": "p-100",
+        }
+        row = TursoDatabase.build_outcome_row(lead, "batch-2", "intent", "2026-01-01")
+
+        assert row[1] == "Beta Inc"    # falls back to company.name
+        assert row[2] == "c-789"       # falls back to company.id
+        assert row[4] == "8211"        # falls back to company.sicCode
+        assert row[5] == 300           # falls back to company.employeeCount
+        assert row[7] == "75202"       # falls back to company.zip
+        assert row[8] == "CA"          # falls back to company.state
+
+    def test_sic_code_computed_field_fallback(self):
+        """Test _sic_code computed field is used when sicCode is missing."""
+        lead = {"_sic_code": "3599", "personId": "p-1"}
+        row = TursoDatabase.build_outcome_row(lead, "b", "geography", "now")
+        assert row[4] == "3599"
+
+    def test_employee_count_field_variants(self):
+        """Test all employee count field name variants."""
+        # 'employees' variant (from Contact Search)
+        lead1 = {"employees": 50, "personId": "p-1"}
+        assert TursoDatabase.build_outcome_row(lead1, "b", "geo", "now")[5] == 50
+
+        # 'numberOfEmployees' variant (from Enrich)
+        lead2 = {"numberOfEmployees": 100, "personId": "p-2"}
+        assert TursoDatabase.build_outcome_row(lead2, "b", "geo", "now")[5] == 100
+
+    def test_zip_field_variants(self):
+        """Test all ZIP code field name variants."""
+        # 'zip' variant
+        lead1 = {"zip": "90210", "personId": "p-1"}
+        assert TursoDatabase.build_outcome_row(lead1, "b", "geo", "now")[7] == "90210"
+
+        # 'zipCode' variant
+        lead2 = {"zipCode": "75201", "personId": "p-2"}
+        assert TursoDatabase.build_outcome_row(lead2, "b", "geo", "now")[7] == "75201"
+
+    def test_source_features_passed_through(self):
+        """Test source_features parameter is included in tuple."""
+        lead = {"personId": "p-1"}
+        row = TursoDatabase.build_outcome_row(lead, "b", "intent", "now", '{"automated": true}')
+        assert row[12] == '{"automated": true}'
+
+    def test_missing_ids_produce_none(self):
+        """Test that missing company/person IDs produce None."""
+        lead = {"companyName": "No IDs Corp"}
+        row = TursoDatabase.build_outcome_row(lead, "b", "geo", "now")
+        assert row[2] is None  # company_id
+        assert row[3] is None  # person_id (empty string from .get("id", "") is falsy)
+
+
+class TestMultiRowInsert:
+    """Tests for multi-row INSERT optimization in execute_many."""
+
+    def test_multi_row_insert_single_execute(self):
+        """Multi-row INSERT should produce 1 execute call, not N."""
+        mock_conn = MagicMock()
+        db = TursoDatabase(url="libsql://test.turso.io", auth_token="test-token")
+        db._conn = mock_conn
+
+        params = [("a", 1), ("b", 2), ("c", 3)]
+        db.execute_many("INSERT INTO t (name, val) VALUES (?, ?)", params)
+
+        assert mock_conn.execute.call_count == 1
+        sql = mock_conn.execute.call_args[0][0]
+        assert sql.count("?") == 6  # 2 × 3 rows
+        flat = mock_conn.execute.call_args[0][1]
+        assert flat == ["a", 1, "b", 2, "c", 3]
+
+    def test_empty_params_list_is_noop(self):
+        """Empty params list should not call execute at all."""
+        mock_conn = MagicMock()
+        db = TursoDatabase(url="libsql://test.turso.io", auth_token="test-token")
+        db._conn = mock_conn
+
+        db.execute_many("INSERT INTO t (x) VALUES (?)", [])
+
+        mock_conn.execute.assert_not_called()
+        mock_conn.commit.assert_not_called()
+
+    def test_insert_or_ignore_optimized(self):
+        """INSERT OR IGNORE should also use multi-row optimization."""
+        mock_conn = MagicMock()
+        db = TursoDatabase(url="libsql://test.turso.io", auth_token="test-token")
+        db._conn = mock_conn
+
+        params = [("a",), ("b",)]
+        db.execute_many("INSERT OR IGNORE INTO t (name) VALUES (?)", params)
+
+        assert mock_conn.execute.call_count == 1
+        sql = mock_conn.execute.call_args[0][0]
+        assert "INSERT OR IGNORE" in sql
+        assert sql.count("?") == 2
+
+    def test_non_insert_uses_loop(self):
+        """UPDATE statements should fall back to individual execute calls."""
+        mock_conn = MagicMock()
+        db = TursoDatabase(url="libsql://test.turso.io", auth_token="test-token")
+        db._conn = mock_conn
+
+        params = [("a", 1), ("b", 2)]
+        db.execute_many("UPDATE t SET name = ? WHERE id = ?", params)
+
+        assert mock_conn.execute.call_count == 2  # one per row
 
 
 class TestPipelineRuns:

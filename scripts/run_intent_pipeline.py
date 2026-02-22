@@ -322,26 +322,11 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
 
         # Record outcomes for calibration tracking
         now = datetime.now(timezone.utc).isoformat()
-        outcomes = []
-        for lead in scored_contacts:
-            co = lead.get("company") if isinstance(lead.get("company"), dict) else {}
-            cid = lead.get("companyId") or co.get("id", "")
-            pid = lead.get("personId") or lead.get("id", "")
-            outcomes.append((
-                batch_id,
-                lead.get("companyName", "") or co.get("name", ""),
-                str(cid) if cid else None,
-                str(pid) if pid else None,
-                lead.get("sicCode", "") or co.get("sicCode", ""),
-                lead.get("employeeCount") or co.get("employeeCount"),
-                None,  # distance_miles (N/A for intent)
-                lead.get("zipCode", "") or co.get("zip", ""),
-                lead.get("state", "") or co.get("state", ""),
-                lead.get("_score", 0),
-                "intent",
-                now,
-                json.dumps({"automated": True, "topics": config["topics"]}),
-            ))
+        features = json.dumps({"automated": True, "topics": config["topics"]})
+        outcomes = [
+            db.build_outcome_row(lead, batch_id, "intent", now, features)
+            for lead in scored_contacts
+        ]
         if outcomes:
             db.record_lead_outcomes_batch(outcomes)
 

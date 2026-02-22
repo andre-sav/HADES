@@ -66,11 +66,25 @@ class TursoDatabase:
             raise
 
     def execute_many(self, query: str, params_list: list[tuple]) -> None:
-        """Execute batch insert/update. Reconnects on stale stream.
+        """Execute batch insert/update. Uses multi-row INSERT when possible.
 
-        Safe to replay all items on reconnect because the old connection
-        never committed — partial writes are rolled back when the stream dies.
+        For INSERT statements, builds a single multi-row VALUES clause
+        (1 round-trip instead of N). Falls back to individual statements
+        for non-INSERT queries.
+
+        Safe to replay on reconnect because the old connection never
+        committed — partial writes are rolled back when the stream dies.
         """
+        if not params_list:
+            return
+
+        # Optimize INSERT to multi-row (single round-trip to Turso)
+        upper = query.strip().upper()
+        if upper.startswith("INSERT") and "VALUES" in upper:
+            self._execute_multi_row_insert(query, params_list)
+            return
+
+        # Non-INSERT: individual statements
         try:
             for params in params_list:
                 self.connection.execute(query, params)
@@ -78,14 +92,49 @@ class TursoDatabase:
         except Exception as e:
             if self._is_stale_stream_error(e):
                 logger.warning("Stale Hrana stream detected, reconnecting...")
-                # Attempt rollback on old connection to ensure no partial state
                 try:
                     self.connection.rollback()
                 except Exception:
-                    pass  # Connection is dead, rollback is best-effort
+                    pass
                 conn = self._reconnect()
                 for params in params_list:
                     conn.execute(query, params)
+                conn.commit()
+                return
+            raise
+
+    def _execute_multi_row_insert(self, query: str, params_list: list[tuple]) -> None:
+        """Build multi-row INSERT VALUES for single round-trip."""
+        cols_per_row = len(params_list[0])
+        row_placeholder = f"({', '.join(['?'] * cols_per_row)})"
+
+        # Split at VALUES to get the prefix (INSERT ... INTO table (...) VALUES)
+        idx = query.upper().find("VALUES")
+        prefix = query[:idx] + "VALUES "
+
+        # Batch to stay under SQLite's 999 parameter limit
+        batch_size = max(1, 900 // cols_per_row)
+
+        try:
+            for i in range(0, len(params_list), batch_size):
+                batch = params_list[i:i + batch_size]
+                multi_query = prefix + ", ".join([row_placeholder] * len(batch))
+                flat_params = [p for row in batch for p in row]
+                self.connection.execute(multi_query, flat_params)
+            self.connection.commit()
+        except Exception as e:
+            if self._is_stale_stream_error(e):
+                logger.warning("Stale Hrana stream detected, reconnecting...")
+                try:
+                    self.connection.rollback()
+                except Exception:
+                    pass
+                conn = self._reconnect()
+                for i in range(0, len(params_list), batch_size):
+                    batch = params_list[i:i + batch_size]
+                    multi_query = prefix + ", ".join([row_placeholder] * len(batch))
+                    flat_params = [p for row in batch for p in row]
+                    conn.execute(multi_query, flat_params)
                 conn.commit()
                 return
             raise
@@ -648,6 +697,40 @@ class TursoDatabase:
         return result
 
     # --- Lead Outcomes ---
+
+    @staticmethod
+    def build_outcome_row(
+        lead: dict,
+        batch_id: str,
+        workflow_type: str,
+        exported_at: str,
+        source_features: str | None = None,
+    ) -> tuple:
+        """Build a lead outcome tuple for record_lead_outcomes_batch.
+
+        Handles field name variations across Contact Search, Intent, and Enrich APIs
+        with a consistent superset of fallbacks.
+        """
+        co = lead.get("company") if isinstance(lead.get("company"), dict) else {}
+
+        cid = lead.get("companyId") or co.get("id", "")
+        pid = lead.get("personId") or lead.get("id", "")
+
+        return (
+            batch_id,
+            lead.get("companyName", "") or co.get("name", ""),
+            str(cid) if cid else None,
+            str(pid) if pid else None,
+            lead.get("sicCode") or lead.get("_sic_code") or co.get("sicCode"),
+            lead.get("employeeCount") or lead.get("employees") or lead.get("numberOfEmployees") or co.get("employeeCount"),
+            lead.get("_distance_miles"),
+            lead.get("zip") or lead.get("zipCode") or co.get("zip"),
+            lead.get("state") or co.get("state"),
+            lead.get("_score", 0),
+            workflow_type,
+            exported_at,
+            source_features,
+        )
 
     def record_lead_outcomes_batch(self, params_list: list[tuple]) -> None:
         """Batch INSERT lead outcomes. Each tuple:
