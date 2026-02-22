@@ -191,28 +191,37 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         if uncached:
             logger.info("Enriching %d contacts to resolve company IDs (%d cached)",
                          len(uncached), len(cached))
+
+            # Collect all PIDs for batch resolution
+            pid_to_hid = {}  # person_id → hashed_company_id
             for hid in uncached:
                 company_lead = selected_companies[hid]
                 recommended = company_lead.get("recommendedContacts") or []
                 if not recommended or not isinstance(recommended[0], dict):
                     continue
                 pid = recommended[0].get("id")
-                if not pid:
-                    continue
+                if pid:
+                    pid_to_hid[str(pid)] = hid
+
+            if pid_to_hid:
                 try:
                     enriched = client.enrich_contacts_batch(
-                        person_ids=[pid],
+                        person_ids=list(pid_to_hid.keys()),
                         output_fields=["id", "companyId", "companyName"],
                     )
-                    if enriched:
-                        company = enriched[0].get("company", {})
-                        numeric_id = company.get("id") or enriched[0].get("companyId")
-                        company_name = company.get("name") or enriched[0].get("companyName", "")
+                    for contact in enriched:
+                        contact_id = str(contact.get("id", ""))
+                        hid = pid_to_hid.get(contact_id)
+                        if not hid:
+                            continue
+                        company = contact.get("company", {})
+                        numeric_id = company.get("id") or contact.get("companyId")
+                        company_name = company.get("name") or contact.get("companyName", "")
                         if numeric_id:
                             numeric_map[hid] = int(numeric_id)
                             db.save_company_id(hid, int(numeric_id), company_name)
                 except Exception as e:
-                    logger.warning("Could not resolve %s: %s", hid[:8], e)
+                    logger.warning("Batch company ID resolution failed: %s", e)
 
         if not numeric_map:
             logger.warning("Could not resolve any company IDs")

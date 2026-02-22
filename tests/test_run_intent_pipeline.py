@@ -201,11 +201,12 @@ class TestFullPipeline:
             _make_contact("p2", "200", "Beta Inc"),
         ]
         client.enrich_contacts_batch.side_effect = [
-            # First call: resolve company IDs (uncached)
-            [{"company": {"id": 100, "name": "Acme Corp"}, "companyId": 100}],
-            # Second call: resolve company IDs (uncached)
-            [{"company": {"id": 200, "name": "Beta Inc"}, "companyId": 200}],
-            # Third call: full enrichment
+            # First call: batch resolve ALL company IDs (was N+1, now single batch)
+            [
+                {"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
+                {"id": "p_c2", "company": {"id": 200, "name": "Beta Inc"}, "companyId": 200},
+            ],
+            # Second call: full enrichment
             [_make_contact("p1", "100", "Acme Corp"),
              _make_contact("p2", "200", "Beta Inc")],
         ]
@@ -302,7 +303,7 @@ class TestFullPipeline:
         # Return empty contacts (test only cares about dedup filtering)
         client.search_contacts_all_pages.return_value = []
         client.enrich_contacts_batch.return_value = [
-            {"company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
+            {"id": "p_c2", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
         ]
 
         db = MockDB.return_value
@@ -317,6 +318,43 @@ class TestFullPipeline:
 
         assert result["summary"]["dedup_filtered"] == 1
         assert result["summary"]["companies_selected"] == 1  # Only c2
+
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_step3_batch_resolves_company_ids(self, MockClient, MockDB, MockCostTracker):
+        """Step 3 resolves all uncached company IDs in one batch enrich call."""
+        config = _make_config(target_companies=3)
+        creds = _make_creds()
+
+        budget = MagicMock()
+        budget.alert_level = None
+        MockCostTracker.return_value.check_budget.return_value = budget
+
+        client = MockClient.return_value
+        client.search_intent_all_pages.return_value = [
+            _make_intent_lead("c1", "Acme Corp"),
+            _make_intent_lead("c2", "Beta Inc"),
+            _make_intent_lead("c3", "Gamma LLC"),
+        ]
+        client.search_contacts_all_pages.return_value = []
+        client.enrich_contacts_batch.return_value = [
+            {"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
+            {"id": "p_c2", "company": {"id": 200, "name": "Beta Inc"}, "companyId": 200},
+            {"id": "p_c3", "company": {"id": 300, "name": "Gamma LLC"}, "companyId": 300},
+        ]
+
+        db = MockDB.return_value
+        db.has_running_pipeline.return_value = False
+        db.get_company_ids_bulk.return_value = {}  # Nothing cached
+        db.get_exported_company_ids.return_value = {}
+
+        run_pipeline(config, creds)
+
+        # Step 3 should make exactly ONE enrich call for ID resolution (not 3)
+        first_enrich_call = client.enrich_contacts_batch.call_args_list[0]
+        assert first_enrich_call[1]["person_ids"] == ["p_c1", "p_c2", "p_c3"]
+        assert first_enrich_call[1]["output_fields"] == ["id", "companyId", "companyName"]
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +501,7 @@ class TestPipelineRunLogging:
             _make_contact("p1", "100", "Acme Corp"),
         ]
         client.enrich_contacts_batch.side_effect = [
-            [{"company": {"id": 100, "name": "Acme Corp"}, "companyId": 100}],
+            [{"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100}],
             [_make_contact("p1", "100", "Acme Corp")],
         ]
 
