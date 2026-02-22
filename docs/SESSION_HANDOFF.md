@@ -1,7 +1,62 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-22
-**Status:** All 4 epics implemented (18 stories complete). 582 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33).
+**Status:** All 4 epics implemented (18 stories complete). 591 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34).
+
+## Session Summary (2026-02-22, Session 34)
+
+### JWT Encryption at Rest (HADES-pt0 item 7) — DONE
+
+Implemented Fernet split-secret encryption for ZoomInfo JWT persistence. The JWT stored in `sync_metadata` is now encrypted at rest — compromising Turso DB alone reveals nothing.
+
+**Design:** Brainstormed 3 approaches (stop persisting, encrypt at rest, TTL cleanup). Chose Fernet split-secret: encrypted blob in Turso, decryption key (`ZOOMINFO_TOKEN_KEY`) in st.secrets.
+
+**Implementation (5 commits, TDD throughout):**
+1. Added `cryptography>=41.0` dependency
+2. `_get_fernet()` — returns Fernet instance from secrets or None if unavailable
+3. `_persist_token()` — encrypts before DB write, skips entirely if no key (NO plaintext fallback)
+4. `_load_persisted_token()` — decrypts with `ttl=3600` (Fernet-level 1-hour TTL), skips if no key
+5. Documented `ZOOMINFO_TOKEN_KEY` in CLAUDE.md
+
+**Security properties:**
+- No code path can write plaintext JWT to DB
+- Fernet TTL rejects decryption after 1 hour (defense-in-depth)
+- Tampered ciphertext detected via HMAC
+- Backward-compatible: old plaintext tokens auto-migrate on first auth
+
+**Subagent-driven development:** 3 implementer subagents + 4 spec reviewers + 3 code quality reviewers. All reviews passed.
+
+### Test Count
+591 tests passing (+9 new: 3 for _get_fernet, 5 for encrypt/decrypt, 1 for no-key load skip; 2 existing tests updated for encrypted mock data)
+
+### Uncommitted Changes
+None. All changes committed and pushed.
+
+### HADES-pt0 (P1) — Security Hardening — PARTIALLY DONE
+
+Item 7 (JWT encryption) is complete. Items 1-6 still open:
+1. `hmac.compare_digest` for password check
+2. Rate limiting on login attempts
+3. XSS escape in `health_indicator()` detail
+4. XSS escape in `_friendly_error()` output
+5. `.env` not in `.gitignore`
+6. Raw `{e}` in `st.error()` — 15+ locations
+
+### What Needs Doing Next Session
+1. **HADES-pt0** [P1] — Security hardening: items 1-6 (quick wins, ~30 min)
+2. **HADES-28z** [P1] — CI test workflow + pin dependencies
+3. **HADES-io6** [P2] — Outcome recording consolidation
+4. **HADES-3bo** [P2] — Config centralization
+5. **HADES-mxm** [P2] — ZoomInfo API resilience
+
+### Deploy Note
+After deploying, generate a Fernet key and add to Streamlit secrets:
+```
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+Add as `ZOOMINFO_TOKEN_KEY` in Streamlit Community Cloud secrets. Without the key, token persistence is disabled (app still works, just re-authenticates on every cold start).
+
+---
 
 ## Session Summary (2026-02-22, Session 33)
 
