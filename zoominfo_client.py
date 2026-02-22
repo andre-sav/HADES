@@ -206,6 +206,13 @@ class ZoomInfoClient:
     # Minimum seconds between API requests (proactive rate limiting)
     MIN_REQUEST_INTERVAL = 0.5
 
+    # Circuit breaker: trip after N consecutive failures, cooldown before retrying
+    CIRCUIT_BREAKER_THRESHOLD = 3
+    CIRCUIT_BREAKER_COOLDOWN = 30  # seconds
+
+    # Max seconds to sleep for a single 429 retry (prevents UI freeze)
+    MAX_RETRY_WAIT = 10
+
     def __init__(self, client_id: str, client_secret: str, token_store=None):
         self.client_id = client_id
         self.client_secret = client_secret
@@ -217,6 +224,8 @@ class ZoomInfoClient:
         self.last_exchange: dict | None = None  # Captures last API request/response for debugging
         self._last_auth_response: dict | None = None  # Captures auth error details for debugging
         self._lock = threading.Lock()  # Guards token, last_exchange, and rate-limit state
+        self._consecutive_failures = 0
+        self._circuit_open_until: float = 0.0
 
     def _get_token(self) -> str:
         """Get valid access token, refreshing if needed. Thread-safe."""
@@ -357,6 +366,25 @@ class ZoomInfoClient:
             logger.error(f"Authentication connection error: {e}")
             raise ZoomInfoAuthError(f"Connection error: {str(e)}")
 
+    def _record_failure(self) -> None:
+        """Increment consecutive failure count and trip circuit breaker if threshold reached."""
+        with self._lock:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self.CIRCUIT_BREAKER_THRESHOLD:
+                self._circuit_open_until = time.time() + self.CIRCUIT_BREAKER_COOLDOWN
+                logger.warning(
+                    f"Circuit breaker OPEN after {self._consecutive_failures} consecutive failures. "
+                    f"Cooldown: {self.CIRCUIT_BREAKER_COOLDOWN}s"
+                )
+
+    def _reset_circuit_breaker(self) -> None:
+        """Reset circuit breaker on successful request."""
+        with self._lock:
+            if self._consecutive_failures > 0:
+                logger.info(f"Circuit breaker reset after {self._consecutive_failures} failures")
+                self._consecutive_failures = 0
+                self._circuit_open_until = 0.0
+
     def _request(
         self,
         method: str,
@@ -365,6 +393,17 @@ class ZoomInfoClient:
         **kwargs,
     ) -> dict:
         """Make authenticated API request with retry logic and proactive rate limiting."""
+        # Circuit breaker: fail fast if API has been consistently failing
+        with self._lock:
+            if self._circuit_open_until > time.time():
+                remaining = int(self._circuit_open_until - time.time()) + 1
+                raise ZoomInfoAPIError(
+                    503,
+                    f"Circuit breaker open — ZoomInfo API unavailable after "
+                    f"{self.CIRCUIT_BREAKER_THRESHOLD} consecutive failures. "
+                    f"Try again in {remaining}s.",
+                )
+
         # Proactive rate limiting: ensure minimum gap between requests
         with self._lock:
             elapsed = time.time() - self._last_request_time
@@ -454,14 +493,18 @@ class ZoomInfoClient:
                         f"Rate limited on {endpoint}. Retry-After: {retry_after}s, "
                         f"detail: {detail} (attempt {attempt + 1}/{max_retries})"
                     )
-                    # Don't retry if Retry-After is very long (quota-level limit)
-                    max_wait = 120  # 2 minutes max per retry
-                    if retry_after > max_wait:
-                        logger.error(f"Retry-After {retry_after}s exceeds max wait {max_wait}s — not retrying")
+                    # Don't block UI thread for long waits
+                    if retry_after > self.MAX_RETRY_WAIT:
+                        logger.error(
+                            f"Retry-After {retry_after}s exceeds max wait "
+                            f"{self.MAX_RETRY_WAIT}s — not retrying"
+                        )
+                        self._record_failure()
                         raise ZoomInfoRateLimitError(retry_after, detail)
                     if attempt < max_retries - 1:
                         time.sleep(retry_after)
                         continue
+                    self._record_failure()
                     raise ZoomInfoRateLimitError(retry_after, detail)
 
                 # Handle auth errors
@@ -483,6 +526,7 @@ class ZoomInfoClient:
                         # Exponential backoff
                         time.sleep(2**attempt)
                         continue
+                    self._record_failure()
                     raise ZoomInfoAPIError(response.status_code, response.text)
 
                 # Handle client errors
@@ -498,6 +542,7 @@ class ZoomInfoClient:
                     raise ZoomInfoAPIError(response.status_code, f"Invalid JSON response: {str(json_err)}")
                 total_results = result.get("totalResults", len(result.get("data", [])))
                 logger.info(f"API Response: {endpoint} -> HTTP {response.status_code}, {total_results} results")
+                self._reset_circuit_breaker()
                 return result
 
             except requests.RequestException as e:
@@ -507,6 +552,7 @@ class ZoomInfoClient:
                 if attempt < max_retries - 1:
                     time.sleep(2**attempt)
                     continue
+                self._record_failure()
                 raise ZoomInfoAPIError(0, f"Connection error: {str(e)}")
 
         self.last_exchange["error"] = f"Max retries exceeded: {str(last_error)}"
@@ -954,7 +1000,6 @@ class ZoomInfoClient:
         seen_person_ids = set()
         dupes_removed = 0
         current_page = 1
-        actual_page_size = None  # Track what ZoomInfo actually returns per page
         params = replace(params)  # Local copy to avoid mutating caller's params
 
         while current_page <= max_pages:
@@ -972,24 +1017,21 @@ class ZoomInfoClient:
                     seen_person_ids.add(pid)
                 all_contacts.append(contact)
 
+            total_pages = result["pagination"]["totalPages"]
+
             if progress_callback:
-                progress_callback(current_page, result["pagination"]["totalPages"])
+                progress_callback(current_page, total_pages)
 
-            # Track actual page size from first page (ZoomInfo may cap at 25)
-            if actual_page_size is None and results_count > 0:
-                actual_page_size = results_count
-                logger.info(f"Contact Search: Detected actual page size: {actual_page_size}")
-
-            # Stop if we got 0 results or fewer than the actual page size
+            # Stop if we got 0 results (safety fallback)
             if results_count == 0:
                 logger.info(f"Contact Search: Page {current_page} returned 0 results, end of results")
                 break
 
-            if actual_page_size and results_count < actual_page_size:
-                logger.info(f"Contact Search: Page {current_page} returned {results_count} < {actual_page_size}, end of results")
+            # Stop when we've reached the last page (consistent with intent/company search)
+            if current_page >= total_pages:
+                logger.info(f"Contact Search: Reached last page ({current_page}/{total_pages})")
                 break
 
-            # If we got a full page, there might be more - continue to next page
             current_page += 1
 
         logger.info(f"Contact Search (batch) complete: {len(all_contacts)} unique contacts ({dupes_removed} duplicates removed) from {current_page} pages")

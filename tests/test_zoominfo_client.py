@@ -1591,3 +1591,200 @@ class TestJWTEncryption:
             client._load_persisted_token()
 
         assert client.access_token is None
+
+
+class TestCircuitBreaker:
+    """Tests for circuit breaker resilience pattern."""
+
+    @pytest.fixture
+    def client(self):
+        return ZoomInfoClient(client_id="test-id", client_secret="test-secret")
+
+    @pytest.fixture
+    def authed_client(self, client):
+        """Client with mocked auth and session."""
+        from datetime import datetime, timedelta
+        client.access_token = "valid-token"
+        client.token_expires_at = datetime.now() + timedelta(hours=1)
+        client._session = MagicMock()
+        return client
+
+    def test_circuit_breaker_trips_after_threshold(self, client):
+        """Circuit breaker opens after CIRCUIT_BREAKER_THRESHOLD consecutive failures."""
+        for _ in range(client.CIRCUIT_BREAKER_THRESHOLD):
+            client._record_failure()
+
+        assert client._consecutive_failures == client.CIRCUIT_BREAKER_THRESHOLD
+        assert client._circuit_open_until > 0
+
+    def test_circuit_breaker_rejects_while_open(self, authed_client):
+        """Requests fail immediately when circuit breaker is open."""
+        import time
+        authed_client._circuit_open_until = time.time() + 30
+
+        with pytest.raises(ZoomInfoAPIError) as exc_info:
+            authed_client._request("POST", "/test")
+
+        assert "Circuit breaker open" in str(exc_info.value)
+
+    def test_circuit_breaker_resets_on_success(self, authed_client):
+        """Successful request resets the circuit breaker."""
+        authed_client._consecutive_failures = 2
+
+        success_response = MagicMock()
+        success_response.status_code = 200
+        success_response.json.return_value = {"data": []}
+        authed_client._session.request.return_value = success_response
+
+        authed_client._request("POST", "/test")
+
+        assert authed_client._consecutive_failures == 0
+        assert authed_client._circuit_open_until == 0.0
+
+    def test_circuit_breaker_allows_after_cooldown(self, authed_client):
+        """Requests succeed after circuit breaker cooldown expires."""
+        import time
+        authed_client._circuit_open_until = time.time() - 1  # expired
+
+        success_response = MagicMock()
+        success_response.status_code = 200
+        success_response.json.return_value = {"data": []}
+        authed_client._session.request.return_value = success_response
+
+        result = authed_client._request("POST", "/test")
+        assert result == {"data": []}
+
+    def test_record_failure_increments_count(self, client):
+        """Each failure increments the consecutive failure counter."""
+        client._record_failure()
+        assert client._consecutive_failures == 1
+        client._record_failure()
+        assert client._consecutive_failures == 2
+
+    def test_circuit_breaker_opens_on_exhausted_retries(self, authed_client):
+        """Circuit breaker records failure when all retries are exhausted."""
+        error_response = MagicMock()
+        error_response.status_code = 500
+        error_response.text = "Server Error"
+        authed_client._session.request.return_value = error_response
+
+        with pytest.raises(ZoomInfoAPIError):
+            authed_client._request("POST", "/test", max_retries=1)
+
+        assert authed_client._consecutive_failures == 1
+
+
+class TestMaxRetryWait:
+    """Tests for reduced max retry wait (prevents UI freeze)."""
+
+    @pytest.fixture
+    def authed_client(self):
+        from datetime import datetime, timedelta
+        client = ZoomInfoClient(client_id="test-id", client_secret="test-secret")
+        client.access_token = "valid-token"
+        client.token_expires_at = datetime.now() + timedelta(hours=1)
+        client._session = MagicMock()
+        return client
+
+    def test_max_retry_wait_is_10_seconds(self):
+        """MAX_RETRY_WAIT should be 10s (not 120s) to prevent UI freeze."""
+        assert ZoomInfoClient.MAX_RETRY_WAIT == 10
+
+    def test_long_retry_after_raises_immediately(self, authed_client):
+        """Retry-After > MAX_RETRY_WAIT should raise immediately without sleeping."""
+        rate_limit_response = MagicMock()
+        rate_limit_response.status_code = 429
+        rate_limit_response.headers = {"Retry-After": "60"}
+        rate_limit_response.json.return_value = {"error": "Rate limited"}
+        authed_client._session.request.return_value = rate_limit_response
+
+        with pytest.raises(ZoomInfoRateLimitError) as exc_info:
+            authed_client._request("POST", "/test", max_retries=3)
+
+        assert exc_info.value.retry_after == 60
+        # Should only make 1 attempt (no retry sleep)
+        assert authed_client._session.request.call_count == 1
+
+    def test_short_retry_after_retries(self, authed_client):
+        """Retry-After <= MAX_RETRY_WAIT should retry after sleeping."""
+        rate_limit_response = MagicMock()
+        rate_limit_response.status_code = 429
+        rate_limit_response.headers = {"Retry-After": "2"}
+        rate_limit_response.json.return_value = {"error": "Rate limited"}
+
+        success_response = MagicMock()
+        success_response.status_code = 200
+        success_response.json.return_value = {"data": []}
+
+        authed_client._session.request.side_effect = [rate_limit_response, success_response]
+
+        result = authed_client._request("POST", "/test", max_retries=2)
+        assert result == {"data": []}
+        assert authed_client._session.request.call_count == 2
+
+
+class TestPaginationFix:
+    """Tests for fixed pagination using totalPages instead of fragile heuristic."""
+
+    @pytest.fixture
+    def client(self):
+        from datetime import datetime, timedelta
+        client = ZoomInfoClient(client_id="test-id", client_secret="test-secret")
+        client.access_token = "valid-token"
+        client.token_expires_at = datetime.now() + timedelta(hours=1)
+        return client
+
+    def test_pagination_stops_at_total_pages(self, client):
+        """Pagination should stop at totalPages, not when page size varies."""
+        # Page 1: 25 results, totalResults=40 (2 pages)
+        # Page 2: 15 results (short page, but expected!)
+        # OLD behavior: Would stop after page 1 if 15 < 25 (actual_page_size heuristic)
+        # NEW behavior: Stops after page 2 because currentPage >= totalPages
+
+        page1_response = {
+            "data": [{"personId": str(i)} for i in range(25)],
+            "totalResults": 40,
+        }
+        page2_response = {
+            "data": [{"personId": str(i)} for i in range(25, 40)],
+            "totalResults": 40,
+        }
+
+        with patch.object(client, "search_contacts", side_effect=[
+            {"data": page1_response["data"], "pagination": {"totalResults": 40, "pageSize": 25, "currentPage": 1, "totalPages": 2}},
+            {"data": page2_response["data"], "pagination": {"totalResults": 40, "pageSize": 25, "currentPage": 2, "totalPages": 2}},
+        ]):
+            results = client._search_contacts_single_batch(
+                ContactQueryParams(zip_codes=["75201"], radius_miles=25, states=["TX"]),
+                max_pages=10,
+            )
+
+        assert len(results) == 40
+
+    def test_pagination_stops_on_empty_page(self, client):
+        """Empty page is a safety fallback for stopping pagination."""
+        with patch.object(client, "search_contacts", side_effect=[
+            {"data": [{"personId": "1"}], "pagination": {"totalResults": 100, "pageSize": 25, "currentPage": 1, "totalPages": 4}},
+            {"data": [], "pagination": {"totalResults": 100, "pageSize": 25, "currentPage": 2, "totalPages": 4}},
+        ]):
+            results = client._search_contacts_single_batch(
+                ContactQueryParams(zip_codes=["75201"], radius_miles=25, states=["TX"]),
+                max_pages=10,
+            )
+
+        assert len(results) == 1
+
+    def test_pagination_respects_max_pages(self, client):
+        """max_pages cap should still be respected."""
+        pages = []
+        for i in range(5):
+            pages.append({"data": [{"personId": str(i)}], "pagination": {"totalResults": 100, "pageSize": 1, "currentPage": i + 1, "totalPages": 100}})
+
+        with patch.object(client, "search_contacts", side_effect=pages):
+            results = client._search_contacts_single_batch(
+                ContactQueryParams(zip_codes=["75201"], radius_miles=25, states=["TX"]),
+                max_pages=5,
+            )
+
+        # Should stop at max_pages=5 even though totalPages=100
+        assert len(results) == 5
