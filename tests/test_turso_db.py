@@ -449,6 +449,24 @@ class TestLeadOutcomes:
         call_params = mock_conn.execute.call_args_list[0][0][1]
         assert call_params[3] == "person-abc-123"
 
+    def test_record_lead_outcomes_rejects_duplicates(self):
+        """Duplicate (batch_id, person_id) rows are silently ignored."""
+        import sqlite3
+        db = TursoDatabase.__new__(TursoDatabase)
+        db._conn = sqlite3.connect(":memory:")
+        db.url = ":memory:"
+        db.init_schema()
+
+        row = (
+            "batch-1", "Acme Corp", "c-100", "p-200", "7011", 500,
+            5.0, "75201", "TX", 85, "intent", "2026-02-22T10:00:00", None,
+        )
+        db.record_lead_outcomes_batch([row])
+        db.record_lead_outcomes_batch([row])  # duplicate
+
+        count = db.execute("SELECT COUNT(*) FROM lead_outcomes")[0][0]
+        assert count == 1, f"Expected 1 row, got {count} — UNIQUE constraint missing"
+
     def test_get_outcomes_by_batch(self, mock_db):
         """Test retrieving outcomes by batch ID."""
         db, mock_conn = mock_db

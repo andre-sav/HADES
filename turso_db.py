@@ -199,6 +199,7 @@ class TursoDatabase:
                 batch_id TEXT NOT NULL,
                 company_name TEXT NOT NULL,
                 company_id TEXT,
+                person_id TEXT,
                 sic_code TEXT,
                 employee_count INTEGER,
                 distance_miles REAL,
@@ -216,6 +217,7 @@ class TursoDatabase:
             """,
             "CREATE INDEX IF NOT EXISTS idx_lead_outcomes_batch ON lead_outcomes(batch_id)",
             "CREATE INDEX IF NOT EXISTS idx_lead_outcomes_company_exported ON lead_outcomes(company_id, exported_at)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_outcomes_batch_person ON lead_outcomes(batch_id, person_id)",
             # Staged exports (persist leads for CSV re-export after session loss)
             """
             CREATE TABLE IF NOT EXISTS staged_exports (
@@ -655,7 +657,7 @@ class TursoDatabase:
          exported_at, source_features)
         """
         self.execute_many(
-            """INSERT INTO lead_outcomes
+            """INSERT OR IGNORE INTO lead_outcomes
                (batch_id, company_name, company_id, person_id, sic_code, employee_count,
                 distance_miles, zip_code, state, hades_score, workflow_type,
                 exported_at, source_features)
