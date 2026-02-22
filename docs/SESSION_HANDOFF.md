@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-22
-**Status:** All 4 epics implemented (18 stories complete). 581 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards implemented (session 33).
+**Status:** All 4 epics implemented (18 stories complete). 582 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33).
 
 ## Session Summary (2026-02-22, Session 33)
 
@@ -19,18 +19,23 @@ Implemented all 5 safety guards from the audit findings:
 
 **Now unblocked:** HADES-ect (Batch Step 3 enrich N+1) and HADES-io6 (Outcome recording consolidation).
 
+### HADES-ect (P1) — Batch Enrich + exclude_org_exported — CLOSED
+
+1. **excludeOrgExportedContacts sent to API** (`zoominfo_client.py`) — field was in dataclass and cache hash but never in request body. Now sent when `exclude_org_exported=True` (default).
+2. **Batch Step 3 ID resolution** (`scripts/run_intent_pipeline.py`) — replaced N+1 per-company `enrich_contacts_batch(person_ids=[single_pid])` loop with single batch call collecting all PIDs first. Saves ~24 credits per automated run.
+
 ### Test Count
-581 tests passing (+3 new: UNIQUE constraint test, has_running_pipeline test, concurrent guard abort test)
+582 tests passing (+4 from session start: UNIQUE constraint, has_running_pipeline, concurrent guard abort, step3 batch test)
 
 ### Uncommitted Changes
 None. All changes committed and pushed.
 
 ### What Needs Doing Next Session
-1. **HADES-ect** [P1] — Batch Step 3 enrich N+1 fix + exclude_org_exported (NOW UNBLOCKED)
-2. **HADES-pt0** [P1] — Security hardening (hmac, XSS, .env, error messages)
-3. **HADES-28z** [P1] — CI test workflow + pin dependencies
-4. **HADES-io6** [P2] — Outcome recording consolidation (NOW UNBLOCKED)
-5. **HADES-3bo** [P2] — Config centralization
+1. **HADES-pt0** [P1] — Security hardening (hmac, XSS, .env, error messages)
+2. **HADES-28z** [P1] — CI test workflow + pin dependencies
+3. **HADES-io6** [P2] — Outcome recording consolidation (NOW UNBLOCKED)
+4. **HADES-3bo** [P2] — Config centralization
+5. **HADES-mxm** [P2] — ZoomInfo API resilience
 
 ---
 
