@@ -1,7 +1,84 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-22
-**Status:** All 4 epics implemented (18 stories complete). 591 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34).
+**Status:** All 4 epics implemented (18 stories complete). 628 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd).
+
+## Session Summary (2026-02-22, Session 34 continued)
+
+### What Was Done
+
+Completed 4 beads, all P1-P2 priority from the audit backlog:
+
+1. **HADES-28z** [P1] — CI test workflow + pinned dependencies
+   - Created `.github/workflows/test.yml` (lint + test on push/PR to main)
+   - Generated `requirements-lock.txt` via `pip-compile` (307 lines)
+   - Created `ruff.toml` with E+F rules, per-file ignores for Streamlit pages
+   - Auto-fixed 52 ruff violations across 38 files
+   - Found real bug: shadowed test (F811) — test count 598→599
+   - Updated `intent-poll.yml` to use lock file
+
+2. **HADES-mxm** [P2] — ZoomInfo API resilience
+   - Circuit breaker: trips after 3 consecutive failures, 30s cooldown
+   - Lowered MAX_RETRY_WAIT from 120s to 10s (prevents Streamlit UI freeze)
+   - Fixed Contact Search pagination: use `totalPages` instead of fragile "fewer results than first page" heuristic
+
+3. **HADES-io6** [P2] — Outcome recording consolidation
+   - Extracted `build_outcome_row()` helper with superset of field fallbacks
+   - Replaced inconsistent inline logic in intent pipeline and CSV export
+   - Optimized `execute_many()` to use multi-row INSERT (1 round-trip vs N)
+   - credits_used was already correctly handled — no fix needed
+
+4. **HADES-3bo** [P2] — Config centralization
+   - Added `search_defaults` section to `icp.yaml` (accuracy, mgmt levels, phone fields, target contacts, radius)
+   - Added 6 getter functions to `utils.py`
+   - Replaced hardcoded defaults in `expand_search.py`, pages/1, pages/2, intent pipeline script
+   - Fixed radius inconsistency (10 vs 15 — unified at 15)
+
+### Test Count
+628 tests passing (+29 new this session: 12 circuit breaker/retry/pagination, 11 outcome/multi-row, 6 config getters)
+
+### Key Files Modified
+```
+zoominfo_client.py              — circuit breaker, retry cap, pagination fix
+turso_db.py                     — build_outcome_row(), multi-row INSERT
+utils.py                        — 6 new config getter functions
+config/icp.yaml                 — search_defaults section
+expand_search.py                — config-driven defaults
+pages/1_Intent_Workflow.py      — config-driven defaults
+pages/2_Geography_Workflow.py   — config-driven defaults
+pages/4_CSV_Export.py           — consolidated outcome recording
+scripts/run_intent_pipeline.py  — consolidated outcome recording, config getter
+.github/workflows/test.yml     — NEW: CI test + lint workflow
+.github/workflows/intent-poll.yml — use requirements-lock.txt
+requirements-lock.txt           — NEW: pinned dependencies
+ruff.toml                       — NEW: linter config (+ docs/briefing ignore)
+tests/test_zoominfo_client.py   — 12 new resilience tests
+tests/test_turso_db.py          — 11 new outcome/batch tests
+tests/test_utils.py             — 6 new config getter tests
+```
+
+### Uncommitted Changes
+Only `.beads/issues.jsonl` (bead state). Will be committed by bd sync.
+Untracked: `docs/ux-review-session26.md` and `ux-review/` (pre-existing, not part of this session).
+
+### Known Issues
+- Ruff tries to lint YAML files if you pass `config/icp.yaml` directly — use `ruff check .` which respects file types
+- SMTP secrets not configured in GitHub Actions (intent pipeline runs but skips email)
+
+### What Needs Doing Next Session
+1. **HADES-oa8** [P2] — UX: 1-click Geo search, contact mini-cards, Push button explanation
+2. **HADES-03x** [P3] — DB performance: indexes, operators pagination, ZIP caching
+3. **HADES-0xw** [P3] — Fix vacuous tests + extract time_ago + add Zoho test suite
+4. **HADES-v3y** [P3] — UI polish: CSS typo, button standardization, WCAG contrast
+5. **HADES-amm** [P3] — UX: Add export history section to CSV Export page
+
+### Beads Status
+- **Closed this session:** HADES-28z, HADES-mxm, HADES-io6, HADES-3bo
+- **Closed earlier in session 34:** HADES-pt0 (security hardening — all 7 items)
+- **All P0-P1 beads closed.** Remaining: 1 P2, 6 P3, 3 P4
+- **Total:** 28 closed, 16 open, 0 in progress
+
+---
 
 ## Session Summary (2026-02-22, Session 34)
 
