@@ -173,6 +173,23 @@ with col3:
 
 
 # --- Run Now ---
+
+@st.dialog("Confirm Pipeline Run")
+def confirm_run_now_dialog(topics, target):
+    st.write("Run intent pipeline now?")
+    st.write(f"Search **{', '.join(topics)}** signals, find top **{target}** companies, enrich contacts, email CSV.")
+    st.caption("Credits will be consumed from your weekly budget.")
+    st.markdown("")
+    col_yes, col_no = st.columns(2)
+    with col_yes:
+        if st.button("Run", type="primary", use_container_width=True):
+            st.session_state["auto_run_confirmed"] = True
+            st.rerun()
+    with col_no:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun()
+
+
 labeled_divider("Run Now")
 
 # Show what will run
@@ -190,10 +207,15 @@ with now_col2:
         "Run Now", type="primary", use_container_width=True, key="auto_run_now",
     )
 
-if run_now and not st.session_state.get("auto_run_triggered"):
+# Open dialog on button click
+if run_now:
+    confirm_run_now_dialog(topics, target)
+
+# Execute pipeline only after dialog confirmation
+if st.session_state.pop("auto_run_confirmed", False) and not st.session_state.get("auto_run_triggered"):
     st.session_state["auto_run_triggered"] = True
-    with st.spinner("Running intent pipeline..."):
-        try:
+    try:
+        with st.spinner("Running intent pipeline..."):
             from scripts.run_intent_pipeline import run_pipeline
             from scripts._credentials import load_credentials
 
@@ -207,9 +229,10 @@ if run_now and not st.session_state.get("auto_run_triggered"):
                     st.caption(f"Batch {result['batch_id']}")
             else:
                 st.error(f"Pipeline failed: {result.get('error', 'Unknown error')}")
-        except Exception as e:
-            st.error(f"Pipeline error: {e}")
-    st.session_state["auto_run_triggered"] = False
+    except Exception as e:
+        st.error(f"Pipeline error: {e}")
+    finally:
+        st.session_state["auto_run_triggered"] = False
     st.rerun()
 
 
