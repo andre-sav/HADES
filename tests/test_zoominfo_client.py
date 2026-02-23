@@ -297,7 +297,7 @@ class TestIntentSearch:
         # Verify flat request body (not JSON:API envelope)
         body = call_args[1]["json"]
         assert body["topics"] == ["Vending"]
-        assert body["rpp"] == 25
+        assert body["rpp"] == 100
         assert body["page"] == 1
 
     def test_search_intent_with_filters(self, client):
@@ -734,8 +734,11 @@ class TestContactSearch:
         body = call_args[1]["json"]
         assert body["jobTitle"] == "Facility Manager,Operations Manager"
 
-    def test_search_contacts_exclude_org_exported(self, client):
-        """Test exclude_org_exported is sent to ZoomInfo API when True (default)."""
+    def test_search_contacts_exclude_org_exported_not_sent(self, client):
+        """excludeOrgExportedContacts is NOT sent — ZoomInfo rejects it (400).
+
+        HADES uses its own cross-session dedup via export_dedup.py instead.
+        """
         mock_response = {"data": [], "totalResults": 0}
 
         with patch.object(client, "_request", return_value=mock_response) as mock_req:
@@ -743,23 +746,6 @@ class TestContactSearch:
                 zip_codes=["75201"],
                 radius_miles=25,
                 states=["TX"],
-            )
-            client.search_contacts(params)
-
-        call_args = mock_req.call_args
-        body = call_args[1]["json"]
-        assert body["excludeOrgExportedContacts"] is True
-
-    def test_search_contacts_include_org_exported(self, client):
-        """Test exclude_org_exported=False omits the field from request."""
-        mock_response = {"data": [], "totalResults": 0}
-
-        with patch.object(client, "_request", return_value=mock_response) as mock_req:
-            params = ContactQueryParams(
-                zip_codes=["75201"],
-                radius_miles=25,
-                states=["TX"],
-                exclude_org_exported=False,
             )
             client.search_contacts(params)
 

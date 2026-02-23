@@ -54,7 +54,7 @@ class IntentQueryParams:
     signal_end_date: str | None = None  # YYYY-MM-DD
     employee_min: int | None = None  # Not used by new API, kept for backward compat
     sic_codes: list[str] | None = None  # Not used by new API, kept for backward compat
-    page_size: int = 25
+    page_size: int = 100
     page: int = 1
 
 
@@ -92,7 +92,7 @@ class ContactQueryParams:
     required_fields: list[str] | None = None  # e.g., ["mobilePhone", "directPhone", "phone"]
     required_fields_operator: str = "or"  # "or" = any field, "and" = all fields
     contact_accuracy_score_min: int = 95  # Quality threshold (0-100)
-    exclude_org_exported: bool = True  # Exclude contacts already exported by org
+    exclude_org_exported: bool = True  # Cache key only; NOT sent to API (ZoomInfo 400). Dedup via export_dedup.py
     # Job title/role filters
     management_levels: list[str] | None = None  # Valid: Manager, Director, VP Level Exec, C Level Exec, Board Member, Non Manager
     job_titles: list[str] | None = None  # Specific titles to search for
@@ -760,7 +760,7 @@ class ZoomInfoClient:
             )
         logger.info(
             f"  Filters: accuracy>={params.contact_accuracy_score_min}, "
-            f"mgmt_levels={params.management_levels}, exclude_exported={params.exclude_org_exported}"
+            f"mgmt_levels={params.management_levels}, dedup=export_dedup"
         )
 
         # Apply ICP filters if not specified
@@ -843,9 +843,9 @@ class ZoomInfoClient:
         if params.job_titles:
             request_body["jobTitle"] = ",".join(params.job_titles)
 
-        # Exclude contacts already exported by this org
-        if params.exclude_org_exported:
-            request_body["excludeOrgExportedContacts"] = True
+        # NOTE: excludeOrgExportedContacts is NOT a valid ZoomInfo /search/contact
+        # parameter (returns 400 "Criteria invalid"). HADES uses its own cross-session
+        # dedup via export_dedup.py instead. Field kept in dataclass for cache keying.
 
         response = self._request("POST", "/search/contact", json=request_body, params=query_params)
 

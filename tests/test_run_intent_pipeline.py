@@ -467,7 +467,7 @@ class TestAutomationConfig:
     def test_get_automation_config_returns_intent(self):
         from utils import get_automation_config
         config = get_automation_config("intent")
-        assert config["topics"] == ["Vending Machines", "Breakroom Solutions"]
+        assert config["topics"] == ["Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers"]
         assert config["target_companies"] == 25
         assert config["accuracy_min"] == 95
 

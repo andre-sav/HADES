@@ -198,7 +198,7 @@ search_defaults:
 # Automation settings for headless pipeline scripts
 automation:
   intent:
-    topics: ["Vending Machines", "Breakroom Solutions"]
+    topics: ["Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers"]
     signal_strengths: ["High", "Medium"]
     target_companies: 25
     management_levels: ["Manager", "Director", "VP Level Exec"]

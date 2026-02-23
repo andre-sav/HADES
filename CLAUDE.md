@@ -152,7 +152,7 @@ python -m pytest tests/test_scoring.py -v
 - `contactAccuracyScoreMin`: `95` - High quality threshold
 - `companyEmployeeCount`: `{"min": 50, "max": 5000}` - Employee range
 - `management_levels`: `["Manager"]` - Target decision-makers (facility managers, operations managers)
-- `exclude_org_exported`: `True` - Skip contacts already exported by your org
+- `exclude_org_exported`: `True` - Retained for cache keying only; NOT sent to API (ZoomInfo rejects it). Dedup handled by `export_dedup.py`
 
 **Usage Example:**
 ```python
