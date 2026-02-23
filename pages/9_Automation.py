@@ -109,12 +109,17 @@ def _run_card_html(run: dict) -> str:
     time_str = run.get("completed_at") or run.get("started_at") or ""
     leads = run.get("leads_exported", 0)
     credits = run.get("credits_used", 0)
-    error_html = ""
+    context_html = ""
     if run.get("error_message"):
         friendly = _friendly_error(run["error_message"])
-        error_html = (
+        context_html = (
             f'<div style="margin-top:{SPACING["xs"]};color:{COLORS["error_light"]};'
             f'font-size:{FONT_SIZES["xs"]};">{friendly}</div>'
+        )
+    elif status == "complete" and leads == 0:
+        context_html = (
+            f'<div style="margin-top:{SPACING["xs"]};color:{COLORS["text_muted"]};'
+            f'font-size:{FONT_SIZES["xs"]};">No new intent signals matched filters</div>'
         )
 
     return (
@@ -124,7 +129,7 @@ def _run_card_html(run: dict) -> str:
         f'<div style="flex:1;min-width:0;">'
         f'<span style="color:{COLORS["text_primary"]};font-weight:500;">{trigger}</span>'
         f'<span style="color:{COLORS["text_muted"]};font-size:{FONT_SIZES["sm"]};margin-left:{SPACING["sm"]};">{time_str}</span>'
-        f'{error_html}</div>'
+        f'{context_html}</div>'
         f'<div style="flex:0 0 auto;text-align:right;font-family:\'IBM Plex Mono\',monospace;'
         f'font-size:{FONT_SIZES["sm"]};font-variant-numeric:tabular-nums;">'
         f'<span style="color:{COLORS["text_primary"]};">{leads}</span>'
@@ -279,7 +284,10 @@ else:
                         st.markdown(f"**Error:** `{run['error_message']}`")
                 with d2:
                     st.markdown(f"**Credits:** {run.get('credits_used', 0)}")
-                    st.markdown(f"**Leads:** {run.get('leads_exported', 0)}")
+                    _detail_leads = run.get('leads_exported', 0)
+                    st.markdown(f"**Leads:** {_detail_leads}")
+                    if run["status"] == "complete" and _detail_leads == 0:
+                        st.caption("No new intent signals matched filters")
                     st.markdown(f"**Started:** {run.get('started_at', '—')}")
                     st.markdown(f"**Completed:** {run.get('completed_at', '—')}")
 
