@@ -345,11 +345,7 @@ class TestZohoSyncMetadata:
     def test_get_last_sync_time_none(self):
         from zoho_sync import get_last_sync_time
         mock_db = MagicMock()
-        mock_db.execute.return_value = []
-        mock_db.connection = MagicMock()
-        mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = []
-        mock_db.connection.execute.return_value = mock_cursor
+        mock_db.get_sync_value.return_value = None
 
         result = get_last_sync_time(mock_db)
         assert result is None
@@ -357,10 +353,7 @@ class TestZohoSyncMetadata:
     def test_get_last_sync_time_exists(self):
         from zoho_sync import get_last_sync_time
         mock_db = MagicMock()
-        mock_db.execute.return_value = [("2026-01-15T10:00:00",)]
-        mock_db.connection = MagicMock()
-        mock_cursor = MagicMock()
-        mock_db.connection.execute.return_value = mock_cursor
+        mock_db.get_sync_value.return_value = "2026-01-15T10:00:00"
 
         result = get_last_sync_time(mock_db)
         assert result == "2026-01-15T10:00:00"
@@ -371,8 +364,8 @@ class TestZohoSyncMetadata:
 
         set_last_sync_time(mock_db, "2026-02-01T12:00:00")
 
-        mock_db.execute_write.assert_called_once()
-        call_args = mock_db.execute_write.call_args
+        mock_db.set_sync_value.assert_called_once()
+        call_args = mock_db.set_sync_value.call_args
         assert "2026-02-01T12:00:00" in str(call_args)
 
 

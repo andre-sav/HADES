@@ -9,7 +9,7 @@ Streamlit UI → ZoomInfo API → Scoring Engine → Turso DB → VanillaSoft Pu
 ```
 
 **Key Components:**
-- **Turso (libsql)** - Cloud SQLite for persistence (operators, cache, usage tracking, staged exports)
+- **Turso (libsql)** - Cloud SQLite for persistence (11 tables: operators, cache, usage, templates, queries, company IDs, sync metadata, historical/lead outcomes, staged exports, pipeline runs)
 - **ZoomInfo API** - OAuth client with retry logic, rate limiting, Contact Search, Intent Search (v2 JSON:API)
 - **Scoring Engine** - Weighted scoring based on signal strength, proximity, on-site likelihood
 - **Cost Tracker** - Budget controls with weekly caps and alerts
@@ -35,7 +35,7 @@ Streamlit UI → ZoomInfo API → Scoring Engine → Turso DB → VanillaSoft Pu
 ```
 HADES/
 ├── app.py                 # Main Streamlit entry point
-├── turso_db.py           # Database connection and CRUD
+├── turso_db.py           # Backward-compat shim → db/
 ├── zoominfo_client.py    # ZoomInfo OAuth + API client (Contact Search)
 ├── scoring.py            # Lead scoring engine
 ├── dedup.py              # Deduplication logic
@@ -45,6 +45,19 @@ HADES/
 ├── vanillasoft_client.py # VanillaSoft Incoming Web Leads push client
 ├── utils.py              # Config loading, phone formatting, ZIP-to-state mapping
 ├── geo.py                # ZIP radius calculations, haversine distance
+├── db/                   # Database package (mixin-based)
+│   ├── __init__.py       # TursoDatabase class (composes all mixins)
+│   ├── _core.py          # Connection management, execute helpers
+│   ├── _schema.py        # Schema creation, migrations
+│   ├── _operators.py     # Operator CRUD
+│   ├── _cache.py         # ZoomInfo cache
+│   ├── _usage.py         # Credit usage tracking
+│   ├── _templates.py     # Location templates
+│   ├── _queries.py       # Query history
+│   ├── _company_ids.py   # Intent company ID resolution
+│   ├── _outcomes.py      # Lead outcomes tracking
+│   ├── _staged.py        # Staged exports
+│   └── _pipeline.py      # Pipeline run history
 ├── config/
 │   └── icp.yaml          # ICP filters, scoring weights, SIC codes
 ├── data/
@@ -56,6 +69,9 @@ HADES/
 │   ├── 4_CSV_Export.py           # Export with operator metadata
 │   ├── 5_Usage_Dashboard.py      # Credit usage monitoring
 │   ├── 6_Executive_Summary.py    # MTD metrics and trends
+│   ├── 7_Score_Calibration.py   # Scoring weight visualization + calibration
+│   ├── 7_Pipeline_Test.py       # API endpoint testing
+│   ├── 8_API_Discovery.py       # ZoomInfo API field explorer
 │   ├── 9_Automation.py           # Automation dashboard + Run Now
 │   └── 10_Pipeline_Health.py    # System health indicators + diagnostics
 ├── scripts/
@@ -63,7 +79,7 @@ HADES/
 │   └── _credentials.py           # Credential loader (env → toml → st.secrets)
 ├── .github/workflows/
 │   └── intent-poll.yml           # Daily intent poll (Mon-Fri 7AM ET)
-├── tests/                # 492 tests (pytest)
+├── tests/                # 686 tests (pytest)
 └── docs/
     └── stories/          # User stories with acceptance criteria
 ```
@@ -75,7 +91,8 @@ HADES/
 - Employee range: 50 - 5,000 (starting; expansion may remove upper limit)
 - Intent budget: 500 credits/week with alerts at 50%/80%/95%
 - Geography budget: unlimited
-- Scoring weights: signal_strength 50%, onsite 25%, freshness 25%
+- Intent scoring weights: signal_strength 50%, onsite 25%, freshness 25%
+- Geography scoring weights: proximity 40%, onsite 25%, authority 15%, employee_scale 20%
 
 **Secrets required (.streamlit/secrets.toml):**
 ```toml
@@ -257,11 +274,13 @@ states = get_states_from_zips(zips)
 
 ## Status
 
-- **577 tests passing** (all tests green)
+- **686 tests passing** (all tests green)
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
 - ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).
 - ✅ **Target Contacts Expansion** - Implemented 2026-02-03
 - ✅ **Shadcn UI Adopted** - `streamlit-shadcn-ui` across all pages
+- ✅ **DB Mixin Architecture** - 11 domain-specific mixins in db/ package
+- ✅ **Score Calibration** - HLM delivery data calibrated SIC/employee scores
 - 🔧 **Contact Enrich** - API returns data, response parsing fixed (needs production test)
 - See `docs/SESSION_HANDOFF.md` for detailed debugging context
 
@@ -292,4 +311,4 @@ All search params must be comma-separated strings, not arrays. Assume data is me
 4. **Production test UX** - Verify shadcn components, action bar, export validation with real data
 
 ---
-*Last updated: 2026-02-16*
+*Last updated: 2026-02-23*

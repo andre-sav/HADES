@@ -52,8 +52,7 @@ class ZoomInfoRateLimitError(ZoomInfoError):
         else:
             wait_display = f"{retry_after} seconds"
         msg = f"Rate limit reached. Try again in {wait_display}."
-        if detail:
-            msg = f"{detail} {msg}"
+        # detail is logged in technical message only, not shown to user
         super().__init__(
             message=f"Rate limit exceeded. Retry after {retry_after} seconds. {detail}".strip(),
             user_message=msg,
@@ -66,11 +65,9 @@ class ZoomInfoAPIError(ZoomInfoError):
 
     def __init__(self, status_code: int, message: str):
         self.status_code = status_code
-        # Truncate raw response for user_message to avoid leaking verbose API bodies
-        safe_msg = (message[:200].replace("\n", " ").strip()) if message else "Unknown error"
         super().__init__(
             message=f"API error {status_code}: {message}",
-            user_message=f"ZoomInfo API error ({status_code}): {safe_msg}",
+            user_message=f"ZoomInfo API error ({status_code}). Check logs for details.",
             recoverable=status_code >= 500,
         )
 
@@ -113,6 +110,6 @@ class ZohoAPIError(PipelineError):
         self.status_code = status_code
         super().__init__(
             message=message,
-            user_message=f"Zoho CRM error: {message[:200]}",
+            user_message=f"Zoho CRM error (HTTP {status_code}). Check logs for details.",
             recoverable=status_code >= 500 or status_code == 0,
         )

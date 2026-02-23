@@ -250,6 +250,6 @@ class TestApplyCalibration:
         mock_db = MagicMock()
         apply_calibration([], config_path, db=mock_db)
 
-        mock_db.execute_write.assert_called_once()
-        call_args = mock_db.execute_write.call_args
-        assert "last_calibration" in call_args[0][1]
+        mock_db.set_sync_value.assert_called_once()
+        call_args = mock_db.set_sync_value.call_args
+        assert call_args[0][0] == "last_calibration"

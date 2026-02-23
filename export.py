@@ -26,10 +26,7 @@ def generate_batch_id(db) -> str:
         (seq_key,),
     )
 
-    rows = db.execute(
-        "SELECT value FROM sync_metadata WHERE key = ?", (seq_key,)
-    )
-    seq = int(rows[0][0])
+    seq = int(db.get_sync_value(seq_key))
 
     return f"HADES-{today}-{seq:03d}"
 

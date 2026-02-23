@@ -226,9 +226,4 @@ def apply_calibration(selected_updates: list[dict], config_path: str | None = No
 
     # Record calibration timestamp
     if db:
-        db.execute_write(
-            """INSERT INTO sync_metadata (key, value, updated_at)
-               VALUES (?, ?, CURRENT_TIMESTAMP)
-               ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP""",
-            ("last_calibration", datetime.now().isoformat(), datetime.now().isoformat()),
-        )
+        db.set_sync_value("last_calibration", datetime.now().isoformat())

@@ -513,8 +513,8 @@ class TestGenerateBatchId:
     def test_first_batch_of_day(self):
         """Test first batch ID generation for a day."""
         mock_db = MagicMock()
-        # Atomic upsert writes first, then reads back the value
-        mock_db.execute.return_value = [("1",)]
+        # Atomic upsert writes first, then get_sync_value reads back the value
+        mock_db.get_sync_value.return_value = "1"
 
         batch_id = generate_batch_id(mock_db)
 
@@ -525,8 +525,8 @@ class TestGenerateBatchId:
     def test_sequential_batch_ids(self):
         """Test that batch IDs increment correctly."""
         mock_db = MagicMock()
-        # Atomic upsert already incremented; read returns new value
-        mock_db.execute.return_value = [("4",)]
+        # Atomic upsert already incremented; get_sync_value returns new value
+        mock_db.get_sync_value.return_value = "4"
 
         batch_id = generate_batch_id(mock_db)
 
@@ -537,7 +537,7 @@ class TestGenerateBatchId:
         import re
 
         mock_db = MagicMock()
-        mock_db.execute.return_value = [("1",)]
+        mock_db.get_sync_value.return_value = "1"
 
         batch_id = generate_batch_id(mock_db)
 

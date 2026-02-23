@@ -209,14 +209,9 @@ class ZoomInfoClient:
     def _load_persisted_token(self) -> None:
         """Load and decrypt cached token from database."""
         try:
-            rows = self._token_store.execute(
-                "SELECT value FROM sync_metadata WHERE key = ?",
-                ("zoominfo_token",),
-            )
-            if not rows:
+            stored_value = self._token_store.get_sync_value("zoominfo_token")
+            if not stored_value:
                 return
-
-            stored_value = rows[0][0]
             fernet = self._get_fernet()
 
             if fernet:
@@ -254,11 +249,7 @@ class ZoomInfoClient:
                 "expires_at": self.token_expires_at.isoformat(),
             })
             encrypted = fernet.encrypt(plaintext.encode()).decode()
-            self._token_store.execute_write(
-                "INSERT INTO sync_metadata (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-                ("zoominfo_token", encrypted),
-            )
+            self._token_store.set_sync_value("zoominfo_token", encrypted)
         except Exception as e:
             logger.debug(f"Could not persist token: {e}")
 

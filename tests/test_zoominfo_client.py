@@ -1367,7 +1367,7 @@ class TestTokenPersistenceAndThreadSafety:
         }).encode()).decode()
 
         mock_store = MagicMock()
-        mock_store.execute.return_value = [(valid_token_data,)]
+        mock_store.get_sync_value.return_value = valid_token_data
         client._token_store = mock_store
 
         with patch("zoominfo_client.st") as mock_st:
@@ -1375,7 +1375,7 @@ class TestTokenPersistenceAndThreadSafety:
             token = client._get_token()
 
         assert token == "persisted-token"
-        mock_store.execute.assert_called_once()
+        mock_store.get_sync_value.assert_called_once()
         mock_session.post.assert_not_called()
 
     def test_get_token_expired_reauths_when_db_also_expired(self, client, mock_session):
@@ -1396,7 +1396,7 @@ class TestTokenPersistenceAndThreadSafety:
         }).encode()).decode()
 
         mock_store = MagicMock()
-        mock_store.execute.return_value = [(expired_token_data,)]
+        mock_store.get_sync_value.return_value = expired_token_data
         client._token_store = mock_store
 
         mock_response = MagicMock()
@@ -1409,7 +1409,7 @@ class TestTokenPersistenceAndThreadSafety:
             token = client._get_token()
 
         assert token == "fresh-token"
-        mock_store.execute.assert_called_once()
+        mock_store.get_sync_value.assert_called_once()
         mock_session.post.assert_called_once()
 
     def test_client_has_threading_lock(self, client):
@@ -1475,9 +1475,9 @@ class TestJWTEncryption:
             client._persist_token()
 
         # Verify something was written
-        mock_store.execute_write.assert_called_once()
-        call_args = mock_store.execute_write.call_args
-        written_value = call_args[0][1][1]  # second positional arg, second tuple element
+        mock_store.set_sync_value.assert_called_once()
+        call_args = mock_store.set_sync_value.call_args
+        written_value = call_args[0][1]  # second positional arg (value)
 
         # The written value should NOT be parseable as the original JSON
         # (it's encrypted, so it should be a Fernet token starting with "gAAAAA")
@@ -1506,7 +1506,7 @@ class TestJWTEncryption:
         encrypted = f.encrypt(plaintext.encode()).decode()
 
         mock_store = MagicMock()
-        mock_store.execute.return_value = [(encrypted,)]
+        mock_store.get_sync_value.return_value = encrypted
         client._token_store = mock_store
 
         with patch("zoominfo_client.st") as mock_st:
@@ -1520,7 +1520,7 @@ class TestJWTEncryption:
     def test_load_persisted_token_rejects_tampered_ciphertext(self, client, fernet_key):
         """Tampered ciphertext should fail decryption -- token stays None."""
         mock_store = MagicMock()
-        mock_store.execute.return_value = [("gAAAAABcorrupted-data-here!!!",)]
+        mock_store.get_sync_value.return_value = "gAAAAABcorrupted-data-here!!!"
         client._token_store = mock_store
 
         with patch("zoominfo_client.st") as mock_st:
@@ -1543,7 +1543,7 @@ class TestJWTEncryption:
         encrypted = f.encrypt(plaintext.encode()).decode()
 
         mock_store = MagicMock()
-        mock_store.execute.return_value = [(encrypted,)]
+        mock_store.get_sync_value.return_value = encrypted
         client._token_store = mock_store
 
         # Patch Fernet.decrypt to simulate TTL expiry
@@ -1567,7 +1567,7 @@ class TestJWTEncryption:
             mock_st.secrets = {}
             client._persist_token()
 
-        mock_store.execute_write.assert_not_called()
+        mock_store.set_sync_value.assert_not_called()
 
     def test_load_skips_when_no_fernet_key(self, client, fernet_key):
         """Without ZOOMINFO_TOKEN_KEY, _load_persisted_token should skip (not attempt decryption)."""
@@ -1583,7 +1583,7 @@ class TestJWTEncryption:
         }).encode()).decode()
 
         mock_store = MagicMock()
-        mock_store.execute.return_value = [(encrypted,)]
+        mock_store.get_sync_value.return_value = encrypted
         client._token_store = mock_store
 
         with patch("zoominfo_client.st") as mock_st:

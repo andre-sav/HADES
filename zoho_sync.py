@@ -80,38 +80,14 @@ def map_zoho_to_hades(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def ensure_sync_metadata_table(db) -> None:
-    """Ensure sync_metadata table exists (handles schema migration edge case)."""
-    db.connection.execute("""
-        CREATE TABLE IF NOT EXISTS sync_metadata (
-            key TEXT PRIMARY KEY,
-            value TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    db.connection.commit()
-
-
 def get_last_sync_time(db) -> Optional[str]:
     """Get the last successful sync timestamp."""
-    ensure_sync_metadata_table(db)
-    rows = db.execute(
-        "SELECT value FROM sync_metadata WHERE key = ?",
-        (SYNC_KEY,)
-    )
-    if rows and rows[0][0]:
-        return rows[0][0]
-    return None
+    return db.get_sync_value(SYNC_KEY)
 
 
 def set_last_sync_time(db, timestamp: str) -> None:
     """Set the last successful sync timestamp."""
-    db.execute_write(
-        """INSERT INTO sync_metadata (key, value, updated_at)
-           VALUES (?, ?, CURRENT_TIMESTAMP)
-           ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP""",
-        (SYNC_KEY, timestamp, timestamp)
-    )
+    db.set_sync_value(SYNC_KEY, timestamp)
 
 
 async def fetch_owner_operators(
@@ -445,12 +421,7 @@ async def sync_outcomes(
 
 def set_last_sync_time_key(db, key: str, timestamp: str) -> None:
     """Set a sync metadata timestamp by key."""
-    db.execute_write(
-        """INSERT INTO sync_metadata (key, value, updated_at)
-           VALUES (?, ?, CURRENT_TIMESTAMP)
-           ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP""",
-        (key, timestamp, timestamp),
-    )
+    db.set_sync_value(key, timestamp)
 
 
 def run_outcome_sync(db, auth: ZohoAuth) -> Dict[str, int]:

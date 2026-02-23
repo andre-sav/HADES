@@ -70,8 +70,8 @@ if active_tab == "Current Weights":
         config = yaml.safe_load(f)
 
     # Last calibration date
-    rows = db.execute("SELECT value FROM sync_metadata WHERE key = 'last_calibration'")
-    last_cal = rows[0][0][:10] if rows else "Never"
+    _last_cal_val = db.get_sync_value("last_calibration")
+    last_cal = _last_cal_val[:10] if _last_cal_val else "Never"
 
     col1, col2, col3 = st.columns(3)
     with col1:
