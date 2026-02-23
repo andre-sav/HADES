@@ -10,14 +10,15 @@ from unittest.mock import MagicMock
 # Mock streamlit before importing modules that depend on it
 sys.modules["streamlit"] = MagicMock()
 
-from errors import PipelineError
-from zoominfo_client import (
+from errors import (
+    PipelineError,
     ZoomInfoError,
     ZoomInfoAuthError,
     ZoomInfoRateLimitError,
     ZoomInfoAPIError,
+    BudgetExceededError,
+    ZohoAPIError,
 )
-from cost_tracker import BudgetExceededError
 
 
 class TestPipelineErrorBase:
@@ -168,3 +169,40 @@ class TestCatchPipelineError:
             assert "(429)" in e.user_message
         else:
             assert False, "PipelineError should catch ZoomInfoAPIError"
+
+    def test_catches_zoho_error(self):
+        try:
+            raise ZohoAPIError("Zoho rate limit", status_code=429)
+        except PipelineError as e:
+            assert e.user_message
+        else:
+            assert False, "PipelineError should catch ZohoAPIError"
+
+
+class TestZohoAPIErrorHierarchy:
+    """Tests that ZohoAPIError inherits from PipelineError."""
+
+    def test_zoho_error_is_pipeline_error(self):
+        assert issubclass(ZohoAPIError, PipelineError)
+
+    def test_zoho_error_preserves_str(self):
+        err = ZohoAPIError("test error", status_code=429)
+        assert str(err) == "test error"
+        assert err.status_code == 429
+
+    def test_zoho_error_has_user_message(self):
+        err = ZohoAPIError("connection timeout", status_code=500)
+        assert "Zoho CRM error" in err.user_message
+
+    def test_zoho_error_5xx_recoverable(self):
+        err = ZohoAPIError("server error", status_code=500)
+        assert err.recoverable is True
+
+    def test_zoho_error_4xx_not_recoverable(self):
+        err = ZohoAPIError("bad request", status_code=400)
+        assert err.recoverable is False
+
+    def test_zoho_error_default_status_recoverable(self):
+        err = ZohoAPIError("unknown")
+        assert err.status_code == 0
+        assert err.recoverable is True

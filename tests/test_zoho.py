@@ -463,7 +463,7 @@ class TestZohoConstants:
         assert MAX_DELAY_SECONDS > BASE_DELAY_SECONDS
 
     def test_zoho_api_error(self):
-        from zoho_client import ZohoAPIError
+        from errors import ZohoAPIError
         err = ZohoAPIError("test error", status_code=429)
         assert str(err) == "test error"
         assert err.status_code == 429

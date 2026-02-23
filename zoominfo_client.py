@@ -14,7 +14,13 @@ from typing import Any
 import requests
 import streamlit as st
 
-from errors import PipelineError
+from errors import (
+    PipelineError,
+    ZoomInfoError,
+    ZoomInfoAuthError,
+    ZoomInfoRateLimitError,
+    ZoomInfoAPIError,
+)
 from utils import get_sic_codes, get_employee_minimum, get_employee_maximum
 
 # Configure logging
@@ -32,59 +38,6 @@ if not logger.handlers:
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
-
-class ZoomInfoError(PipelineError):
-    """Base for all ZoomInfo API errors.
-
-    Catch this to distinguish ZoomInfo failures from other pipeline
-    errors (e.g., BudgetExceededError). Otherwise catch PipelineError.
-    """
-
-    pass
-
-
-class ZoomInfoAuthError(ZoomInfoError):
-    """Authentication failed."""
-
-    def __init__(self, message: str):
-        super().__init__(
-            message=message,
-            user_message="ZoomInfo authentication failed. Please check your API credentials.",
-            recoverable=False,
-        )
-
-
-class ZoomInfoRateLimitError(ZoomInfoError):
-    """Rate limit exceeded."""
-
-    def __init__(self, retry_after: int = 60, detail: str = ""):
-        self.retry_after = retry_after
-        if retry_after >= 60:
-            wait_display = f"{retry_after // 60} minute{'s' if retry_after >= 120 else ''}"
-        else:
-            wait_display = f"{retry_after} seconds"
-        msg = f"Rate limit reached. Try again in {wait_display}."
-        if detail:
-            msg = f"{detail} {msg}"
-        super().__init__(
-            message=f"Rate limit exceeded. Retry after {retry_after} seconds. {detail}".strip(),
-            user_message=msg,
-            recoverable=True,
-        )
-
-
-class ZoomInfoAPIError(ZoomInfoError):
-    """General API error."""
-
-    def __init__(self, status_code: int, message: str):
-        self.status_code = status_code
-        # Truncate raw response for user_message to avoid leaking verbose API bodies
-        safe_msg = (message[:200].replace("\n", " ").strip()) if message else "Unknown error"
-        super().__init__(
-            message=f"API error {status_code}: {message}",
-            user_message=f"ZoomInfo API error ({status_code}): {safe_msg}",
-            recoverable=status_code >= 500,
-        )
 
 
 @dataclass
@@ -153,35 +106,30 @@ class ContactEnrichParams:
     output_fields: list[str] | None = None  # Fields to return (None = all available)
 
 
-# Default output fields for contact enrichment - comprehensive list for VanillaSoft export
+# Default output fields for contact enrichment — only fields used for export or scoring.
+# Trimmed from 30 → 22 fields (removed middleName, salutation, suffix, externalUrls,
+# jobFunction, personHasMoved, country, companyCountry — none referenced anywhere).
 DEFAULT_ENRICH_OUTPUT_FIELDS = [
     # Identity
-    "id",
+    "id",  # personId — used for dedup/tracking
     "firstName",
     "lastName",
-    "middleName",
-    "salutation",
-    "suffix",
     # Contact info
     "email",
-    "phone",
+    "phone",  # fallback for Business phone in export.py
     # "directPhone",  # Requires additional subscription
     "mobilePhone",
-    "externalUrls",
     # Job info
     "jobTitle",
-    "jobFunction",
-    "managementLevel",
-    "contactAccuracyScore",
+    "managementLevel",  # used in scoring engine
+    "contactAccuracyScore",  # used in scoring engine
     # Location
     "street",
     "city",
     "state",
     "zipCode",
-    "country",
-    "personHasMoved",
     # Company info
-    "companyId",
+    "companyId",  # used for dedup/tracking
     "companyName",
     "companyPhone",
     "companyWebsite",
@@ -189,7 +137,6 @@ DEFAULT_ENRICH_OUTPUT_FIELDS = [
     "companyCity",
     "companyState",
     "companyZipCode",
-    "companyCountry",
     # Fields below require additional subscription:
     # "directPhone", "employeeCount", "revenue", "sicCode", "naicsCode", "industry"
 ]

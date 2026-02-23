@@ -28,11 +28,7 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 
-class ZohoAPIError(Exception):
-    """Zoho API error with status code."""
-    def __init__(self, message: str, status_code: int = 0):
-        super().__init__(message)
-        self.status_code = status_code
+from errors import ZohoAPIError  # noqa: F401 (re-exported for backward compat)
 
 
 class ZohoClient:

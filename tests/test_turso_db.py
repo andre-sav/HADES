@@ -983,6 +983,65 @@ class TestStagedExportPushTracking:
         assert row["push_results_json"] is None
 
 
+class TestPurgeOldStagedExports:
+    """Tests for PII retention: purging old staged exports."""
+
+    def _get_db(self):
+        """Create an in-memory DB with schema using stdlib sqlite3."""
+        import sqlite3
+        db = TursoDatabase.__new__(TursoDatabase)
+        db._conn = sqlite3.connect(":memory:")
+        db.url = ":memory:"
+        db.init_schema()
+        return db
+
+    def test_purge_deletes_old_records(self):
+        db = self._get_db()
+        # Insert a record with old created_at
+        db.execute_write(
+            "INSERT INTO staged_exports (workflow_type, leads_json, lead_count, created_at) "
+            "VALUES (?, ?, ?, datetime('now', '-100 days'))",
+            ("intent", '[{"name": "old"}]', 1),
+        )
+        # Insert a recent record
+        db.save_staged_export("geography", [{"name": "new"}])
+
+        count = db.purge_old_staged_exports(days=90)
+        assert count == 1
+
+        # Recent record should still exist
+        exports = db.get_staged_exports(limit=10)
+        assert len(exports) == 1
+        assert exports[0]["workflow_type"] == "geography"
+
+    def test_purge_preserves_recent_records(self):
+        db = self._get_db()
+        db.save_staged_export("intent", [{"name": "recent"}])
+        count = db.purge_old_staged_exports(days=90)
+        assert count == 0
+
+        exports = db.get_staged_exports(limit=10)
+        assert len(exports) == 1
+
+    def test_purge_empty_table(self):
+        db = self._get_db()
+        count = db.purge_old_staged_exports(days=90)
+        assert count == 0
+
+    def test_purge_custom_days(self):
+        db = self._get_db()
+        # Insert a record 10 days old
+        db.execute_write(
+            "INSERT INTO staged_exports (workflow_type, leads_json, lead_count, created_at) "
+            "VALUES (?, ?, ?, datetime('now', '-10 days'))",
+            ("intent", '[{"name": "ten_days_old"}]', 1),
+        )
+        # 30-day purge should delete it? No, 10 < 30
+        assert db.purge_old_staged_exports(days=30) == 0
+        # 5-day purge should delete it
+        assert db.purge_old_staged_exports(days=5) == 1
+
+
 class TestMigrations:
     """Tests for _run_migrations using PRAGMA table_info."""
 

@@ -4,33 +4,8 @@ Credit usage tracking and budget controls for ZoomInfo API queries.
 
 from dataclasses import dataclass
 
-from errors import PipelineError
+from errors import BudgetExceededError  # noqa: F401 (re-exported for backward compat)
 from utils import get_budget_config
-
-
-class BudgetExceededError(PipelineError):
-    """Raised when a query would exceed the budget cap."""
-
-    def __init__(self, workflow_type: str, current_usage: int, cap: int, requested: int):
-        self.workflow_type = workflow_type
-        self.current_usage = current_usage
-        self.cap = cap
-        self.requested = requested
-        self.remaining = cap - current_usage
-
-        super().__init__(
-            message=(
-                f"{workflow_type} budget would be exceeded. "
-                f"Current: {current_usage}, Cap: {cap}, Requested: {requested}, "
-                f"Remaining: {self.remaining}"
-            ),
-            user_message=(
-                f"{workflow_type.title()} weekly budget exceeded. "
-                f"{current_usage} of {cap} credits used this week. "
-                f"This query needs ~{requested} credits. Resets Monday."
-            ),
-            recoverable=False,
-        )
 
 
 @dataclass
