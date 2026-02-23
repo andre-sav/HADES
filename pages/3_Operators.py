@@ -82,10 +82,10 @@ with st.expander("Sync from Zoho CRM", expanded=False):
         from zoho_sync import get_last_sync_time
         last_sync = get_last_sync_time(db)
 
-        synced_ops = [op for op in operators if op.get("synced_at")]
+        _synced_count = db.execute("SELECT COUNT(*) FROM operators WHERE synced_at IS NOT NULL")[0][0]
 
         if last_sync:
-            st.caption(f"Last sync: {last_sync[:16].replace('T', ' ')} UTC ({len(synced_ops)} synced operators)")
+            st.caption(f"Last sync: {last_sync[:16].replace('T', ' ')} UTC ({_synced_count} synced operators)")
         else:
             st.caption("Never synced - will perform full sync")
 
