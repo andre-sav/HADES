@@ -175,6 +175,21 @@ class SchemaMixin:
             """,
             "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_workflow ON pipeline_runs(workflow_type)",
             "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_created ON pipeline_runs(created_at)",
+            # Error log table
+            """
+            CREATE TABLE IF NOT EXISTS error_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_type TEXT NOT NULL,
+                error_type TEXT NOT NULL,
+                user_message TEXT NOT NULL,
+                technical_message TEXT DEFAULT '',
+                recoverable INTEGER DEFAULT 1,
+                context_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_error_log_created ON error_log(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_error_log_workflow ON error_log(workflow_type)",
         ]
 
         for statement in schema_statements:

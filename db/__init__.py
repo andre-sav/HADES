@@ -20,6 +20,7 @@ from db._outcomes import OutcomesMixin
 from db._staged import StagedExportsMixin
 from db._pipeline import PipelineRunsMixin
 from db._metadata import MetadataMixin
+from db._error_log import ErrorLogMixin
 
 
 class TursoDatabase(
@@ -35,6 +36,7 @@ class TursoDatabase(
     StagedExportsMixin,
     PipelineRunsMixin,
     MetadataMixin,
+    ErrorLogMixin,
 ):
     """Turso database connection manager."""
 

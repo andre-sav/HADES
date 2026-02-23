@@ -586,6 +586,16 @@ if search_clicked:
                 st.session_state["_intent_api_error"] = str(e.user_message)
                 st.session_state["_intent_api_exchange"] = getattr(client, "last_exchange", None)
                 st.error(e.user_message)
+                try:
+                    db.log_error(
+                        workflow_type="intent",
+                        error_type=type(e).__name__,
+                        user_message=e.user_message,
+                        technical_message=str(e),
+                        recoverable=e.recoverable,
+                    )
+                except Exception:
+                    pass  # Never let error logging cause secondary failures
             except Exception:
                 st.session_state["_intent_api_error"] = "An unexpected error occurred"
                 try:
@@ -956,6 +966,16 @@ if (
             except PipelineError as e:
                 search_status.update(label="❌ API Error", state="error")
                 st.error(e.user_message)
+                try:
+                    db.log_error(
+                        workflow_type="intent",
+                        error_type=type(e).__name__,
+                        user_message=e.user_message,
+                        technical_message=str(e),
+                        recoverable=e.recoverable,
+                    )
+                except Exception:
+                    pass  # Never let error logging cause secondary failures
             except Exception:
                 search_status.update(label="❌ Contact search failed", state="error")
                 logger.exception("Contact search failed")
@@ -1167,6 +1187,16 @@ if (
                             st.rerun()
                         except PipelineError as e:
                             st.error(f"Enrichment failed: {e.user_message}")
+                            try:
+                                db.log_error(
+                                    workflow_type="intent",
+                                    error_type=type(e).__name__,
+                                    user_message=e.user_message,
+                                    technical_message=str(e),
+                                    recoverable=e.recoverable,
+                                )
+                            except Exception:
+                                pass  # Never let error logging cause secondary failures
                         except Exception:
                             logger.exception("Enrichment failed")
                             st.error("Enrichment failed unexpectedly. Check application logs.")

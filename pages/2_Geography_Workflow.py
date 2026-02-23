@@ -11,6 +11,7 @@ import threading
 
 import streamlit as st
 import streamlit_shadcn_ui as ui
+from keyboard_shortcuts import inject_ctrl_enter_shortcut
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -462,7 +463,7 @@ if has_operator:
             calculated_zips = []
         else:
             _template_options = {t["name"]: t for t in _saved_templates}
-            _template_col1, _template_col2 = st.columns([3, 1])
+            _template_col1, _template_col2, _template_col3 = st.columns([3, 1, 1])
             with _template_col1:
                 _selected_template_name = st.selectbox(
                     "Template",
@@ -471,12 +472,26 @@ if has_operator:
                 )
             with _template_col2:
                 _delete_template = ui.button(text="Delete", variant="destructive", key="geo_delete_template_btn")
+            with _template_col3:
+                _rename_template = ui.button(text="Rename", variant="outline", key="geo_rename_template_btn")
 
             if _delete_template and _selected_template_name:
                 _tmpl = _template_options[_selected_template_name]
                 db.delete_location_template(_tmpl["id"])
                 st.toast(f"Deleted template '{_selected_template_name}'")
                 st.rerun()
+
+            if _rename_template and _selected_template_name:
+                st.session_state["geo_renaming_template"] = True
+
+            if st.session_state.get("geo_renaming_template"):
+                _new_name = st.text_input("New name", value=_selected_template_name, key="geo_rename_input")
+                if st.button("Confirm Rename", key="geo_rename_confirm_btn"):
+                    _tmpl = _template_options[_selected_template_name]
+                    db.rename_location_template(_tmpl["id"], _new_name)
+                    st.session_state["geo_renaming_template"] = False
+                    st.toast(f"Renamed to '{_new_name}'")
+                    st.rerun()
 
             _tmpl = _template_options[_selected_template_name]
             zip_codes = _tmpl["zip_codes"]
@@ -908,6 +923,9 @@ if has_operator:
             st.session_state.geo_request_previewed = True
             st.session_state.geo_pending_search_params = pending_params
 
+    # Ctrl+Enter shortcut to trigger Search button
+    inject_ctrl_enter_shortcut()
+
     with search_col2:
         if st.session_state.geo_preview_contacts or st.session_state.geo_search_executed:
             if ui.button(text="Clear / Reset", variant="destructive", key="geo_reset_btn"):
@@ -1000,6 +1018,16 @@ if has_operator:
                 job.result = result
             except PipelineError as e:
                 job.error = e.user_message
+                try:
+                    db.log_error(
+                        workflow_type="geography",
+                        error_type=type(e).__name__,
+                        user_message=e.user_message,
+                        technical_message=str(e),
+                        recoverable=e.recoverable,
+                    )
+                except Exception:
+                    pass  # Never let error logging cause secondary failures
             except Exception:
                 logger.exception("Geography search failed")
                 job.error = "Search failed unexpectedly. Check application logs."
@@ -1483,6 +1511,16 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                     st.rerun()
                 except PipelineError as e:
                     st.error(f"Enrichment failed: {e.user_message}")
+                    try:
+                        db.log_error(
+                            workflow_type="geography",
+                            error_type=type(e).__name__,
+                            user_message=e.user_message,
+                            technical_message=str(e),
+                            recoverable=e.recoverable,
+                        )
+                    except Exception:
+                        pass  # Never let error logging cause secondary failures
                 except Exception:
                     logger.exception("Geography enrichment failed")
                     st.error("Enrichment failed unexpectedly. Check application logs.")

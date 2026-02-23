@@ -78,17 +78,30 @@ _exec_active = ui.tabs(options=["Overview", "Trends", "Budget"], default_value="
 if _exec_active == "Overview":
     mtd = cost_tracker.get_usage_summary(days=today.day)
 
+    # Calculate WoW deltas
+    _this_week = cost_tracker.get_usage_summary(days=7)
+    _prev_week_cumulative = cost_tracker.get_usage_summary(days=14)
+    _prev_week_leads = _prev_week_cumulative.total_leads - _this_week.total_leads
+    _prev_week_credits = _prev_week_cumulative.total_credits - _this_week.total_credits
+    _prev_week_queries = _prev_week_cumulative.total_queries - _this_week.total_queries
+
+    _delta_leads = _this_week.total_leads - _prev_week_leads if _prev_week_leads > 0 else None
+    _delta_credits = _this_week.total_credits - _prev_week_credits if _prev_week_credits > 0 else None
+    _delta_queries = _this_week.total_queries - _prev_week_queries if _prev_week_queries > 0 else None
+
     # KPI cards — scannable at a glance
     _kpi1, _kpi2, _kpi3, _kpi4 = st.columns(4)
     with _kpi1:
-        metric_card("Leads Exported", mtd.total_leads, help_text="Month to date")
+        st.metric("Leads Exported", mtd.total_leads, delta=_delta_leads, help="Month to date")
     with _kpi2:
-        metric_card("Credits Used", mtd.total_credits, help_text="Month to date")
+        st.metric("Credits Used", mtd.total_credits, delta=_delta_credits, delta_color="inverse", help="Month to date")
     with _kpi3:
         _eff = mtd.total_leads / mtd.total_credits if mtd.total_credits > 0 else 0
-        metric_card("Efficiency", f"{_eff:.2f}", help_text="Leads per credit")
+        st.metric("Efficiency", f"{_eff:.2f}", help="Leads per credit")
     with _kpi4:
-        metric_card("Queries", mtd.total_queries, help_text="Month to date")
+        st.metric("Queries", mtd.total_queries, delta=_delta_queries, help="Month to date")
+
+    st.page_link("pages/2_Geography_Workflow.py", label="Start Territory Search", icon="📍")
 
     st.markdown("")
 

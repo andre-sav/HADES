@@ -328,3 +328,25 @@ if queries:
     )
 else:
     st.caption("No queries recorded yet")
+
+
+# =============================================================================
+# ERROR LOG
+# =============================================================================
+st.markdown("---")
+st.subheader("Recent Errors")
+try:
+    _recent_errors = db.get_recent_errors(limit=20)
+    if _recent_errors:
+        for err in _recent_errors:
+            _icon = "\U0001f534" if not err["recoverable"] else "\U0001f7e1"
+            with st.expander(f"{_icon} {err['error_type']} — {err['workflow_type']} \u00b7 {err['created_at']}"):
+                st.write(err["user_message"])
+                if err["technical_message"]:
+                    st.code(err["technical_message"], language="text")
+                if err["context_json"]:
+                    st.json(err["context_json"])
+    else:
+        st.caption("No errors logged")
+except Exception:
+    st.caption("Error log not available")
