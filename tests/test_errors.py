@@ -206,3 +206,20 @@ class TestZohoAPIErrorHierarchy:
         err = ZohoAPIError("unknown")
         assert err.status_code == 0
         assert err.recoverable is True
+
+
+class TestBackwardCompatImports:
+    """Verify re-exports from original modules still work."""
+
+    def test_budget_error_from_cost_tracker(self):
+        from cost_tracker import BudgetExceededError as BE
+        assert issubclass(BE, PipelineError)
+
+    def test_zoho_error_from_zoho_client(self):
+        from zoho_client import ZohoAPIError as ZE
+        assert issubclass(ZE, PipelineError)
+
+    def test_zoominfo_errors_from_zoominfo_client(self):
+        from zoominfo_client import ZoomInfoError, ZoomInfoAuthError
+        assert issubclass(ZoomInfoError, PipelineError)
+        assert issubclass(ZoomInfoAuthError, ZoomInfoError)
