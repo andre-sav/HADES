@@ -407,9 +407,8 @@ class TestZohoSyncOperators:
 
         mock_db = MagicMock()
         # get_last_sync_time returns None (force full)
+        mock_db.get_sync_value.return_value = None  # No last sync time (full sync)
         mock_db.execute.side_effect = [
-            [],      # ensure_sync_metadata: no rows
-            [],      # get_last_sync_time: no rows
             [],      # all_operators query: empty
         ]
         mock_db.connection = MagicMock()

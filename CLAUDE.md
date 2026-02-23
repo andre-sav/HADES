@@ -57,7 +57,9 @@ HADES/
 │   ├── _company_ids.py   # Intent company ID resolution
 │   ├── _outcomes.py      # Lead outcomes tracking
 │   ├── _staged.py        # Staged exports
-│   └── _pipeline.py      # Pipeline run history
+│   ├── _pipeline.py      # Pipeline run history
+│   ├── _metadata.py      # Sync metadata key-value store
+│   └── _error_log.py     # Persistent error logging
 ├── config/
 │   └── icp.yaml          # ICP filters, scoring weights, SIC codes
 ├── data/

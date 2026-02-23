@@ -85,9 +85,10 @@ if _exec_active == "Overview":
     _prev_week_credits = _prev_week_cumulative.total_credits - _this_week.total_credits
     _prev_week_queries = _prev_week_cumulative.total_queries - _this_week.total_queries
 
-    _delta_leads = _this_week.total_leads - _prev_week_leads if _prev_week_leads > 0 else None
-    _delta_credits = _this_week.total_credits - _prev_week_credits if _prev_week_credits > 0 else None
-    _delta_queries = _this_week.total_queries - _prev_week_queries if _prev_week_queries > 0 else None
+    # Show delta when either week has activity (rolling 7-day windows, not week-aligned)
+    _delta_leads = _this_week.total_leads - _prev_week_leads if (_this_week.total_leads + _prev_week_leads) > 0 else None
+    _delta_credits = _this_week.total_credits - _prev_week_credits if (_this_week.total_credits + _prev_week_credits) > 0 else None
+    _delta_queries = _this_week.total_queries - _prev_week_queries if (_this_week.total_queries + _prev_week_queries) > 0 else None
 
     # KPI cards — scannable at a glance
     _kpi1, _kpi2, _kpi3, _kpi4 = st.columns(4)

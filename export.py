@@ -17,7 +17,8 @@ def generate_batch_id(db) -> str:
     today = datetime.now().strftime("%Y%m%d")
     seq_key = f"hades_batch_seq_{today}"
 
-    # Atomic upsert: insert 1 or increment existing value in a single statement
+    # Atomic upsert: insert 1 or increment existing value in a single statement.
+    # Intentionally raw SQL — MetadataMixin.set_sync_value can't express CAST increment.
     db.execute_write(
         """INSERT INTO sync_metadata (key, value, updated_at)
            VALUES (?, '1', CURRENT_TIMESTAMP)

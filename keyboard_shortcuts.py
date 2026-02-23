@@ -20,6 +20,8 @@ def inject_ctrl_enter_shortcut() -> None:
         <script>
         (function() {
             const doc = window.parent.document;
+            if (doc._ctrlEnterInjected) return;
+            doc._ctrlEnterInjected = true;
             doc.addEventListener('keydown', function(e) {
                 if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                     // Find the primary-styled Streamlit button
