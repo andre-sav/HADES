@@ -12,32 +12,8 @@ from datetime import datetime, timedelta
 sys.modules["streamlit"] = MagicMock()
 sys.modules["streamlit_shadcn_ui"] = MagicMock()
 
-# Import after mocking
-from pages import __path__ as pages_path  # noqa: F401
-
-# We can't import the page directly (it runs on import), so test the logic directly
-
-
-def time_ago(iso_str: str | None) -> str:
-    """Copy of the helper for testing — same logic as in the page."""
-    if not iso_str:
-        return "Never"
-    try:
-        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
-        diff = now - dt
-        minutes = diff.total_seconds() / 60
-        if minutes < 1:
-            return "Just now"
-        if minutes < 60:
-            return f"{int(minutes)}m ago"
-        hours = minutes / 60
-        if hours < 24:
-            return f"{int(hours)}h ago"
-        days = hours / 24
-        return f"{int(days)}d ago"
-    except (ValueError, TypeError):
-        return "Unknown"
+# Import the real time_ago from utils (tests the actual implementation)
+from utils import time_ago
 
 
 class TestTimeAgo:

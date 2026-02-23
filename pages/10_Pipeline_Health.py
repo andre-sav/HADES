@@ -23,7 +23,7 @@ st.set_page_config(page_title="Pipeline Health", page_icon="🔧", layout="wide"
 
 inject_base_styles()
 
-from utils import require_auth
+from utils import require_auth, time_ago
 require_auth()
 
 
@@ -44,26 +44,8 @@ except Exception as e:
 # HELPERS
 # =============================================================================
 
-def time_ago(iso_str: str | None) -> str:
-    """Convert ISO timestamp to 'X minutes/hours/days ago' string."""
-    if not iso_str:
-        return "Never"
-    try:
-        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
-        diff = now - dt
-        minutes = diff.total_seconds() / 60
-        if minutes < 1:
-            return "Just now"
-        if minutes < 60:
-            return f"{int(minutes)}m ago"
-        hours = minutes / 60
-        if hours < 24:
-            return f"{int(hours)}h ago"
-        days = hours / 24
-        return f"{int(days)}d ago"
-    except (ValueError, TypeError):
-        return "Unknown"
+
+# time_ago imported from utils
 
 
 def health_indicator(label: str, status: str, detail: str, timestamp: str | None = None):

@@ -2,7 +2,14 @@
 
 from unittest.mock import Mock, patch
 
-from expand_search import build_contacts_by_company
+from expand_search import (
+    build_contacts_by_company,
+    DEFAULT_TARGET_CONTACTS,
+    DEFAULT_START_RADIUS,
+    DEFAULT_START_ACCURACY,
+    DEFAULT_START_MANAGEMENT,
+    DEFAULT_START_EMPLOYEE_MAX,
+)
 
 
 class TestExpansionStepsDefinition:
@@ -76,31 +83,26 @@ class TestExpansionStepsDefinition:
 
 
 class TestDefaultValues:
-    """Test default constants for expansion."""
+    """Test default constants for expansion (imported from module, not local shadows)."""
 
     def test_default_target_contacts(self):
         """Default target should be 25."""
-        DEFAULT_TARGET_CONTACTS = 25
         assert DEFAULT_TARGET_CONTACTS == 25
 
     def test_default_start_radius(self):
-        """Default starting radius should be 10.0 miles."""
-        DEFAULT_START_RADIUS = 10.0
-        assert DEFAULT_START_RADIUS == 10.0
+        """Default starting radius should be 15.0 miles."""
+        assert DEFAULT_START_RADIUS == 15.0
 
     def test_default_start_accuracy(self):
         """Default starting accuracy should be 95."""
-        DEFAULT_START_ACCURACY = 95
         assert DEFAULT_START_ACCURACY == 95
 
     def test_default_start_management(self):
         """Default starting management levels should include Manager, Director, VP."""
-        DEFAULT_START_MANAGEMENT = ["Manager", "Director", "VP Level Exec"]
         assert DEFAULT_START_MANAGEMENT == ["Manager", "Director", "VP Level Exec"]
 
     def test_default_start_employee_max(self):
         """Default starting employee max should be 5000."""
-        DEFAULT_START_EMPLOYEE_MAX = 5000
         assert DEFAULT_START_EMPLOYEE_MAX == 5000
 
 

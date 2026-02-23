@@ -390,6 +390,32 @@ ZIP_PREFIX_TO_STATE = {
 }
 
 
+def time_ago(iso_str: str | None) -> str:
+    """Convert ISO timestamp to human-readable relative time string.
+
+    Returns 'Just now', 'Xm ago', 'Xh ago', 'Xd ago', 'Never', or 'Unknown'.
+    """
+    if not iso_str:
+        return "Never"
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        diff = now - dt
+        minutes = diff.total_seconds() / 60
+        if minutes < 1:
+            return "Just now"
+        if minutes < 60:
+            return f"{int(minutes)}m ago"
+        hours = minutes / 60
+        if hours < 24:
+            return f"{int(hours)}h ago"
+        days = hours / 24
+        return f"{int(days)}d ago"
+    except (ValueError, TypeError):
+        return "Unknown"
+
+
 def get_state_from_zip(zip_code: str) -> str | None:
     """Get state code from ZIP code.
 
