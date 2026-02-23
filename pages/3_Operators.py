@@ -9,7 +9,7 @@ import logging
 import streamlit as st
 import streamlit_shadcn_ui as ui
 from turso_db import get_database
-from ui_components import inject_base_styles, page_header, paginate_items, pagination_controls, empty_state, labeled_divider
+from ui_components import inject_base_styles, page_header, pagination_controls, empty_state, labeled_divider
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +60,11 @@ if "operators_selected_id" not in st.session_state:
 # =============================================================================
 # HEADER
 # =============================================================================
-operators = db.get_operators()
+_total_count = db.execute("SELECT COUNT(*) FROM operators")[0][0]
 
 page_header(
     "Operators",
-    f"{len(operators):,} operators",
+    f"{_total_count:,} operators",
 )
 
 st.markdown("---")
@@ -171,21 +171,14 @@ search_query = st.text_input(
     label_visibility="collapsed",
 )
 
-# Filter operators based on search
+# SQL-level search + pagination (avoids loading all 3K+ operators)
+PAGE_SIZE = 20
+current_page = st.session_state.get("operators_page", 1)
+offset = (current_page - 1) * PAGE_SIZE
+filtered_operators, filtered_total = db.search_operators(query=search_query, limit=PAGE_SIZE, offset=offset)
+
 if search_query:
-    query_lower = search_query.lower()
-    filtered_operators = [
-        op for op in operators
-        if query_lower in (op["operator_name"] or "").lower()
-        or query_lower in (op["vending_business_name"] or "").lower()
-        or query_lower in (op["operator_phone"] or "").lower()
-        or query_lower in (op["operator_email"] or "").lower()
-        or query_lower in (op["operator_zip"] or "").lower()
-        or query_lower in (op.get("operator_website") or "").lower()
-    ]
-    st.caption(f"Showing {len(filtered_operators)} of {len(operators)} operators")
-else:
-    filtered_operators = operators
+    st.caption(f"Showing {len(filtered_operators)} of {filtered_total:,} matches")
 
 st.markdown("---")
 
@@ -262,11 +255,12 @@ if not filtered_operators:
     else:
         empty_state("No operators yet", icon="👤", hint="Click '+ Add operator' to create your first operator.")
 else:
-    # Paginate the operator list
-    page_items, current_page, total_pages = paginate_items(filtered_operators, page_size=20, page_key="operators_page")
-    st.caption(f"Showing {(current_page - 1) * 20 + 1}–{min(current_page * 20, len(filtered_operators))} of {len(filtered_operators):,} operators")
+    total_pages = max(1, (filtered_total + PAGE_SIZE - 1) // PAGE_SIZE)
+    start = offset + 1
+    end = min(offset + PAGE_SIZE, filtered_total)
+    st.caption(f"Showing {start}–{end} of {filtered_total:,} operators")
 
-    for op in page_items:
+    for op in filtered_operators:
         is_editing = st.session_state.operators_editing_id == op["id"]
         is_selected = st.session_state.operators_selected_id == op["id"]
 

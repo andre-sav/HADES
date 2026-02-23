@@ -91,7 +91,7 @@ class TestGetZipsInRadius:
     def test_invalid_zip_returns_empty(self):
         """Invalid ZIP should return empty list."""
         zips = get_zips_in_radius("00000", 10)
-        assert zips == []
+        assert len(zips) == 0
 
     def test_zero_radius_returns_only_center(self):
         """Zero radius should return only the center ZIP."""

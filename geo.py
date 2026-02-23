@@ -58,28 +58,43 @@ def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
     return R * c
 
 
-def get_zips_in_radius(center_zip: str, radius_miles: float) -> list[dict]:
+@lru_cache(maxsize=64)
+def get_zips_in_radius(center_zip: str, radius_miles: float) -> tuple[dict, ...]:
     """
     Get all ZIP codes within radius of a center ZIP.
+
+    Uses bounding-box pre-filter to skip ~95% of ZIPs before haversine,
+    and LRU cache to avoid recomputation on Streamlit reruns.
 
     Args:
         center_zip: 5-digit ZIP code (center point)
         radius_miles: Search radius in miles
 
     Returns:
-        List of dicts with keys: zip, state, lat, lng, distance_miles
+        Tuple of dicts with keys: zip, state, lat, lng, distance_miles
         Sorted by distance (center ZIP first at 0.0 miles).
-        Returns empty list if center_zip not found.
+        Returns empty tuple if center_zip not found.
     """
     centroids = load_zip_centroids()
 
     if center_zip not in centroids:
-        return []
+        return ()
 
     center_lat, center_lng, _ = centroids[center_zip]
 
+    # Bounding-box pre-filter: 1° lat ≈ 69 miles, 1° lng varies by latitude
+    lat_margin = radius_miles / 69.0
+    lng_margin = radius_miles / (69.0 * math.cos(math.radians(center_lat)))
+    min_lat = center_lat - lat_margin
+    max_lat = center_lat + lat_margin
+    min_lng = center_lng - lng_margin
+    max_lng = center_lng + lng_margin
+
     results = []
     for zip_code, (lat, lng, state) in centroids.items():
+        # Fast rectangular check eliminates ~95% of ZIPs
+        if lat < min_lat or lat > max_lat or lng < min_lng or lng > max_lng:
+            continue
         distance = haversine_distance(center_lat, center_lng, lat, lng)
 
         if distance <= radius_miles:
@@ -93,7 +108,7 @@ def get_zips_in_radius(center_zip: str, radius_miles: float) -> list[dict]:
 
     # Sort by distance
     results.sort(key=lambda x: x["distance_miles"])
-    return results
+    return tuple(results)
 
 
 def get_states_from_zips(zips: list[dict]) -> list[str]:

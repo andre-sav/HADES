@@ -90,6 +90,57 @@ class TestTursoDatabase:
         assert result[0]["zoho_id"] == "zoho123"
         assert result[0]["synced_at"] == "2024-01-01T00:00:00"
 
+    def test_search_operators_no_query(self, mock_db):
+        """Test search_operators returns paginated results without query."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        # First call: COUNT(*), second call: SELECT with LIMIT/OFFSET
+        mock_cursor.fetchall.side_effect = [
+            [(50,)],  # total count
+            [(1, "Alpha Op", "Biz A", "555-0001", "a@a.com", "10001", "a.com", "Team 1", None, None, "2024-01-01")],
+        ]
+        mock_conn.execute.return_value = mock_cursor
+
+        operators, total = db.search_operators(query="", limit=20, offset=0)
+
+        assert total == 50
+        assert len(operators) == 1
+        assert operators[0]["operator_name"] == "Alpha Op"
+
+    def test_search_operators_with_query(self, mock_db):
+        """Test search_operators filters by query with LIKE."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.side_effect = [
+            [(3,)],  # filtered count
+            [(2, "Bob Smith", "Smith Vending", "555-0002", "bob@smith.com", "75201", "smith.com", "TX", None, None, "2024-01-01")],
+        ]
+        mock_conn.execute.return_value = mock_cursor
+
+        operators, total = db.search_operators(query="Smith", limit=20, offset=0)
+
+        assert total == 3
+        assert len(operators) == 1
+        assert operators[0]["operator_name"] == "Bob Smith"
+        # Verify LIKE param was passed
+        calls = mock_conn.execute.call_args_list
+        assert any("%Smith%" in str(c) for c in calls)
+
+    def test_search_operators_offset(self, mock_db):
+        """Test search_operators respects offset for pagination."""
+        db, mock_conn = mock_db
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.side_effect = [
+            [(100,)],
+            [],  # page 6 empty
+        ]
+        mock_conn.execute.return_value = mock_cursor
+
+        operators, total = db.search_operators(query="", limit=20, offset=100)
+
+        assert total == 100
+        assert len(operators) == 0
+
     def test_create_operator(self, mock_db):
         """Test creating an operator."""
         db, mock_conn = mock_db
@@ -930,3 +981,50 @@ class TestStagedExportPushTracking:
         assert row["push_status"] is None
         assert row["pushed_at"] is None
         assert row["push_results_json"] is None
+
+
+class TestMigrations:
+    """Tests for _run_migrations using PRAGMA table_info."""
+
+    def test_migration_skips_existing_column(self):
+        """Migration should skip columns that already exist (uses PRAGMA table_info)."""
+        mock_conn = MagicMock()
+        db = TursoDatabase(url="libsql://test.turso.io", auth_token="test-token")
+        db._conn = mock_conn
+
+        # Return all migration-target columns as already existing per table
+        table_columns = {
+            "operators": [
+                (0, "id", "INTEGER", 1, None, 1),
+                (1, "zoho_id", "TEXT", 0, None, 0),
+                (2, "synced_at", "TIMESTAMP", 0, None, 0),
+            ],
+            "lead_outcomes": [
+                (0, "id", "INTEGER", 1, None, 1),
+                (1, "person_id", "TEXT", 0, None, 0),
+            ],
+            "staged_exports": [
+                (0, "id", "INTEGER", 1, None, 1),
+                (1, "push_status", "TEXT", 0, None, 0),
+                (2, "pushed_at", "TEXT", 0, None, 0),
+                (3, "push_results_json", "TEXT", 0, None, 0),
+            ],
+        }
+
+        def side_effect(query, *args):
+            cursor = MagicMock()
+            for table, cols in table_columns.items():
+                if f"table_info({table})" in query:
+                    cursor.fetchall.return_value = cols
+                    return cursor
+            cursor.fetchall.return_value = []
+            return cursor
+
+        mock_conn.execute.side_effect = side_effect
+
+        db._run_migrations()
+
+        # Should not have executed any ALTER TABLE since all columns exist
+        all_queries = [str(c) for c in mock_conn.execute.call_args_list]
+        alter_calls = [q for q in all_queries if "ALTER" in q]
+        assert len(alter_calls) == 0

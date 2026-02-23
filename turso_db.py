@@ -207,6 +207,7 @@ class TursoDatabase:
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_history_created ON query_history(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_history_workflow_created ON query_history(workflow_type, created_at)",
             # Company ID mapping cache (hashed intent ID → numeric ID)
             """
             CREATE TABLE IF NOT EXISTS company_id_mapping (
@@ -265,6 +266,7 @@ class TursoDatabase:
             """,
             "CREATE INDEX IF NOT EXISTS idx_lead_outcomes_batch ON lead_outcomes(batch_id)",
             "CREATE INDEX IF NOT EXISTS idx_lead_outcomes_company_exported ON lead_outcomes(company_id, exported_at)",
+            "CREATE INDEX IF NOT EXISTS idx_lead_outcomes_exported_company ON lead_outcomes(exported_at, company_id)",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_outcomes_batch_person ON lead_outcomes(batch_id, person_id)",
             # Staged exports (persist leads for CSV re-export after session loss)
             """
@@ -327,22 +329,19 @@ class TursoDatabase:
         ]
 
         for table, column, statement in migrations:
-            # Check if column exists
-            try:
-                self.connection.execute(f"SELECT {column} FROM {table} LIMIT 1")
+            # Check if column exists via PRAGMA (immune to error message format changes)
+            existing_cols = {
+                row[1] for row in self.connection.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if column in existing_cols:
                 logger.debug(f"Migration: {table}.{column} already exists")
-            except Exception:
-                # Column doesn't exist, add it
-                try:
-                    self.connection.execute(statement)
-                    self.connection.commit()
-                    logger.info(f"Migration: Added {column} to {table}")
-                except Exception as e:
-                    error_str = str(e).lower()
-                    if "duplicate" in error_str or "already exists" in error_str:
-                        logger.debug(f"Migration: {table}.{column} already exists (from error)")
-                    else:
-                        logger.error(f"Migration failed for {table}.{column}: {e}")
+                continue
+            try:
+                self.connection.execute(statement)
+                self.connection.commit()
+                logger.info(f"Migration: Added {column} to {table}")
+            except Exception as e:
+                logger.error(f"Migration failed for {table}.{column}: {e}")
 
     # --- Operator CRUD ---
 
@@ -369,6 +368,43 @@ class TursoDatabase:
             }
             for r in rows
         ]
+
+    def search_operators(self, query: str = "", limit: int = 20, offset: int = 0) -> tuple[list[dict], int]:
+        """Search operators with SQL-level filtering and pagination.
+
+        Returns (operators, total_count) tuple.
+        """
+        _cols = ("id, operator_name, vending_business_name, operator_phone, "
+                 "operator_email, operator_zip, operator_website, team, zoho_id, synced_at, created_at")
+        if query:
+            like = f"%{query}%"
+            where = ("WHERE operator_name LIKE ? OR vending_business_name LIKE ? "
+                     "OR operator_phone LIKE ? OR operator_email LIKE ? "
+                     "OR operator_zip LIKE ? OR operator_website LIKE ?")
+            params = (like, like, like, like, like, like)
+            count_rows = self.execute(f"SELECT COUNT(*) FROM operators {where}", params)
+            total = count_rows[0][0] if count_rows else 0
+            rows = self.execute(
+                f"SELECT {_cols} FROM operators {where} ORDER BY operator_name LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            )
+        else:
+            count_rows = self.execute("SELECT COUNT(*) FROM operators")
+            total = count_rows[0][0] if count_rows else 0
+            rows = self.execute(
+                f"SELECT {_cols} FROM operators ORDER BY operator_name LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+        operators = [
+            {
+                "id": r[0], "operator_name": r[1], "vending_business_name": r[2],
+                "operator_phone": r[3], "operator_email": r[4], "operator_zip": r[5],
+                "operator_website": r[6], "team": r[7], "zoho_id": r[8],
+                "synced_at": r[9], "created_at": r[10],
+            }
+            for r in rows
+        ]
+        return operators, total
 
     def get_operator(self, operator_id: int) -> dict | None:
         """Get operator by ID."""
