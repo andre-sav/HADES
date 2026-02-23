@@ -1,7 +1,62 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-23
-**Status:** All 4 epics implemented (18 stories complete). 672 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35).
+**Status:** All 4 epics implemented (18 stories complete). 704 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36).
+
+## Session Summary (2026-02-23, Session 36)
+
+### What Was Done
+
+Investigated previous session's stalled Chrome MCP test of the Intent Workflow. Diagnosed root cause and fixed a UX dead-state bug.
+
+**Investigation findings:**
+- Prior session (post-35) implemented intent yield expansion (commit d551631): removed invalid `excludeOrgExportedContacts` param (400 fix), expanded topics to 4, bumped page_size 25→100
+- That session then tried to live-test in Chrome, hit context compaction, and stalled for 10+ minutes ("Noodling")
+- All code from that session was already committed — no work was lost
+
+**CLI pipeline verification:**
+- Intent Search API: Working (100 results returned)
+- `excludeOrgExportedContacts` 400 error: Confirmed fixed
+- Contact Search API: Working (no 400 errors)
+- Scoring: Working correctly — but all 100 current "Vending Machines" intent signals are stale (>14 days), so 0 survive freshness scoring
+
+**UX bug found and fixed — Intent Workflow dead state:**
+- **Root cause**: When autopilot search returns results but 0 survive freshness scoring, `intent_companies_confirmed` was set True while `intent_selected_companies` was empty. Stepper advanced to Step 2 but no content rendered — dead state with no user feedback.
+- **Fix 1**: `get_current_step()` — changed autopilot condition from `intent_companies` (raw results) to `intent_selected_companies` (actual selections). Stepper no longer falsely advances.
+- **Fix 2**: Auto-select guard — `intent_companies_confirmed` only set True when `auto_selected` is non-empty. Both cache-hit and API-call paths fixed.
+- **Fix 3**: New warning message — "All N intent results are stale (>14 days old)" when raw results exist but 0 survive scoring.
+
+**Also produced:** Comprehensive test self-prompt for full HADES system testing (all pages, workflows, scoring, data quality, UX, performance).
+
+### Test Count
+704 tests passing (unchanged — UX-only fix, no new test surface)
+
+### Key Files Modified
+```
+pages/1_Intent_Workflow.py  — 3 fixes: stepper logic, auto-select guard, stale warning message
+```
+
+### Uncommitted Changes
+`pages/1_Intent_Workflow.py` — the 3 UX fixes described above (17 insertions, 3 deletions). Ready to commit.
+
+Untracked (pre-existing, not from this session): `docs/ux-review-session26.md`, `ux-review/`
+
+### Known Issues
+- Chrome MCP extension is unreliable — disconnects frequently during browser automation, making live UI testing difficult
+- All current "Vending Machines" High intent signals are stale (>14 days). The expanded topics (Coffee Services, Water Coolers) in automation config should help yield, but only run via the daily cron job
+- HADES-iic (Zoho CRM dedup) still needs user clarification on CRM workflow
+
+### What Needs Doing Next Session
+1. **Commit the UX fix** — `pages/1_Intent_Workflow.py` dead-state fix (ready to commit)
+2. **Run the comprehensive test self-prompt** — generated this session, covers all pages/workflows/scoring/data quality
+3. **HADES-iic** [P4] — Zoho CRM dedup at export (needs user input on CRM workflow)
+
+### Beads Status
+- **Open:** HADES-iic (P4, Zoho CRM dedup)
+- **All P0-P3 beads closed.** Remaining: 1 P4
+- **Total:** 36 closed, 1 open, 0 in progress
+
+---
 
 ## Session Summary (2026-02-23, Session 35)
 

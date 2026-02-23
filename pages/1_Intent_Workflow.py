@@ -252,7 +252,7 @@ def get_current_step() -> int:
     if st.session_state.intent_contacts_by_company:
         return 3 if is_manual else 2
     if st.session_state.intent_companies_confirmed or (
-        not is_manual and st.session_state.intent_companies
+        not is_manual and st.session_state.intent_selected_companies
     ):
         return 3 if is_manual else 2
     if st.session_state.intent_companies:
@@ -466,7 +466,8 @@ if search_clicked:
                 if cid:
                     auto_selected[cid] = lead
             st.session_state.intent_selected_companies = auto_selected
-            st.session_state.intent_companies_confirmed = True
+            if auto_selected:
+                st.session_state.intent_companies_confirmed = True
 
         st.rerun()
 
@@ -578,7 +579,8 @@ if search_clicked:
                             if cid:
                                 auto_selected[cid] = lead
                         st.session_state.intent_selected_companies = auto_selected
-                        st.session_state.intent_companies_confirmed = True
+                        if auto_selected:
+                            st.session_state.intent_companies_confirmed = True
 
                     st.rerun()
 
@@ -724,6 +726,18 @@ if st.session_state.intent_search_executed and st.session_state.intent_companies
                     st.session_state.intent_companies_confirmed = False
                     st.session_state.intent_selected_companies = {}
                     st.rerun()
+
+# Empty scoring results — all leads filtered by freshness
+if st.session_state.intent_search_executed and not st.session_state.intent_companies:
+    _resp = st.session_state.get("_intent_api_response_summary", {})
+    _raw_count = _resp.get("total_results", 0)
+    if _raw_count > 0:
+        st.warning(
+            f"All {_raw_count} intent results are stale (>14 days old). "
+            "No companies survived freshness scoring. Try adding more topics or lowering signal strength."
+        )
+    elif not st.session_state.get("_intent_api_error"):
+        st.info("No companies found matching criteria.")
 
 # =============================================================================
 # STEP 2: SELECT COMPANIES (Manual mode only; Autopilot auto-advances)
