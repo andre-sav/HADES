@@ -1,7 +1,74 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-22
-**Status:** All 4 epics implemented (18 stories complete). 628 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd).
+**Date:** 2026-02-23
+**Status:** All 4 epics implemented (18 stories complete). 672 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35).
+
+## Session Summary (2026-02-23, Session 35)
+
+### What Was Done
+
+Recovered from a system crash that lost all uncommitted code from a prior session attempt. Re-implemented everything from scratch. Closed 9 beads total:
+
+**Batch 1 — 5 UX polish beads:**
+1. **HADES-v3y** [P3] — WCAG contrast fix (#5c6370→#8b95a5, ratio 3.8:1→5.2:1), CSS typo `font_weight`→`font-weight`, sidebar icon comment
+2. **HADES-3p4** [P3] — Removed redundant page_link CTAs from CSV Export
+3. **HADES-t4g** [P3] — Missing business name → muted italic "No business name"
+4. **HADES-2jp** [P3] — Removed redundant large operator count from header
+5. **HADES-ctq** [P3] — Replaced styled_table with sortable st.dataframe for SIC codes
+
+**Batch 2 — DB performance:**
+6. **HADES-03x** [P3] — Composite indexes (query_history, lead_outcomes), SQL pagination for operators (search_operators with LIKE+LIMIT/OFFSET), bounding-box pre-filter + LRU cache for get_zips_in_radius, PRAGMA table_info migration cleanup
+
+**Batch 3 — Test quality:**
+7. **HADES-0xw** [P3] — Fixed vacuous tests in test_expand_search.py (shadow variables → real imports), extracted time_ago() to utils.py, created tests/test_zoho.py with 31 tests
+
+**Quick win:**
+8. **HADES-59e** [P4] — 0-lead automation context message ("No new intent signals matched filters")
+
+**Investigated but NOT started:**
+9. **HADES-iic** [P4] — Zoho CRM dedup at export. User questioned the feature's purpose; needs clarification on CRM workflow before implementation. Reset to open.
+
+### Test Count
+672 tests passing (+44 from session start: 4 DB perf + 31 Zoho + 9 from other fixes)
+
+### Key Files Modified
+```
+ui_components.py                — WCAG contrast fix, CSS typo fix, sidebar icon comment
+pages/3_Operators.py            — missing biz name, SQL pagination, removed redundant header count
+pages/4_CSV_Export.py           — removed redundant page_link CTAs
+pages/7_Score_Calibration.py    — sortable st.dataframe for SIC codes
+pages/9_Automation.py           — 0-lead context message in run cards + detail view
+pages/10_Pipeline_Health.py     — import time_ago from utils (removed local copy)
+turso_db.py                     — composite indexes, search_operators(), PRAGMA migration
+geo.py                          — bounding-box pre-filter, LRU cache, tuple return type
+utils.py                        — time_ago() function
+tests/test_geo.py               — fixed tuple vs list assertion
+tests/test_expand_search.py     — fixed vacuous tests (real constant imports)
+tests/test_pipeline_health.py   — import time_ago from utils
+tests/test_turso_db.py          — 3 search_operators + 1 migration test
+tests/test_zoho.py              — NEW: 31 Zoho tests (auth, client, sync, constants)
+```
+
+### Uncommitted Changes
+Only `.beads/issues.jsonl` (bead state). Will be committed by bd sync.
+Untracked: `docs/ux-review-session26.md` and `ux-review/` (pre-existing, not part of this session).
+
+### Known Issues
+- HADES-iic (Zoho CRM dedup) needs user clarification on CRM workflow before implementation
+- Beads repo ID mismatch was fixed with `bd migrate --update-repo-id` — should not recur
+
+### What Needs Doing Next Session
+1. **HADES-iic** [P4] — Zoho CRM dedup at export (needs user input on CRM workflow)
+2. **HADES-wuq** [P4] — Architecture: split turso_db, PII retention, enrich fields, error hierarchy
+3. **HADES-umv** [P4] — Plan compliance: missing CTA, error log, PII enforcement, doc updates
+
+### Beads Status
+- **Closed this session:** HADES-v3y, HADES-3p4, HADES-t4g, HADES-2jp, HADES-ctq, HADES-03x, HADES-0xw, HADES-59e (8 closed)
+- **HADES-iic:** Investigated, reset to open (needs user clarification)
+- **All P0-P3 beads closed.** Remaining: 3 P4
+- **Total:** 36 closed, 3 open, 0 in progress
+
+---
 
 ## Session Summary (2026-02-22, Session 34 continued)
 
