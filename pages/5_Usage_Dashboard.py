@@ -80,12 +80,17 @@ col1, col2 = st.columns([3, 1])
 with col1:
     st.caption("ZoomInfo API Usage")
 with col2:
-    if ui.button(text="Fetch ZoomInfo Usage", variant="default", key="usage_fetch_btn"):
+    if ui.button(text="Refresh", variant="default", key="usage_fetch_btn"):
         with st.spinner("Fetching usage data from ZoomInfo..."):
             zi_usage = fetch_zoominfo_usage()
             st.session_state["zi_usage_data"] = zi_usage
 
-# Display cached data if available
+# Auto-fetch on first page load (no click required)
+if "zi_usage_data" not in st.session_state:
+    with st.spinner("Fetching usage data from ZoomInfo..."):
+        zi_usage = fetch_zoominfo_usage()
+        st.session_state["zi_usage_data"] = zi_usage
+
 if "zi_usage_data" in st.session_state:
     zi_usage = st.session_state["zi_usage_data"]
 

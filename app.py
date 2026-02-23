@@ -111,6 +111,44 @@ def _detail_text(last_query):
 
 
 # Build status items as a single unified HTML row
+# Last automation run
+_last_automation_runs = db.get_pipeline_runs("intent", limit=1)
+_last_auto = _last_automation_runs[0] if _last_automation_runs else None
+
+
+def _auto_badge(run):
+    """Badge for last automation run."""
+    if not run:
+        return status_badge("neutral", "No runs")
+    st_map = {"completed": "success", "failed": "error", "running": "info"}
+    badge_type = st_map.get(run.get("status", ""), "neutral")
+    return status_badge(badge_type, run.get("status", "unknown").title())
+
+
+def _auto_detail(run):
+    """Detail line for last automation run."""
+    if not run:
+        return ""
+    parts = []
+    leads = run.get("leads_exported", 0)
+    if leads:
+        parts.append(f"{leads} leads")
+    ts = run.get("completed_at") or run.get("started_at") or ""
+    if ts:
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            delta = datetime.now() - dt.replace(tzinfo=None)
+            if delta.days > 0:
+                parts.append(f"{delta.days}d ago")
+            elif delta.seconds >= 3600:
+                parts.append(f"{delta.seconds // 3600}h ago")
+            else:
+                parts.append("Just now")
+        except (ValueError, TypeError):
+            pass
+    return " · ".join(parts)
+
+
 _status_items = [
     {
         "label": "Database",
@@ -126,6 +164,11 @@ _status_items = [
         "label": "Geography",
         "badge": _freshness_badge(last_geo),
         "detail": _detail_text(last_geo),
+    },
+    {
+        "label": "Automation",
+        "badge": _auto_badge(_last_auto),
+        "detail": _auto_detail(_last_auto),
     },
     {
         "label": "Staged Leads",
@@ -186,7 +229,28 @@ with col3:
 # =============================================================================
 labeled_divider("Recent Runs")
 
+# Merge manual queries and automation pipeline runs
 recent_display = db.get_recent_queries(limit=10)
+_auto_runs = db.get_pipeline_runs("intent", limit=5)
+
+# Show automation runs first if any exist
+if _auto_runs:
+    with st.expander(f"Automation Runs ({len(_auto_runs)})", expanded=False):
+        for run in _auto_runs:
+            status = run.get("status", "unknown")
+            leads = run.get("leads_exported", 0) or 0
+            credits = run.get("credits_used", 0) or 0
+            trigger = run.get("trigger", "manual")
+            ts = (run.get("completed_at") or run.get("started_at") or "")[:16]
+            error = run.get("error_message", "")
+
+            status_icon = {"completed": "✓", "failed": "✗", "running": "◉"}.get(status, "?")
+            header = f"{ts} · {status_icon} {status.title()} · {leads} leads · {credits} credits · {trigger}"
+            if error:
+                st.markdown(f"{header}")
+                st.caption(f"Error: {error}")
+            else:
+                st.markdown(header)
 
 if recent_display:
     for q in recent_display:

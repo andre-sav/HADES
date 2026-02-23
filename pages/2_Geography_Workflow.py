@@ -338,10 +338,21 @@ if operator_mode == "Select existing":
         st.session_state.geo_operator = None
     else:
         st.caption(f"Select the vending company operator for this territory search · {len(operators):,} available")
-        operator_options = {
-            f"{op['operator_name']}  ·  {op.get('vending_business_name') or 'N/A'}": op
-            for op in operators
-        }
+
+        # Build options with recently used operators at top
+        recent_ids = set(db.get_recent_operator_ids(limit=5))
+        recent_ops = [op for op in operators if op.get("id") in recent_ids]
+        other_ops = [op for op in operators if op.get("id") not in recent_ids]
+
+        operator_options = {}
+        if recent_ops:
+            for op in recent_ops:
+                key = f"★  {op['operator_name']}  ·  {op.get('vending_business_name') or 'N/A'}"
+                operator_options[key] = op
+            operator_options["─── All operators ───"] = None  # separator
+        for op in other_ops:
+            key = f"{op['operator_name']}  ·  {op.get('vending_business_name') or 'N/A'}"
+            operator_options[key] = op
 
         selected = st.selectbox(
             "Select operator",
@@ -350,7 +361,7 @@ if operator_mode == "Select existing":
             label_visibility="collapsed",
         )
 
-        if selected:
+        if selected and operator_options.get(selected) is not None:
             st.session_state.geo_operator = operator_options[selected]
             op = st.session_state.geo_operator
 

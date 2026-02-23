@@ -888,7 +888,7 @@ class TursoDatabase:
         """Get recent staged exports (newest first)."""
         rows = self.execute(
             "SELECT id, workflow_type, lead_count, query_params, operator_id, "
-            "batch_id, exported_at, created_at "
+            "batch_id, exported_at, created_at, push_status "
             "FROM staged_exports ORDER BY created_at DESC LIMIT ?",
             (limit,),
         )
@@ -902,6 +902,7 @@ class TursoDatabase:
                 "batch_id": r[5],
                 "exported_at": r[6],
                 "created_at": r[7],
+                "push_status": r[8],
             }
             for r in rows
         ]
@@ -932,6 +933,16 @@ class TursoDatabase:
             "pushed_at": r[10],
             "push_results_json": r[11],
         }
+
+    def get_recent_operator_ids(self, limit: int = 5) -> list[int]:
+        """Get operator IDs recently used in exports (most recent first, deduplicated)."""
+        rows = self.execute(
+            "SELECT DISTINCT operator_id FROM staged_exports "
+            "WHERE operator_id IS NOT NULL "
+            "ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        )
+        return [r[0] for r in rows]
 
     def mark_staged_exported(self, export_id: int, batch_id: str) -> None:
         """Mark a staged export as exported with batch ID and timestamp."""

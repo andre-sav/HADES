@@ -130,6 +130,41 @@ if not intent_leads and not geo_leads:
     with col2:
         st.page_link("pages/2_Geography_Workflow.py", label="Run Geography Search", icon="📍", use_container_width=True)
 
+    # Export History — show completed exports
+    exported = db.get_staged_exports(limit=20)
+    exported = [e for e in exported if e.get("exported_at") or e.get("push_status")]
+    if exported:
+        labeled_divider("Export History")
+        history_data = []
+        for e in exported:
+            if e.get("push_status") == "complete":
+                status = "Pushed"
+            elif e.get("push_status") == "partial":
+                status = "Partial"
+            elif e.get("exported_at"):
+                status = "CSV"
+            else:
+                continue
+            ts = e.get("exported_at") or e.get("created_at", "")
+            history_data.append({
+                "time": ts[:16] if ts else "",
+                "workflow": e["workflow_type"].title(),
+                "leads": e["lead_count"],
+                "batch": (e.get("batch_id") or "")[:12],
+                "status": status,
+            })
+        if history_data:
+            styled_table(
+                rows=history_data,
+                columns=[
+                    {"key": "time", "label": "Exported"},
+                    {"key": "workflow", "label": "Workflow"},
+                    {"key": "leads", "label": "Leads", "align": "right", "mono": True},
+                    {"key": "batch", "label": "Batch", "mono": True},
+                    {"key": "status", "label": "Method", "pill": {"Pushed": "success", "CSV": "info", "Partial": "warning"}},
+                ],
+            )
+
     st.stop()
 
 
