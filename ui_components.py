@@ -74,7 +74,7 @@ COLORS = {
     "border_light": "#3a4350",  # Hover borders
     "text_primary": "#f0f2f5",  # Primary text (slightly softer)
     "text_secondary": "#8b929e",# Secondary text
-    "text_muted": "#5c6370",    # Muted text
+    "text_muted": "#8b95a5",    # Muted text (WCAG AA ≥4.5:1 on bg_secondary)
 }
 
 # =============================================================================
@@ -483,7 +483,8 @@ def inject_base_styles():
         border-left: 2px solid {COLORS['primary']};
     }}
 
-    /* Sidebar page icons via CSS */
+    /* Sidebar page icons via CSS — nth-child order must match pages/ file numbering.
+       Update when adding/removing/reordering pages. */
     section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a span::before {{
         margin-right: 8px;
         font-style: normal;
@@ -2184,7 +2185,7 @@ def company_card_header(
             padding: {SPACING['xs']} {SPACING['sm']};
             border-radius: 9999px;
             font-size: {FONT_SIZES['xs']};
-            font_weight: 500;
+            font-weight: 500;
         ">{badge_text}</span>
     </div>
     '''

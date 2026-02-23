@@ -64,8 +64,7 @@ operators = db.get_operators()
 
 page_header(
     "Operators",
-    "Manage operators for lead assignment",
-    right_content=(f'<span style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: 600; color: #f0f2f5;">{len(operators)}</span>', f"{len(operators):,} operators"),
+    f"{len(operators):,} operators",
 )
 
 st.markdown("---")
@@ -315,7 +314,7 @@ else:
             # Build operator row as single HTML block for typographic control
             safe_name = html_mod.escape(op["operator_name"])
             biz = op["vending_business_name"]
-            biz_html = f'<span class="op-biz">{html_mod.escape(biz)}</span>' if biz else ""
+            biz_html = f'<span class="op-biz">{html_mod.escape(biz)}</span>' if biz else '<span class="op-biz" style="opacity: 0.4; font-style: italic;">No business name</span>'
 
             contact_parts = []
             if op["operator_phone"]:

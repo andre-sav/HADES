@@ -4,6 +4,7 @@ Score Calibration - View current scoring weights, run calibration, review outcom
 
 import logging
 
+import pandas as pd
 import streamlit as st
 import streamlit_shadcn_ui as ui
 import yaml
@@ -105,22 +106,25 @@ if active_tab == "Current Weights":
     sic_rows = []
     for sic in sorted(all_sics):
         score = sic_scores.get(sic, sic_default)
-        source = "calibrated" if sic in sic_scores else "default"
+        source = "Calibrated" if sic in sic_scores else "Default"
         desc = SIC_CODE_DESCRIPTIONS.get(sic, "Unknown")
         if _sic_filter:
             _q = _sic_filter.lower()
             if _q not in sic.lower() and _q not in desc.lower():
                 continue
-        sic_rows.append({"SIC": sic, "Industry": desc, "Score": score, "Source": source})
+        sic_rows.append({"SIC Code": sic, "Industry": desc, "Score": score, "Source": source})
 
-    styled_table(
-        rows=sic_rows,
-        columns=[
-            {"key": "SIC", "label": "SIC Code"},
-            {"key": "Industry", "label": "Industry"},
-            {"key": "Score", "label": "Score", "align": "right", "mono": True},
-            {"key": "Source", "label": "Source", "pill": {"calibrated": "success", "default": "muted"}},
-        ],
+    sic_df = pd.DataFrame(sic_rows) if sic_rows else pd.DataFrame(columns=["SIC Code", "Industry", "Score", "Source"])
+    st.dataframe(
+        sic_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "SIC Code": st.column_config.TextColumn(width="small"),
+            "Industry": st.column_config.TextColumn(width="medium"),
+            "Score": st.column_config.NumberColumn(width="small"),
+            "Source": st.column_config.TextColumn(width="small"),
+        },
     )
 
     # Employee Scale table

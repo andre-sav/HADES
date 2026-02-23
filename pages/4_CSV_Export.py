@@ -124,12 +124,6 @@ if not intent_leads and not geo_leads:
             hint="Run a workflow to find and stage leads, then return here to download your VanillaSoft CSV.",
         )
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.page_link("pages/1_Intent_Workflow.py", label="Run Intent Search", icon="🎯", use_container_width=True)
-    with col2:
-        st.page_link("pages/2_Geography_Workflow.py", label="Run Geography Search", icon="📍", use_container_width=True)
-
     # Export History — show completed exports
     exported = db.get_staged_exports(limit=20)
     exported = [e for e in exported if e.get("exported_at") or e.get("push_status")]
