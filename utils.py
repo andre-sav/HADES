@@ -416,7 +416,7 @@ def time_ago(iso_str: str | None) -> str:
         return "Unknown"
 
 
-def normalize_zip(raw) -> str | None:
+def normalize_zip(raw: str | int | None) -> str | None:
     """Normalize a ZIP code to 5-digit string.
 
     Handles ZIP+4 (hyphen, space, no separator), leading-zero padding,
