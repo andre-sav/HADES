@@ -24,10 +24,6 @@ Usage:
 
 import html as html_mod
 import streamlit as st
-try:
-    import streamlit_shadcn_ui as ui
-except ImportError:
-    ui = None  # Not available in test environment
 from typing import Callable, Optional, Literal
 
 # =============================================================================
@@ -1136,14 +1132,6 @@ def inject_base_styles():
     }}
 
     /* ================================================================
-       SHADCN UI IFRAME
-       ================================================================ */
-    iframe[title*="streamlit_shadcn_ui"] {{
-        border: none !important;
-        color-scheme: dark;
-    }}
-
-    /* ================================================================
        ACCESSIBILITY
        ================================================================ */
     button:focus-visible,
@@ -1192,8 +1180,51 @@ def inject_base_styles():
     [data-testid="stSidebarNav"] a[href*="API_Discovery"] {{
         display: none !important;
     }}
+
+    /* ================================================================
+       BUTTON VARIANTS (destructive / outline containers)
+       ================================================================ */
+    /* Destructive button — red for danger */
+    div[data-testid="stVerticalBlock"][data-st-key^="_dest_"] button {{
+        background: {COLORS['error']} !important;
+        border-color: {COLORS['error']} !important;
+        color: white !important;
+    }}
+    div[data-testid="stVerticalBlock"][data-st-key^="_dest_"] button:hover {{
+        background: {COLORS['error_dark']} !important;
+        border-color: {COLORS['error_dark']} !important;
+        filter: brightness(1.1) !important;
+    }}
+
+    /* Outline button — ghost with border */
+    div[data-testid="stVerticalBlock"][data-st-key^="_outl_"] button {{
+        background: transparent !important;
+        border: 1px solid {COLORS['border']} !important;
+        color: {COLORS['text_primary']} !important;
+    }}
+    div[data-testid="stVerticalBlock"][data-st-key^="_outl_"] button:hover {{
+        border-color: {COLORS['primary']} !important;
+        color: {COLORS['primary_light']} !important;
+        background: {COLORS['primary']}0a !important;
+    }}
 </style>
 """, unsafe_allow_html=True)
+
+
+# =============================================================================
+# BUTTON VARIANT HELPERS
+# =============================================================================
+
+def destructive_button(label: str, *, key: str, **kwargs) -> bool:
+    """Red-styled button for dangerous/irreversible actions."""
+    with st.container(key=f"_dest_{key}"):
+        return st.button(label, key=key, **kwargs)
+
+
+def outline_button(label: str, *, key: str, **kwargs) -> bool:
+    """Subtle outlined button for secondary actions."""
+    with st.container(key=f"_outl_{key}"):
+        return st.button(label, key=key, **kwargs)
 
 
 # =============================================================================
@@ -2318,11 +2349,11 @@ def action_bar(
     col_idx = 0
     if secondary_label and btn_cols:
         with btn_cols[col_idx]:
-            secondary_clicked = bool(ui.button(
-                text=secondary_label,
-                variant="outline",
+            secondary_clicked = outline_button(
+                secondary_label,
                 key=secondary_key or f"action_bar_secondary_{run_state}",
-            ))
+                use_container_width=True,
+            )
         col_idx += 1
 
     if primary_label and col_idx < len(btn_cols):

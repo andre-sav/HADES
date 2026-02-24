@@ -280,7 +280,6 @@ states = get_states_from_zips(zips)
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
 - ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).
 - ✅ **Target Contacts Expansion** - Implemented 2026-02-03
-- ✅ **Shadcn UI Adopted** - `streamlit-shadcn-ui` across all pages
 - ✅ **DB Mixin Architecture** - 11 domain-specific mixins in db/ package
 - ✅ **Score Calibration** - HLM delivery data calibrated SIC/employee scores
 - 🔧 **Contact Enrich** - API returns data, response parsing fixed (needs production test)

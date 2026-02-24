@@ -213,7 +213,7 @@ The CSS in `inject_base_styles()` overrides native Streamlit widgets:
 ## Rules
 
 1. **Always call `inject_base_styles()` first** on every page
-2. **Use `st.button` not `ui.button`** for critical actions (shadcn-ui clicks are unreliable in nested blocks)
+2. **Use native `st.button`** with `destructive_button`/`outline_button` helpers for button variants
 3. **Use design system components** (`metric_card`, `status_badge`, `labeled_divider`) -- never hardcode colors
 4. **Session state keys prefixed by page**: `intent_*`, `geo_*`, `auto_*`
 5. **Rerun guard pattern** for DB writes: set flag before write, check flag to prevent duplicates

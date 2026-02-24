@@ -6,7 +6,6 @@ Superhuman-inspired: clean dashboards, clear insights.
 import logging
 
 import streamlit as st
-import streamlit_shadcn_ui as ui
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
@@ -72,10 +71,10 @@ page_header(
 # =============================================================================
 # TABBED CONTENT
 # =============================================================================
-_exec_active = ui.tabs(options=["Overview", "Trends", "Budget"], default_value="Overview", key="exec_main_tabs")
+tab_overview, tab_trends, tab_budget = st.tabs(["Overview", "Trends", "Budget"])
 
 # --- OVERVIEW TAB ---
-if _exec_active == "Overview":
+with tab_overview:
     mtd = cost_tracker.get_usage_summary(days=today.day)
 
     # Calculate WoW deltas
@@ -223,7 +222,7 @@ if _exec_active == "Overview":
 
 
 # --- TRENDS TAB ---
-elif _exec_active == "Trends":
+with tab_trends:
     trend = []
     for weeks_ago in range(4):
         week_end = today - timedelta(days=weeks_ago * 7)
@@ -301,7 +300,7 @@ elif _exec_active == "Trends":
 
 
 # --- BUDGET TAB ---
-elif _exec_active == "Budget":
+with tab_budget:
     col1, col2 = st.columns(2)
 
     with col1:

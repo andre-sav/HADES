@@ -6,7 +6,6 @@ import json
 import logging
 
 import streamlit as st
-import streamlit_shadcn_ui as ui
 from datetime import datetime
 
 from turso_db import get_database
@@ -173,7 +172,13 @@ if geo_leads:
 
 if len(sources) > 1:
     source_labels = [s[1] for s in sources]
-    _src_tab = ui.tabs(options=source_labels, default_value=source_labels[0], key="export_source_tabs")
+    _src_tab = st.segmented_control(
+        "Source",
+        options=source_labels,
+        default=source_labels[0],
+        key="export_source_tabs",
+        label_visibility="collapsed",
+    )
     _src_idx = source_labels.index(_src_tab) if _src_tab in source_labels else 0
     workflow_type = sources[_src_idx][0]
 else:

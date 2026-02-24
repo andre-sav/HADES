@@ -6,7 +6,6 @@ Superhuman-inspired: clean metrics, scannable tables.
 import logging
 
 import streamlit as st
-import streamlit_shadcn_ui as ui
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -83,7 +82,7 @@ col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown("")
 with col2:
-    if ui.button(text="Refresh", variant="default", key="usage_fetch_btn"):
+    if st.button("Refresh", key="usage_fetch_btn"):
         with st.spinner("Fetching usage data from ZoomInfo..."):
             zi_usage = fetch_zoominfo_usage()
             st.session_state["zi_usage_data"] = zi_usage
@@ -181,10 +180,10 @@ labeled_divider("Details")
 # =============================================================================
 # TABBED CONTENT
 # =============================================================================
-_usage_active = ui.tabs(options=["Weekly", "By Period", "Recent Queries"], default_value="Weekly", key="usage_main_tabs")
+tab_weekly, tab_period, tab_queries = st.tabs(["Weekly", "By Period", "Recent Queries"])
 
 # --- WEEKLY TAB ---
-if _usage_active == "Weekly":
+with tab_weekly:
     weekly = cost_tracker.get_weekly_usage_by_workflow()
     total = sum(weekly.values())
 
@@ -218,7 +217,7 @@ if _usage_active == "Weekly":
         )
 
 # --- BY PERIOD TAB ---
-elif _usage_active == "By Period":
+with tab_period:
     col1, col2 = st.columns([1, 3])
 
     with col1:
@@ -266,7 +265,7 @@ elif _usage_active == "By Period":
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 # --- RECENT QUERIES TAB ---
-elif _usage_active == "Recent Queries":
+with tab_queries:
     # Date range filter
     today = datetime.now().date()
     col_range, col_wf = st.columns([2, 1])

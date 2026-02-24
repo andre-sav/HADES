@@ -7,9 +7,8 @@ import html as html_mod
 import logging
 
 import streamlit as st
-import streamlit_shadcn_ui as ui
 from turso_db import get_database
-from ui_components import inject_base_styles, page_header, pagination_controls, empty_state, labeled_divider
+from ui_components import inject_base_styles, page_header, pagination_controls, empty_state, labeled_divider, destructive_button, outline_button
 
 logger = logging.getLogger(__name__)
 
@@ -95,14 +94,20 @@ with st.expander("Sync from Zoho CRM", expanded=False):
             _resync_trigger = st.button("Full Resync", key="op_resync_btn")
             st.caption("Full Resync replaces all records")
 
-        _resync_confirmed = ui.alert_dialog(
-            show=_resync_trigger,
-            title="Full Resync",
-            description="This will fetch all records from Zoho CRM. This may take a while.",
-            confirm_label="Resync",
-            cancel_label="Cancel",
-            key="op_resync_dialog",
-        )
+        @st.dialog("Full Resync")
+        def confirm_resync():
+            st.write("This will fetch all records from Zoho CRM. This may take a while.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Cancel", use_container_width=True):
+                    st.rerun()
+            with c2:
+                if st.button("Resync", type="primary", use_container_width=True):
+                    st.session_state["_op_resync_confirmed"] = True
+                    st.rerun()
+
+        if _resync_trigger:
+            confirm_resync()
 
         if sync_clicked:
             with st.spinner("Syncing from Zoho CRM..."):
@@ -133,7 +138,7 @@ with st.expander("Sync from Zoho CRM", expanded=False):
                     logger.error(f"Sync failed: {e}")
                     st.error("Sync failed. Please try again.")
 
-        if _resync_confirmed:
+        if st.session_state.pop("_op_resync_confirmed", False):
             with st.spinner("Full resync from Zoho CRM..."):
                 try:
                     from zoho_auth import ZohoAuth
@@ -183,7 +188,7 @@ st.markdown("")
 # ADD BUTTON
 # =============================================================================
 if not st.session_state.operators_adding:
-    if ui.button(text="+ Add operator", variant="default", key="op_add_btn"):
+    if st.button("+ Add operator", key="op_add_btn"):
         st.session_state.operators_adding = True
         st.rerun()
 
@@ -210,7 +215,7 @@ if st.session_state.operators_adding:
     col1, col2, col3 = st.columns([1, 1, 2])
 
     with col1:
-        if ui.button(text="Save", variant="default", key="op_save_new_btn"):
+        if st.button("Save", type="primary", key="op_save_new_btn"):
             if not new_name:
                 st.error("Name required")
             else:
@@ -235,7 +240,7 @@ if st.session_state.operators_adding:
                         st.error("Operation failed. Please try again.")
 
     with col2:
-        if ui.button(text="Cancel", variant="outline", key="op_cancel_new_btn"):
+        if outline_button("Cancel", key="op_cancel_new_btn"):
             st.session_state.operators_adding = False
             st.rerun()
 
@@ -278,7 +283,7 @@ else:
             col1, col2, col3 = st.columns([1, 1, 2])
 
             with col1:
-                if ui.button(text="Save", variant="default", key=f"op_save_edit_{op['id']}_btn"):
+                if st.button("Save", type="primary", key=f"op_save_edit_{op['id']}_btn"):
                     if not edit_name:
                         st.error("Name required")
                     else:
@@ -296,7 +301,7 @@ else:
                         st.rerun()
 
             with col2:
-                if ui.button(text="Cancel", variant="outline", key=f"op_cancel_edit_{op['id']}_btn"):
+                if outline_button("Cancel", key=f"op_cancel_edit_{op['id']}_btn"):
                     st.session_state.operators_editing_id = None
                     st.rerun()
 
@@ -341,28 +346,35 @@ else:
             if is_selected:
                 act1, act2, act3 = st.columns([2, 2, 20])
                 with act1:
-                    if ui.button(text="Edit", variant="secondary", key=f"op_edit_{op['id']}_btn"):
+                    if st.button("Edit", key=f"op_edit_{op['id']}_btn"):
                         st.session_state.operators_editing_id = op["id"]
                         st.session_state.operators_selected_id = None
                         st.rerun()
                 with act2:
-                    _del_trigger = ui.button(text="Delete", variant="destructive", key=f"op_delete_{op['id']}_btn")
-                    _del_confirmed = ui.alert_dialog(
-                        show=_del_trigger,
-                        title="Delete Operator",
-                        description=f"Delete {op['operator_name']}? This action cannot be undone.",
-                        confirm_label="Delete",
-                        cancel_label="Cancel",
-                        key=f"op_delete_{op['id']}_dialog",
-                    )
-                    if _del_confirmed:
-                        try:
-                            db.delete_operator(op["id"])
-                            st.session_state.operators_selected_id = None
+                    if destructive_button("Delete", key=f"op_delete_{op['id']}_btn"):
+                        st.session_state["_op_delete_target"] = {"id": op["id"], "name": op["operator_name"]}
+                        # Trigger handled below after loop
+
+            # Handle delete confirmation dialog (must be outside column context)
+            _del_target = st.session_state.pop("_op_delete_target", None)
+            if _del_target and _del_target["id"] == op["id"]:
+                @st.dialog("Delete Operator")
+                def confirm_delete(op_id, op_name):
+                    st.write(f"Delete **{op_name}**? This action cannot be undone.")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("Cancel", use_container_width=True):
                             st.rerun()
-                        except Exception as e:
-                            logger.error(f"Failed to delete: {e}")
-                            st.error("Failed to delete. Please try again.")
+                    with c2:
+                        if st.button("Delete", type="primary", use_container_width=True):
+                            try:
+                                db.delete_operator(op_id)
+                                st.session_state.operators_selected_id = None
+                                st.rerun()
+                            except Exception as e:
+                                logger.error(f"Failed to delete: {e}")
+                                st.error("Failed to delete. Please try again.")
+                confirm_delete(_del_target["id"], _del_target["name"])
 
     # Pagination controls at bottom
     if total_pages > 1:

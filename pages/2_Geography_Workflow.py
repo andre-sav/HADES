@@ -10,7 +10,6 @@ import logging
 import threading
 
 import streamlit as st
-import streamlit_shadcn_ui as ui
 from keyboard_shortcuts import inject_ctrl_enter_shortcut
 
 # Configure logging
@@ -76,6 +75,8 @@ from ui_components import (
     last_run_indicator,
     expansion_timeline,
     format_contact_label,
+    destructive_button,
+    outline_button,
 )
 
 st.set_page_config(page_title="Geography", page_icon="📍", layout="wide")
@@ -215,12 +216,15 @@ mode_col1, mode_col2, mode_col3 = st.columns([1, 2, 1])
 with mode_col1:
     _GEO_MODE_MAP = {"Autopilot": "autopilot", "Manual Review": "manual"}
     _GEO_MODE_REVERSE = {v: k for k, v in _GEO_MODE_MAP.items()}
-    _geo_mode_tab = ui.tabs(
+    _geo_mode_tab = st.segmented_control(
+        "Mode",
         options=list(_GEO_MODE_MAP.keys()),
-        default_value=_GEO_MODE_REVERSE.get(st.session_state.geo_mode, "Autopilot"),
+        default=_GEO_MODE_REVERSE.get(st.session_state.geo_mode, "Autopilot"),
         key="geo_mode_tabs",
+        label_visibility="collapsed",
     )
-    st.session_state.geo_mode = _GEO_MODE_MAP.get(_geo_mode_tab, st.session_state.geo_mode)
+    if _geo_mode_tab is not None:
+        st.session_state.geo_mode = _GEO_MODE_MAP.get(_geo_mode_tab, st.session_state.geo_mode)
 
 with mode_col2:
     if st.session_state.geo_mode == "autopilot":
@@ -229,8 +233,7 @@ with mode_col2:
         st.caption("Manual: Search (free preview) → Select contacts → Enrich selected → Export")
 
 with mode_col3:
-    _geo_test_sw = ui.switch(default_checked=st.session_state.geo_test_mode, label="Test Mode", key="geo_test_mode_switch")
-    st.session_state.geo_test_mode = bool(_geo_test_sw) if _geo_test_sw is not None else st.session_state.geo_test_mode
+    st.session_state.geo_test_mode = st.toggle("Test Mode", value=st.session_state.geo_test_mode, key="geo_test_mode_switch")
     if st.session_state.geo_test_mode:
         st.caption("⚠️ Using mock data")
 
@@ -324,10 +327,12 @@ if not st.session_state.geo_operator:
     st.info("Select an operator to search their service territory for ICP-matching contacts.", icon="👤")
 
 _OP_MODE_MAP = {"Existing Operator": "Select existing", "Enter Manually": "Enter manually"}
-_op_mode_tab = ui.tabs(
+_op_mode_tab = st.segmented_control(
+    "Operator source",
     options=list(_OP_MODE_MAP.keys()),
-    default_value="Existing Operator",
+    default="Existing Operator",
     key="geo_operator_mode_tabs",
+    label_visibility="collapsed",
 )
 operator_mode = _OP_MODE_MAP.get(_op_mode_tab, "Select existing")
 
@@ -444,10 +449,12 @@ if has_operator:
     _LOC_MODE_REVERSE = {v: k for k, v in _LOC_MODE_MAP.items()}
     _saved_templates = db.get_location_templates()
     _loc_default = "Radius Search"
-    _loc_mode_tab = ui.tabs(
+    _loc_mode_tab = st.segmented_control(
+        "Location mode",
         options=list(_LOC_MODE_MAP.keys()),
-        default_value=_loc_default,
+        default=_loc_default,
         key="geo_location_mode_tabs",
+        label_visibility="collapsed",
     )
     location_mode = _LOC_MODE_MAP.get(_loc_mode_tab, "radius")
 
@@ -471,9 +478,9 @@ if has_operator:
                     label_visibility="collapsed",
                 )
             with _template_col2:
-                _delete_template = ui.button(text="Delete", variant="destructive", key="geo_delete_template_btn")
+                _delete_template = destructive_button("Delete", key="geo_delete_template_btn")
             with _template_col3:
-                _rename_template = ui.button(text="Rename", variant="outline", key="geo_rename_template_btn")
+                _rename_template = outline_button("Rename", key="geo_rename_template_btn")
 
             if _delete_template and _selected_template_name:
                 _tmpl = _template_options[_selected_template_name]
@@ -639,7 +646,7 @@ if has_operator:
                 key="geo_template_name_input",
             )
         with _save_col2:
-            if ui.button(text="Save Template", variant="outline", key="geo_save_template_btn"):
+            if outline_button("Save Template", key="geo_save_template_btn"):
                 if _template_name:
                     db.save_location_template(_template_name, zip_codes, int(radius))
                     st.toast(f"Saved template '{_template_name}'")
@@ -698,8 +705,7 @@ if has_operator:
                 include_person_only = False
 
         with qf_col3:
-            _cur_emp_sw = ui.switch(default_checked=last_filters.get("current_only", True), label="Current Employees Only", key="geo_current_emp_switch")
-            current_only = bool(_cur_emp_sw) if _cur_emp_sw is not None else last_filters.get("current_only", True)
+            current_only = st.toggle("Current Employees Only", value=last_filters.get("current_only", True), key="geo_current_emp_switch")
 
         with qf_col4:
             st.caption("Previously exported companies are filtered in search results (last 180 days).")
@@ -724,10 +730,12 @@ if has_operator:
 
         with phone_col2:
             _PHONE_OP_MAP = {"Any Field (OR)": "or", "All Fields (AND)": "and"}
-            _phone_op_tab = ui.tabs(
+            _phone_op_tab = st.segmented_control(
+                "Logic",
                 options=list(_PHONE_OP_MAP.keys()),
-                default_value="Any Field (OR)",
+                default="Any Field (OR)",
                 key="geo_phone_operator_tabs",
+                label_visibility="collapsed",
             )
             required_fields_operator = _PHONE_OP_MAP.get(_phone_op_tab, "or")
 
@@ -761,11 +769,11 @@ if has_operator:
 
         col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
-            if ui.button(text="All", variant="secondary", key="sic_all_btn"):
+            if st.button("All", key="sic_all_btn"):
                 st.session_state.geo_selected_sics = list(sic_display.keys())
                 st.rerun()
         with col2:
-            if ui.button(text="None", variant="secondary", key="sic_none_btn"):
+            if st.button("None", key="sic_none_btn"):
                 st.session_state.geo_selected_sics = []
                 st.rerun()
 
@@ -928,7 +936,7 @@ if has_operator:
 
     with search_col2:
         if st.session_state.geo_preview_contacts or st.session_state.geo_search_executed:
-            if ui.button(text="Clear / Reset", variant="destructive", key="geo_reset_btn"):
+            if destructive_button("Clear / Reset", key="geo_reset_btn"):
                 # Cancel any running search thread
                 existing_job = st.session_state.get("geo_search_job")
                 if existing_job and not existing_job.done.is_set():
@@ -1402,14 +1410,14 @@ if (
     bulk_col1, bulk_col2, bulk_col3 = st.columns(3)
 
     with bulk_col1:
-        if ui.button(text="Select all best", variant="secondary", key="geo_select_all_btn"):
+        if st.button("Select all best", key="geo_select_all_btn"):
             for company_id, data in contacts_by_company.items():
                 if data["contacts"]:
                     st.session_state.geo_selected_contacts[company_id] = data["contacts"][0]
             st.rerun()
 
     with bulk_col2:
-        if ui.button(text="Skip all", variant="secondary", key="geo_skip_all_btn"):
+        if st.button("Skip all", key="geo_skip_all_btn"):
             st.session_state.geo_selected_contacts = {}
             st.rerun()
 
@@ -1799,7 +1807,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
     # Option to go back and revise (Manual mode)
     if st.session_state.geo_mode == "manual":
         st.markdown("---")
-        if ui.button(text="Back to Contact Selection", variant="outline", key="geo_back_btn"):
+        if outline_button("Back to Contact Selection", key="geo_back_btn"):
             st.session_state.geo_selection_confirmed = False
             st.session_state.geo_enrichment_done = False
             st.session_state.geo_enriched_contacts = None

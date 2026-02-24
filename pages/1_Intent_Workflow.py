@@ -10,7 +10,6 @@ import json
 import logging
 
 import streamlit as st
-import streamlit_shadcn_ui as ui
 
 logger = logging.getLogger(__name__)
 import pandas as pd
@@ -62,6 +61,8 @@ from ui_components import (
     workflow_summary_strip,
     last_run_indicator,
     format_contact_label,
+    destructive_button,
+    outline_button,
     COLORS,
     FONT_SIZES,
     SPACING,
@@ -175,12 +176,15 @@ mode_col1, mode_col2, mode_col3 = st.columns([1, 2, 1])
 with mode_col1:
     _MODE_MAP = {"Autopilot": "autopilot", "Manual Review": "manual"}
     _MODE_REVERSE = {v: k for k, v in _MODE_MAP.items()}
-    _mode_tab = ui.tabs(
+    _mode_tab = st.segmented_control(
+        "Mode",
         options=list(_MODE_MAP.keys()),
-        default_value=_MODE_REVERSE.get(st.session_state.intent_mode, "Autopilot"),
+        default=_MODE_REVERSE.get(st.session_state.intent_mode, "Autopilot"),
         key="intent_mode_tabs",
+        label_visibility="collapsed",
     )
-    st.session_state.intent_mode = _MODE_MAP.get(_mode_tab, st.session_state.intent_mode)
+    if _mode_tab is not None:
+        st.session_state.intent_mode = _MODE_MAP.get(_mode_tab, st.session_state.intent_mode)
 
 with mode_col2:
     if st.session_state.intent_mode == "autopilot":
@@ -189,8 +193,7 @@ with mode_col2:
         st.info("**Manual**: Search → Select companies → Review contacts → Export", icon="👤")
 
 with mode_col3:
-    _test_sw = ui.switch(default_checked=st.session_state.intent_test_mode, label="Test Mode", key="intent_test_mode_switch")
-    st.session_state.intent_test_mode = bool(_test_sw) if _test_sw is not None else st.session_state.intent_test_mode
+    st.session_state.intent_test_mode = st.toggle("Test Mode", value=st.session_state.intent_test_mode, key="intent_test_mode_switch")
     if st.session_state.intent_test_mode:
         st.caption("⚠️ Using mock data")
 
@@ -396,7 +399,7 @@ else:
     # Reset button
     if st.session_state.intent_search_executed:
         with target_col3:
-            if ui.button(text="Reset", variant="destructive", key="intent_reset_btn"):
+            if destructive_button("Reset", key="intent_reset_btn"):
                 # Cancel any running search thread
                 existing_job = st.session_state.get("intent_search_job")
                 if existing_job and not existing_job.done.is_set():
@@ -730,7 +733,7 @@ if st.session_state.intent_search_executed and st.session_state.intent_companies
             st.caption(" · ".join(_indicator_parts))
         if st.session_state.get("_intent_from_cache"):
             with _refresh_col:
-                if ui.button(text="Refresh", variant="outline", key="intent_cache_refresh_btn"):
+                if outline_button("Refresh", key="intent_cache_refresh_btn"):
                     st.session_state["_intent_force_refresh"] = True
                     # Reset search state so search_clicked can re-trigger
                     st.session_state.intent_companies = None
@@ -858,7 +861,7 @@ if (
         # Bulk actions
         bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns([1, 1, 1, 1])
         with bulk_col1:
-            if ui.button(text=f"Select Top {target_companies}", variant="secondary", key="intent_select_top_btn"):
+            if st.button(f"Select Top {target_companies}", key="intent_select_top_btn"):
                 auto = {}
                 for lead in companies[:target_companies]:
                     cid = str(lead.get("companyId", ""))
@@ -867,7 +870,7 @@ if (
                 st.session_state.intent_selected_companies = auto
                 st.rerun()
         with bulk_col2:
-            if ui.button(text="Select All Filtered", variant="secondary", key="intent_select_all_btn"):
+            if st.button("Select All Filtered", key="intent_select_all_btn"):
                 auto = {}
                 for d in display_data:
                     cid = d["_companyId"]
@@ -878,7 +881,7 @@ if (
                 st.session_state.intent_selected_companies = auto
                 st.rerun()
         with bulk_col3:
-            if ui.button(text="Clear", variant="destructive", key="intent_clear_btn"):
+            if destructive_button("Clear", key="intent_clear_btn"):
                 st.session_state.intent_selected_companies = {}
                 st.rerun()
 
@@ -1127,13 +1130,13 @@ if (
         st.markdown("")
         bulk_col1, bulk_col2, bulk_col3 = st.columns(3)
         with bulk_col1:
-            if ui.button(text="Select all best", variant="secondary", key="intent_select_all_btn"):
+            if st.button("Select all best", key="intent_select_all_contacts_btn"):
                 for cid, data in contacts_by_company.items():
                     if data["contacts"]:
                         st.session_state.intent_selected_contacts[cid] = data["contacts"][0]
                 st.rerun()
         with bulk_col2:
-            if ui.button(text="Skip all", variant="secondary", key="intent_skip_all_btn"):
+            if st.button("Skip all", key="intent_skip_all_btn"):
                 st.session_state.intent_selected_contacts = {}
                 st.rerun()
         with bulk_col3:
@@ -1171,11 +1174,11 @@ if (
                 st.button("Enrich (0 contacts)", disabled=True, use_container_width=True)
             elif st.session_state.intent_test_mode:
                 # Test mode: skip dialog, go directly
-                if ui.button(text=f"Enrich ({selected_contact_count} contacts)", variant="default", key="intent_enrich_test_btn"):
+                if st.button(f"Enrich ({selected_contact_count} contacts)", type="primary", key="intent_enrich_test_btn"):
                     st.session_state.intent_enrich_clicked = True
                     st.rerun()
             else:
-                if ui.button(text=f"Enrich ({selected_contact_count} contacts)", variant="default", key="intent_enrich_btn"):
+                if st.button(f"Enrich ({selected_contact_count} contacts)", type="primary", key="intent_enrich_btn"):
                     remaining = budget["remaining"] if budget["has_cap"] else None
                     confirm_intent_enrich(selected_contact_count, remaining)
         with enrich_col2:
@@ -1485,7 +1488,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
     # Back button (manual mode)
     if st.session_state.intent_mode == "manual":
         st.markdown("---")
-        if ui.button(text="Back to Contact Selection", variant="outline", key="intent_back_btn"):
+        if outline_button("Back to Contact Selection", key="intent_back_btn"):
             st.session_state.intent_enrichment_done = False
             st.session_state.intent_enriched_contacts = None
             st.session_state.intent_enrich_clicked = False

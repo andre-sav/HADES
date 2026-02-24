@@ -246,7 +246,6 @@ streamlit==1.54.0
     #   streamlit-image-coordinates
     #   streamlit-keyup
     #   streamlit-notify
-    #   streamlit-shadcn-ui
     #   streamlit-toggle-switch
     #   streamlit-vertical-slider
 streamlit-avatar==0.1.3
@@ -258,9 +257,7 @@ streamlit-card==1.0.2
 streamlit-embedcode==0.1.2
     # via streamlit-extras
 streamlit-extras==0.7.8
-    # via
-    #   markdownlit
-    #   streamlit-shadcn-ui
+    # via markdownlit
 streamlit-faker==0.0.4
     # via streamlit-extras
 streamlit-image-coordinates==0.4.0
@@ -269,8 +266,6 @@ streamlit-keyup==0.3.0
     # via streamlit-extras
 streamlit-notify==0.3.1
     # via streamlit-extras
-streamlit-shadcn-ui==0.1.19
-    # via -r /Users/boss/Projects/HADES/requirements.txt
 streamlit-toggle-switch==1.0.2
     # via streamlit-extras
 streamlit-vertical-slider==2.5.5

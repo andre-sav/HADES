@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 
 # Mock streamlit before importing
 sys.modules["streamlit"] = MagicMock()
-sys.modules["streamlit_shadcn_ui"] = MagicMock()
 
 # Import the real time_ago from utils (tests the actual implementation)
 from utils import time_ago
