@@ -437,28 +437,10 @@ def normalize_zip(raw) -> str | None:
 
 
 def get_state_from_zip(zip_code: str) -> str | None:
-    """Get state code from ZIP code.
-
-    Args:
-        zip_code: 5-digit ZIP code
-
-    Returns:
-        2-letter state code or None if not found
-    """
-    if not zip_code:
+    """Get state code from ZIP code."""
+    cleaned = normalize_zip(zip_code)
+    if not cleaned:
         return None
-
-    # Clean: strip whitespace, take digits only for ZIP+4 variants
-    # Handles: "75201", "75201-1234", "75201 1234", "752011234", "0501"
-    cleaned = str(zip_code).strip().split("-")[0].split(" ")[0]
-    if len(cleaned) > 5:
-        # 9-digit ZIP+4 without separator: take first 5
-        cleaned = cleaned[:5]
-    # Pad truncated ZIPs (e.g., "501" → "00501" for Vermont)
-    cleaned = cleaned.zfill(5)
-    if len(cleaned) < 3:
-        return None
-
     prefix = cleaned[:3]
     return ZIP_PREFIX_TO_STATE.get(prefix)
 
