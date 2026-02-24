@@ -791,7 +791,7 @@ class TestMultiRowInsert:
         sql = mock_conn.execute.call_args[0][0]
         assert sql.count("?") == 6  # 2 × 3 rows
         flat = mock_conn.execute.call_args[0][1]
-        assert flat == ["a", 1, "b", 2, "c", 3]
+        assert flat == ("a", 1, "b", 2, "c", 3)
 
     def test_empty_params_list_is_noop(self):
         """Empty params list should not call execute at all."""

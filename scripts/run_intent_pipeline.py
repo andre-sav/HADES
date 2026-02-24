@@ -406,8 +406,8 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
     except PipelineError as e:
         db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, e.user_message)
         raise
-    except Exception:
-        db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, "Unexpected pipeline error")
+    except Exception as e:
+        db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, f"Unexpected error: {type(e).__name__}: {e}")
         raise
 
 

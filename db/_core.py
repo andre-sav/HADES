@@ -113,7 +113,7 @@ class ConnectionMixin:
             for i in range(0, len(params_list), batch_size):
                 batch = params_list[i:i + batch_size]
                 multi_query = prefix + ", ".join([row_placeholder] * len(batch))
-                flat_params = [p for row in batch for p in row]
+                flat_params = tuple(p for row in batch for p in row)
                 self.connection.execute(multi_query, flat_params)
             self.connection.commit()
         except Exception as e:
@@ -127,7 +127,7 @@ class ConnectionMixin:
                 for i in range(0, len(params_list), batch_size):
                     batch = params_list[i:i + batch_size]
                     multi_query = prefix + ", ".join([row_placeholder] * len(batch))
-                    flat_params = [p for row in batch for p in row]
+                    flat_params = tuple(p for row in batch for p in row)
                     conn.execute(multi_query, flat_params)
                 conn.commit()
                 return
