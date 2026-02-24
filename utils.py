@@ -416,6 +416,26 @@ def time_ago(iso_str: str | None) -> str:
         return "Unknown"
 
 
+def normalize_zip(raw) -> str | None:
+    """Normalize a ZIP code to 5-digit string.
+
+    Handles ZIP+4 (hyphen, space, no separator), leading-zero padding,
+    Excel backtick/equals formatting, integer input, and whitespace.
+
+    Returns:
+        5-digit ZIP string, or None if input is empty/invalid.
+    """
+    if raw is None:
+        return None
+    digits = re.sub(r"[^0-9]", "", str(raw))
+    if len(digits) < 3:
+        return None
+    # Take first 5 digits (handles ZIP+4 variants)
+    digits = digits[:5]
+    # Pad with leading zeros (handles 4-digit CT/NJ/MA ZIPs)
+    return digits.zfill(5)
+
+
 def get_state_from_zip(zip_code: str) -> str | None:
     """Get state code from ZIP code.
 

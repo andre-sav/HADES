@@ -24,6 +24,7 @@ from utils import (
     get_default_phone_fields,
     get_default_target_contacts,
     get_default_radius,
+    normalize_zip,
     get_state_from_zip,
     remove_phone_extension,
     normalize_phone,
@@ -307,6 +308,53 @@ class TestVanillaSoftColumns:
     def test_column_count(self):
         """Test expected number of columns."""
         assert len(VANILLASOFT_COLUMNS) == 31
+
+
+class TestNormalizeZip:
+    """Tests for centralized ZIP code normalization."""
+
+    def test_standard_5_digit(self):
+        assert normalize_zip("75201") == "75201"
+
+    def test_zip_plus4_hyphen(self):
+        assert normalize_zip("75201-1234") == "75201"
+
+    def test_zip_plus4_space(self):
+        assert normalize_zip("75201 1234") == "75201"
+
+    def test_9_digit_no_separator(self):
+        assert normalize_zip("752011234") == "75201"
+
+    def test_4_digit_padded(self):
+        assert normalize_zip("6101") == "06101"
+
+    def test_3_digit_padded(self):
+        assert normalize_zip("501") == "00501"
+
+    def test_backtick_excel_format(self):
+        assert normalize_zip("`06101") == "06101"
+
+    def test_excel_equals_format(self):
+        assert normalize_zip("='06101'") == "06101"
+
+    def test_whitespace(self):
+        assert normalize_zip("  75201  ") == "75201"
+
+    def test_integer_input(self):
+        assert normalize_zip(6101) == "06101"
+
+    def test_none_returns_none(self):
+        assert normalize_zip(None) is None
+
+    def test_empty_returns_none(self):
+        assert normalize_zip("") is None
+
+    def test_non_numeric_returns_none(self):
+        assert normalize_zip("ABCDE") is None
+
+    def test_too_short_returns_none(self):
+        assert normalize_zip("1") is None
+        assert normalize_zip("12") is None
 
 
 class TestGetStateFromZip:
