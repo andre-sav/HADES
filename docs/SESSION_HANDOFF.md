@@ -1,7 +1,64 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-23
-**Status:** All 4 epics implemented (18 stories complete). 704 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37).
+**Date:** 2026-02-24
+**Status:** All 4 epics implemented (18 stories complete). 727 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38).
+
+## Session Summary (2026-02-24, Session 38)
+
+### What Was Done
+
+Closed 2 beads (HADES-5um, HADES-nw6). Added 20 new tests (727 total).
+
+**HADES-5um: Actionable Guidance for Stale Intent Results**
+- Added `compute_stale_summary()` and `build_stale_guidance()` to `scoring.py`
+- When all intent results are stale (>14 days), replaces generic warning with contextual guidance: age distribution, unused topic suggestions, missing signal strengths, barely-stale re-check note
+- Integrated in Intent Workflow (both cache-hit and cache-miss paths), Automation dry-run preview, and headless pipeline summary
+- Fixed cache-hit bug where `_intent_api_response_summary` was never set (stale warning silently failed)
+- Code review fixes: guard against empty summary input, clear stale state between searches
+- Design critique: separated diagnosis (st.warning headline) from guidance (styled block with design system tokens — warning accent border, "Try next" header, arrow bullets)
+
+**HADES-nw6: Centralize ZIP Code Normalization**
+- Added canonical `normalize_zip()` to `utils.py` (regex: strip non-digits, take first 5, zero-pad)
+- Refactored `get_state_from_zip()` to delegate (replaced 18 lines of inline cleaning)
+- Made `enrich_locatings.clean_zip()` a thin wrapper (returns "" instead of None for backward compat)
+- Deleted duplicate `scripts/import_historical.normalize_zip()`, callers import from utils
+- `zoho_sync.parse_zip()` left as-is (extraction, not normalization)
+
+### Test Count
+727 tests passing (+23 from session 37: 6 stale summary + 14 normalize_zip + 3 pre-existing)
+
+### Key Files Modified
+```
+scoring.py                      — compute_stale_summary, build_stale_guidance, STALE_THRESHOLD_DAYS
+utils.py                        — normalize_zip(), get_state_from_zip refactored
+pages/1_Intent_Workflow.py      — stale guidance rendering, cache-hit bug fix
+pages/10_Automation.py          — stale guidance in dry-run preview
+scripts/run_intent_pipeline.py  — stale_summary in pipeline summary dict
+enrich_locatings.py             — clean_zip delegates to normalize_zip
+scripts/import_historical.py    — deleted normalize_zip, imports from utils
+tests/test_scoring.py           — TestStaleSummary (6 tests)
+tests/test_utils.py             — TestNormalizeZip (14 tests)
+tests/test_import_historical.py — updated imports
+docs/plans/2026-02-24-centralize-zip-normalization.md — design plan (untracked)
+```
+
+### Uncommitted Changes
+None. All code committed and pushed.
+
+Untracked (pre-existing): `docs/ux-review-session26.md`, `ux-review/`
+Untracked (new): `docs/plans/2026-02-24-centralize-zip-normalization.md`
+
+### Known Issues
+- Chrome MCP extension disconnects frequently — browser UI testing not possible
+- All current "Vending Machines" High intent signals are stale (>14 days)
+- HADES-iic (Zoho CRM dedup) still needs user clarification on CRM workflow
+
+### What Needs Doing Next Session
+1. **HADES-dgr** [P4] — Show budget remaining in Run Now confirmation dialog
+2. **HADES-iic** [P4] — Add Zoho CRM dedup check at export time
+3. Live test stale guidance — run Intent Workflow with "Vending Machines" only + "High" only to verify guidance renders
+
+---
 
 ## Session Summary (2026-02-23, Session 37)
 
