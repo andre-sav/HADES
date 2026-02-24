@@ -207,16 +207,111 @@ labeled_divider("Run Now")
 topics = auto_config.get("topics", [])
 target = auto_config.get("target_companies", "?")
 
-now_col1, now_col2 = st.columns([5, 2])
+now_col1, now_col2, now_col3 = st.columns([5, 1, 1])
 with now_col1:
     st.markdown(
         f"Search **{', '.join(topics)}** intent signals, select top **{target}** "
         f"companies, find contacts, enrich, and email CSV."
     )
 with now_col2:
+    dry_run = st.button(
+        "Dry Run", use_container_width=True, key="auto_dry_run",
+    )
+with now_col3:
     run_now = st.button(
         "Run Now", type="primary", use_container_width=True, key="auto_run_now",
     )
+
+# Execute dry run
+if dry_run:
+    try:
+        with st.spinner("Running preview..."):
+            from scripts.run_intent_pipeline import run_pipeline
+            from scripts._credentials import load_credentials
+
+            creds = load_credentials()
+            result = run_pipeline(auto_config, creds, dry_run=True, db=db)
+
+            if result["success"]:
+                st.session_state["dry_run_result"] = result["summary"]
+            else:
+                st.error(f"Preview failed: {result.get('error', 'Unknown error')}")
+    except Exception as e:
+        logger.error(f"Dry run error: {e}")
+        st.error("Preview failed. Please try again or check the logs.")
+    st.rerun()
+
+# Render dry-run preview
+if "dry_run_result" in st.session_state:
+    preview = st.session_state["dry_run_result"]
+
+    st.markdown("")
+    st.markdown(
+        f'<div style="background:{COLORS["bg_secondary"]};border:1px solid {COLORS["border"]};'
+        f'border-radius:10px;padding:{SPACING["md"]};">',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("**Preview Results**")
+
+    p1, p2, p3, p4 = st.columns(4)
+    with p1:
+        metric_card("Intent Results", preview.get("intent_results", 0))
+    with p2:
+        metric_card("Scored (non-stale)", preview.get("scored_results", 0))
+    with p3:
+        metric_card("After Dedup", preview.get("scored_results", 0) - preview.get("dedup_filtered", 0))
+    with p4:
+        metric_card("Would Select", preview.get("companies_selected", 0))
+
+    # Estimated credits
+    est_credits = preview.get("companies_selected", 0)
+    remaining = weekly_cap - weekly_used
+    if est_credits > 0:
+        credit_color = COLORS["error_light"] if est_credits > remaining else COLORS["text_muted"]
+        st.markdown(
+            f'<div style="color:{credit_color};font-size:{FONT_SIZES["sm"]};margin-top:{SPACING["xs"]};">'
+            f'Estimated credits: ~{est_credits} of {remaining:,} remaining'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Top companies table
+    top_cos = preview.get("top_companies", [])
+    if top_cos:
+        st.markdown(f"**Top {len(top_cos)} Companies**")
+        header = (
+            f'<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:{SPACING["xs"]};'
+            f'padding:{SPACING["xs"]} 0;border-bottom:1px solid {COLORS["border"]};'
+            f'color:{COLORS["text_muted"]};font-size:{FONT_SIZES["xs"]};">'
+            f'<div>Company</div><div>Score</div><div>Topic</div><div>Strength</div></div>'
+        )
+        rows = "".join(
+            f'<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:{SPACING["xs"]};'
+            f'padding:{SPACING["xs"]} 0;border-bottom:1px solid {COLORS["border"]}40;'
+            f'font-size:{FONT_SIZES["sm"]};">'
+            f'<div style="color:{COLORS["text_primary"]};">{html.escape(co.get("companyName", ""))}</div>'
+            f'<div style="color:{COLORS["text_primary"]};font-family:\'IBM Plex Mono\',monospace;">'
+            f'{co.get("_score", 0)}</div>'
+            f'<div style="color:{COLORS["text_muted"]};">{html.escape(co.get("intentTopic", ""))}</div>'
+            f'<div>{status_badge("success" if co.get("intentStrength") == "High" else "warning", co.get("intentStrength", ""))}</div>'
+            f'</div>'
+            for co in top_cos[:5]
+        )
+        st.markdown(header + rows, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Action buttons
+    act1, act2, _ = st.columns([1, 1, 4])
+    with act1:
+        if st.button("Run Full Pipeline", type="primary", key="dry_run_proceed"):
+            del st.session_state["dry_run_result"]
+            confirm_run_now_dialog(topics, target)
+    with act2:
+        if st.button("Dismiss", key="dry_run_dismiss"):
+            del st.session_state["dry_run_result"]
+            st.rerun()
 
 # Open dialog on button click
 if run_now:
