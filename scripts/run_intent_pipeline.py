@@ -7,7 +7,7 @@ search → enrich → export → email.  Reuses all existing HADES modules direc
 
 Usage:
     python scripts/run_intent_pipeline.py              # Full run + email
-    python scripts/run_intent_pipeline.py --dry-run    # Validate config, no API calls
+    python scripts/run_intent_pipeline.py --dry-run    # Intent search + scoring preview, no credits
     python scripts/run_intent_pipeline.py --no-email   # Run pipeline, skip email
     python scripts/run_intent_pipeline.py --verbose    # Debug logging
 
@@ -130,7 +130,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
                 "companyName": lead.get("companyName", ""),
                 "companyId": str(lead.get("companyId", "")),
                 "_score": lead.get("_score", 0),
-                "_priority": lead.get("_priority", ""),
+                "_priority": get_priority_label(lead.get("_score", 0)),
                 "intentTopic": lead.get("intentTopic", ""),
                 "intentStrength": lead.get("intentStrength", ""),
             }
@@ -530,7 +530,7 @@ def send_email(msg: MIMEMultipart, creds: dict) -> None:
 def main():
     parser = argparse.ArgumentParser(description="HADES Automated Intent Pipeline")
     parser.add_argument("--dry-run", action="store_true",
-                        help="Validate config and credentials, no API calls")
+                        help="Run intent search + scoring preview, no credits consumed")
     parser.add_argument("--no-email", action="store_true",
                         help="Run pipeline but skip email delivery")
     parser.add_argument("--verbose", action="store_true",
