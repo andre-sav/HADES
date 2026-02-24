@@ -80,10 +80,63 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         "credits_used": 0,
         "expansions": [],
         "top_leads": [],
+        "top_companies": [],
     }
 
     if dry_run:
-        logger.info("Dry run — validating config and module imports only")
+        logger.info("Dry run — running intent search + scoring (no credits consumed)")
+
+        client = ZoomInfoClient(
+            client_id=creds["ZOOMINFO_CLIENT_ID"],
+            client_secret=creds["ZOOMINFO_CLIENT_SECRET"],
+        )
+
+        # Step 1: Intent Search (free)
+        intent_params = IntentQueryParams(
+            topics=config["topics"],
+            signal_strengths=config["signal_strengths"],
+            sic_codes=get_sic_codes(),
+            employee_min=get_employee_minimum(),
+        )
+        intent_results = client.search_intent_all_pages(intent_params, max_pages=10)
+        summary["intent_results"] = len(intent_results)
+
+        if not intent_results:
+            return {"success": True, "csv_content": None, "csv_filename": None,
+                    "batch_id": None, "summary": summary, "error": None}
+
+        # Step 2: Score + dedup
+        scored_leads = score_intent_leads(intent_results)
+        scored_leads, _ = dedupe_leads(scored_leads)
+        summary["scored_results"] = len(scored_leads)
+
+        # Cross-session dedup
+        if db is not None:
+            dedup_days = config.get("dedup_days_back", 180)
+            lookup = get_previously_exported(db, days_back=dedup_days)
+            new_leads, filtered_leads = filter_previously_exported(scored_leads, lookup)
+            summary["dedup_filtered"] = len(filtered_leads)
+        else:
+            new_leads = scored_leads
+
+        # Select top N
+        target = config["target_companies"]
+        selected = new_leads[:target]
+        summary["companies_selected"] = len(selected)
+
+        # Top companies for preview
+        summary["top_companies"] = [
+            {
+                "companyName": lead.get("companyName", ""),
+                "companyId": str(lead.get("companyId", "")),
+                "_score": lead.get("_score", 0),
+                "_priority": lead.get("_priority", ""),
+                "intentTopic": lead.get("intentTopic", ""),
+                "intentStrength": lead.get("intentStrength", ""),
+            }
+            for lead in selected
+        ]
+
         return {"success": True, "csv_content": None, "csv_filename": None,
                 "batch_id": None, "summary": summary, "error": None}
 

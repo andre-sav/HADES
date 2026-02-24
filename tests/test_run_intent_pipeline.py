@@ -161,16 +161,86 @@ class TestCredentialLoading:
 # ---------------------------------------------------------------------------
 
 class TestDryRun:
-    """Dry-run should validate config without making API calls."""
+    """Dry-run should execute intent search + scoring but skip contacts/export."""
 
-    def test_dry_run_no_api_calls(self):
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_dry_run_no_api_calls(self, MockClient):
         config = _make_config()
         creds = _make_creds()
+
+        client = MockClient.return_value
+        client.search_intent_all_pages.return_value = []
+
         result = run_pipeline(config, creds, dry_run=True)
 
         assert result["success"] is True
         assert result["csv_content"] is None
         assert result["batch_id"] is None
+
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_dry_run_returns_real_counts(self, MockClient):
+        """Dry run should execute intent search + scoring and return real numbers."""
+        config = _make_config(target_companies=2)
+        creds = _make_creds()
+
+        client = MockClient.return_value
+        client.search_intent_all_pages.return_value = [
+            _make_intent_lead("c1", "Acme Corp"),
+            _make_intent_lead("c2", "Beta Inc"),
+            _make_intent_lead("c3", "Gamma LLC"),
+        ]
+
+        result = run_pipeline(config, creds, dry_run=True)
+
+        assert result["success"] is True
+        assert result["csv_content"] is None
+        assert result["batch_id"] is None
+        # Real counts from intent search + scoring
+        assert result["summary"]["intent_results"] == 3
+        assert result["summary"]["scored_results"] > 0
+        assert result["summary"]["companies_selected"] <= 2  # capped at target
+        # Top companies populated
+        assert isinstance(result["summary"]["top_companies"], list)
+        assert len(result["summary"]["top_companies"]) > 0
+        assert "companyName" in result["summary"]["top_companies"][0]
+
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_dry_run_does_not_call_contacts_or_enrich(self, MockClient):
+        """Dry run must NOT call contact search, enrich, or export."""
+        config = _make_config()
+        creds = _make_creds()
+
+        client = MockClient.return_value
+        client.search_intent_all_pages.return_value = [
+            _make_intent_lead("c1", "Acme Corp"),
+        ]
+
+        run_pipeline(config, creds, dry_run=True)
+
+        # Intent search SHOULD be called
+        client.search_intent_all_pages.assert_called_once()
+        # These should NOT be called
+        client.search_contacts_all_pages.assert_not_called()
+        client.enrich_contacts_batch.assert_not_called()
+
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_dry_run_does_not_log_pipeline_run(self, MockClient):
+        """Dry run must NOT create a pipeline run record in the DB."""
+        config = _make_config()
+        creds = _make_creds()
+
+        client = MockClient.return_value
+        client.search_intent_all_pages.return_value = [
+            _make_intent_lead("c1", "Acme Corp"),
+        ]
+
+        # Provide a mock DB to verify it's not called
+        mock_db = MagicMock()
+        result = run_pipeline(config, creds, dry_run=True, db=mock_db)
+
+        assert result["success"] is True
+        mock_db.start_pipeline_run.assert_not_called()
+        mock_db.complete_pipeline_run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
