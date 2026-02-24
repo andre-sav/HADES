@@ -423,6 +423,7 @@ if search_clicked:
         # Cache hit — use cached results directly
         st.session_state["_intent_from_cache"] = True
         st.session_state["_intent_api_response_summary"] = {"total_results": len(cached_leads)}
+        st.session_state.pop("_intent_stale_summary", None)
         scored = score_intent_leads(cached_leads)
         if not scored:
             st.session_state["_intent_stale_summary"] = compute_stale_summary(cached_leads)
@@ -532,6 +533,7 @@ if search_clicked:
                         leads=leads,
                     )
 
+                    st.session_state.pop("_intent_stale_summary", None)
                     scored = score_intent_leads(leads)
                     if not scored:
                         st.session_state["_intent_stale_summary"] = compute_stale_summary(leads)
@@ -741,8 +743,8 @@ if st.session_state.intent_search_executed and not st.session_state.intent_compa
     if _raw_count > 0:
         _stale_summ = st.session_state.get("_intent_stale_summary", {})
         _qp = st.session_state.get("intent_query_params", {})
-        _used_topics = _qp.get("topics", selected_topics if "selected_topics" in dir() else [])
-        _used_strengths = _qp.get("signal_strengths", signal_strengths if "signal_strengths" in dir() else [])
+        _used_topics = _qp.get("topics", [])
+        _used_strengths = _qp.get("signal_strengths", [])
         _guidance = build_stale_guidance(_stale_summ, _used_topics, _used_strengths)
         _bullets = "\n".join(f"- {g}" for g in _guidance) if _guidance else ""
         st.warning(

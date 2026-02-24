@@ -577,6 +577,9 @@ def build_stale_guidance(
     Returns:
         List of plain-text guidance bullets.
     """
+    if not stale_summary or stale_summary.get("total_count", 0) == 0:
+        return []
+
     lines: list[str] = []
 
     min_age = stale_summary.get("min_age_days", 0)
