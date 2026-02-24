@@ -14,7 +14,10 @@ from ui_components import (
     page_header,
     styled_table,
     empty_state,
+    labeled_divider,
     COLORS,
+    SPACING,
+    FONT_SIZES,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,34 +54,39 @@ except Exception as e:
 def health_indicator(label: str, status: str, detail: str, timestamp: str | None = None):
     """Render a health indicator card with green/yellow/red status."""
     color_map = {
-        "green": COLORS.get("success", "#22c55e"),
-        "yellow": "#eab308",
-        "red": COLORS.get("error", "#ef4444"),
-        "gray": COLORS.get("text_secondary", "#64748b"),
+        "green": COLORS["success"],
+        "yellow": COLORS["warning"],
+        "red": COLORS["error"],
+        "gray": COLORS["text_secondary"],
     }
     dot_color = color_map.get(status, color_map["gray"])
     status_label = {"green": "Healthy", "yellow": "Stale", "red": "Critical", "gray": "Unknown"}.get(status, "Unknown")
 
-    ts_html = f'<span style="color: {COLORS["text_secondary"]}; font-size: 0.8rem;">{timestamp}</span>' if timestamp else ""
+    ts_html = (
+        f'<span style="color:{COLORS["text_secondary"]};font-size:{FONT_SIZES["xs"]};">{timestamp}</span>'
+        if timestamp else ""
+    )
 
     st.markdown(f'''
     <div style="
-        background: {COLORS['bg_secondary']};
-        border: 1px solid {COLORS['border']};
-        border-radius: 8px;
-        padding: 16px;
-        margin-bottom: 8px;
+        background:{COLORS['bg_secondary']};
+        border:1px solid {COLORS['border']};
+        border-radius:var(--radius);
+        padding:{SPACING['md']};
+        margin-bottom:{SPACING['sm']};
+        box-shadow:var(--card-shadow);
+        transition:border-color var(--transition);
     ">
-        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+        <div style="display:flex;align-items:center;gap:{SPACING['sm']};margin-bottom:{SPACING['xs']};">
             <span style="
-                display: inline-block; width: 10px; height: 10px;
-                border-radius: 50%; background: {dot_color};
-                box-shadow: 0 0 6px {dot_color};
+                display:inline-block;width:10px;height:10px;
+                border-radius:50%;background:{dot_color};
+                box-shadow:0 0 6px {dot_color};
             "></span>
-            <strong style="color: {COLORS['text_primary']};">{label}</strong>
-            <span style="color: {COLORS['text_secondary']}; font-size: 0.85rem; margin-left: auto;">{status_label}</span>
+            <strong style="color:{COLORS['text_primary']};">{label}</strong>
+            <span style="color:{COLORS['text_secondary']};font-size:{FONT_SIZES['sm']};margin-left:auto;">{status_label}</span>
         </div>
-        <div style="color: {COLORS['text_secondary']}; font-size: 0.9rem;">
+        <div style="color:{COLORS['text_secondary']};font-size:{FONT_SIZES['sm']};">
             {html.escape(str(detail))} {ts_html}
         </div>
     </div>
@@ -224,8 +232,7 @@ with _h_col2:
 # =============================================================================
 # RECENT ERRORS
 # =============================================================================
-st.markdown("---")
-st.caption("Recent Pipeline Runs")
+labeled_divider("Recent Pipeline Runs")
 
 # Check pipeline_runs for errors
 try:
@@ -299,8 +306,7 @@ except Exception:
 # =============================================================================
 # QUERY HISTORY SUMMARY
 # =============================================================================
-st.markdown("---")
-st.caption("Recent Query Activity")
+labeled_divider("Recent Query Activity")
 
 queries = db.get_recent_queries(limit=5)
 if queries:
@@ -333,8 +339,7 @@ else:
 # =============================================================================
 # ERROR LOG
 # =============================================================================
-st.markdown("---")
-st.subheader("Recent Errors")
+labeled_divider("Recent Errors")
 try:
     _recent_errors = db.get_recent_errors(limit=20)
     if _recent_errors:

@@ -24,8 +24,6 @@ require_auth()
 
 page_header("API Field Discovery", "Query ZoomInfo API to discover available search and enrich field names")
 
-st.markdown("---")
-
 # List of potential lookup endpoints to try
 LOOKUP_ENDPOINTS = [
     "/lookup/inputfields",

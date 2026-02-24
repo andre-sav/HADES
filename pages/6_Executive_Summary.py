@@ -90,19 +90,34 @@ if _exec_active == "Overview":
     _delta_credits = _this_week.total_credits - _prev_week_credits if (_this_week.total_credits + _prev_week_credits) > 0 else None
     _delta_queries = _this_week.total_queries - _prev_week_queries if (_this_week.total_queries + _prev_week_queries) > 0 else None
 
+    def _fmt_delta(val, inverse=False):
+        """Format delta value with sign and color for metric_card."""
+        if val is None:
+            return None, "neutral"
+        prefix = "+" if val > 0 else ""
+        if val > 0:
+            color = "error" if inverse else "success"
+        elif val < 0:
+            color = "success" if inverse else "error"
+        else:
+            color = "neutral"
+        return f"{prefix}{val:,}", color
+
+    _eff = mtd.total_leads / mtd.total_credits if mtd.total_credits > 0 else 0
+
     # KPI cards — scannable at a glance
     _kpi1, _kpi2, _kpi3, _kpi4 = st.columns(4)
     with _kpi1:
-        st.metric("Leads Exported", mtd.total_leads, delta=_delta_leads, help="Month to date")
+        _dl, _dlc = _fmt_delta(_delta_leads)
+        metric_card("Leads Exported", mtd.total_leads, delta=_dl, delta_color=_dlc, help_text="Month to date")
     with _kpi2:
-        st.metric("Credits Used", mtd.total_credits, delta=_delta_credits, delta_color="inverse", help="Month to date")
+        _dc, _dcc = _fmt_delta(_delta_credits, inverse=True)
+        metric_card("Credits Used", mtd.total_credits, delta=_dc, delta_color=_dcc, help_text="Month to date")
     with _kpi3:
-        _eff = mtd.total_leads / mtd.total_credits if mtd.total_credits > 0 else 0
-        st.metric("Efficiency", f"{_eff:.2f}", help="Leads per credit")
+        metric_card("Efficiency", f"{_eff:.2f}", help_text="Leads per credit")
     with _kpi4:
-        st.metric("Queries", mtd.total_queries, delta=_delta_queries, help="Month to date")
-
-    st.page_link("pages/2_Geography_Workflow.py", label="Start Territory Search", icon="📍")
+        _dq, _dqc = _fmt_delta(_delta_queries)
+        metric_card("Queries", mtd.total_queries, delta=_dq, delta_color=_dqc, help_text="Month to date")
 
     st.markdown("")
 

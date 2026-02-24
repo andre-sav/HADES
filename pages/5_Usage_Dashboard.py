@@ -20,6 +20,7 @@ from ui_components import (
     metric_card,
     empty_state,
     labeled_divider,
+    status_badge,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,9 +77,11 @@ page_header(
 # =============================================================================
 # ZOOMINFO API USAGE
 # =============================================================================
+labeled_divider("ZoomInfo API Usage")
+
 col1, col2 = st.columns([3, 1])
 with col1:
-    st.caption("ZoomInfo API Usage")
+    st.markdown("")
 with col2:
     if ui.button(text="Refresh", variant="default", key="usage_fetch_btn"):
         with st.spinner("Fetching usage data from ZoomInfo..."):
@@ -122,7 +125,13 @@ if "zi_usage_data" in st.session_state:
         if _constraint_parts:
             _most_constrained = max(_constraint_parts, key=lambda x: x[1])
             _label_map = {"requestLimit": "API Requests", "recordLimit": "Records", "uniqueIdLimit": "Unique IDs"}
-            st.caption(f"Most constrained: {_label_map.get(_most_constrained[0], _most_constrained[0])} ({_most_constrained[1]:.0f}% used)")
+            _constrained_name = _label_map.get(_most_constrained[0], _most_constrained[0])
+            _constrained_pct = _most_constrained[1]
+            _badge_type = "error" if _constrained_pct > 90 else "warning" if _constrained_pct > 70 else "info"
+            st.markdown(
+                f'Most constrained: {status_badge(_badge_type, f"{_constrained_name} · {_constrained_pct:.0f}%")}',
+                unsafe_allow_html=True,
+            )
 
         col1, col2, col3 = st.columns(3)
 

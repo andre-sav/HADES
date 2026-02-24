@@ -21,6 +21,7 @@ from ui_components import (
     styled_table,
     empty_state,
     labeled_divider,
+    COLORS,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ CONFIG_PATH = Path(__file__).parent.parent / "config" / "icp.yaml"
 # =============================================================================
 page_header("Score Calibration", "Compare current weights to outcome data")
 
-st.info("Review scoring weights and SIC industry scores that determine lead priority. Calibrate based on delivery outcome data to improve targeting over time.")
+st.caption("Review scoring weights and SIC industry scores. Calibrate based on delivery outcome data.")
 
 # =============================================================================
 # TABS
@@ -179,49 +180,47 @@ elif active_tab == "Calibration Report":
     if "cal_selected" not in st.session_state:
         st.session_state.cal_selected = set()
 
-    st.markdown("---")
-    st.caption("SIC Code Calibration")
+    def _render_calibration_item(comp, prefix):
+        """Render a single calibration item with structured layout."""
+        key = f"{prefix}_{comp['key']}"
+        delta_sign = f"+{comp['delta']}" if comp["delta"] > 0 else str(comp["delta"])
+        delta_type = "success" if comp["delta"] > 0 else "error" if comp["delta"] < 0 else "neutral"
+        conf_type = {"High": "success", "Medium": "warning", "Low": "error"}.get(comp["confidence"], "neutral")
+
+        # Description for SIC codes
+        desc = SIC_CODE_DESCRIPTIONS.get(comp["key"], "") if prefix == "sic" else comp["key"]
+        label = f"SIC {comp['key']}" if prefix == "sic" else comp["key"]
+
+        col_check, col_info, col_delta, col_conf = st.columns([1, 8, 3, 2])
+        with col_check:
+            checked = st.checkbox("", key=key, value=key in st.session_state.cal_selected, label_visibility="collapsed")
+        with col_info:
+            st.markdown(f"**{label}** · {desc}" if desc else f"**{label}**")
+            st.caption(f"N={comp['n']} · {comp['rate']*100:.1f}% delivery rate")
+        with col_delta:
+            delta_label = f"{comp['current']} → {comp['suggested']} ({delta_sign})"
+            st.markdown(status_badge(delta_type, delta_label), unsafe_allow_html=True)
+        with col_conf:
+            st.markdown(status_badge(conf_type, comp["confidence"]), unsafe_allow_html=True)
+
+        if checked:
+            st.session_state.cal_selected.add(key)
+        else:
+            st.session_state.cal_selected.discard(key)
+
+    labeled_divider("SIC Code Calibration")
 
     sic_comps = [c for c in comparisons if c["dimension"] == "sic"]
     if sic_comps:
         for comp in sorted(sic_comps, key=lambda c: abs(c["delta"]), reverse=True):
-            delta_color = "🟢" if comp["delta"] > 0 else "🔴" if comp["delta"] < 0 else "⚪"
-            delta_sign = f"+{comp['delta']}" if comp["delta"] > 0 else str(comp["delta"])
-            conf_badge = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}.get(comp["confidence"], "⚪")
+            _render_calibration_item(comp, "sic")
 
-            key = f"sic_{comp['key']}"
-            checked = st.checkbox(
-                f"{delta_color} SIC {comp['key']}: {comp['current']} → {comp['suggested']} ({delta_sign}) "
-                f"· N={comp['n']} · {comp['rate']*100:.1f}% · {conf_badge} {comp['confidence']}",
-                key=key,
-                value=key in st.session_state.cal_selected,
-            )
-            if checked:
-                st.session_state.cal_selected.add(key)
-            else:
-                st.session_state.cal_selected.discard(key)
-
-    st.markdown("---")
-    st.caption("Employee Scale Calibration")
+    labeled_divider("Employee Scale Calibration")
 
     emp_comps = [c for c in comparisons if c["dimension"] == "employee"]
     if emp_comps:
         for comp in emp_comps:
-            delta_color = "🟢" if comp["delta"] > 0 else "🔴" if comp["delta"] < 0 else "⚪"
-            delta_sign = f"+{comp['delta']}" if comp["delta"] > 0 else str(comp["delta"])
-            conf_badge = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}.get(comp["confidence"], "⚪")
-
-            key = f"emp_{comp['key']}"
-            checked = st.checkbox(
-                f"{delta_color} {comp['key']}: {comp['current']} → {comp['suggested']} ({delta_sign}) "
-                f"· N={comp['n']} · {comp['rate']*100:.1f}% · {conf_badge} {comp['confidence']}",
-                key=key,
-                value=key in st.session_state.cal_selected,
-            )
-            if checked:
-                st.session_state.cal_selected.add(key)
-            else:
-                st.session_state.cal_selected.discard(key)
+            _render_calibration_item(comp, "emp")
 
     # Apply button
     st.markdown("---")

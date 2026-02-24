@@ -45,8 +45,6 @@ if "test_search_request" not in st.session_state:
 if "test_params" not in st.session_state:
     st.session_state.test_params = None
 
-st.markdown("---")
-
 # --- Test Configuration ---
 st.subheader("1. Test Configuration")
 

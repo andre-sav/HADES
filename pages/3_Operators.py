@@ -67,8 +67,6 @@ page_header(
     f"{_total_count:,} operators",
 )
 
-st.markdown("---")
-
 
 # =============================================================================
 # ZOHO SYNC
@@ -159,8 +157,6 @@ with st.expander("Sync from Zoho CRM", expanded=False):
                     logger.error(f"Sync failed: {e}")
                     st.error("Sync failed. Please try again.")
 
-st.markdown("---")
-
 
 # =============================================================================
 # SEARCH
@@ -180,7 +176,7 @@ filtered_operators, filtered_total = db.search_operators(query=search_query, lim
 if search_query:
     st.caption(f"Showing {len(filtered_operators)} of {filtered_total:,} matches")
 
-st.markdown("---")
+st.markdown("")
 
 
 # =============================================================================
@@ -243,7 +239,7 @@ if st.session_state.operators_adding:
             st.session_state.operators_adding = False
             st.rerun()
 
-    st.markdown("---")
+    st.markdown("")
 
 
 # =============================================================================
