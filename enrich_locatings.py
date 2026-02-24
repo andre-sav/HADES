@@ -38,19 +38,11 @@ VS_ENRICH_FIELDS = ["Primary SIC", "Primary Line of Business", "Number of Employ
 def clean_zip(raw: str) -> str:
     """Clean a ZIP code: strip non-numeric, pad to 5 digits.
 
-    Handles: backticks, ='061' format, 4-digit ZIPs missing leading zero,
-    9-digit ZIPs (take first 5).
+    Thin wrapper around utils.normalize_zip() — returns "" instead of
+    None for backward compatibility with the enrichment pipeline.
     """
-    if not raw:
-        return ""
-    # Strip everything except digits
-    digits = re.sub(r"[^0-9]", "", raw)
-    if not digits:
-        return ""
-    # Take first 5 digits (handles ZIP+4)
-    digits = digits[:5]
-    # Pad with leading zeros (handles 4-digit CT/NJ/MA ZIPs)
-    return digits.zfill(5)
+    from utils import normalize_zip
+    return normalize_zip(raw) or ""
 
 
 # =============================================================================
