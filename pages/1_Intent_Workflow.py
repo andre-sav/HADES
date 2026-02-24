@@ -30,6 +30,8 @@ from scoring import (
     get_priority_label,
     get_priority_action,
     calculate_age_days,
+    compute_stale_summary,
+    build_stale_guidance,
 )
 from dedup import dedupe_leads
 from cost_tracker import CostTracker
@@ -420,7 +422,10 @@ if search_clicked:
     if cached_leads is not None:
         # Cache hit — use cached results directly
         st.session_state["_intent_from_cache"] = True
+        st.session_state["_intent_api_response_summary"] = {"total_results": len(cached_leads)}
         scored = score_intent_leads(cached_leads)
+        if not scored:
+            st.session_state["_intent_stale_summary"] = compute_stale_summary(cached_leads)
         deduped, removed = dedupe_leads(scored)
 
         for lead in deduped:
@@ -528,6 +533,8 @@ if search_clicked:
                     )
 
                     scored = score_intent_leads(leads)
+                    if not scored:
+                        st.session_state["_intent_stale_summary"] = compute_stale_summary(leads)
                     deduped, removed = dedupe_leads(scored)
 
                     for lead in deduped:
@@ -732,9 +739,15 @@ if st.session_state.intent_search_executed and not st.session_state.intent_compa
     _resp = st.session_state.get("_intent_api_response_summary", {})
     _raw_count = _resp.get("total_results", 0)
     if _raw_count > 0:
+        _stale_summ = st.session_state.get("_intent_stale_summary", {})
+        _qp = st.session_state.get("intent_query_params", {})
+        _used_topics = _qp.get("topics", selected_topics if "selected_topics" in dir() else [])
+        _used_strengths = _qp.get("signal_strengths", signal_strengths if "signal_strengths" in dir() else [])
+        _guidance = build_stale_guidance(_stale_summ, _used_topics, _used_strengths)
+        _bullets = "\n".join(f"- {g}" for g in _guidance) if _guidance else ""
         st.warning(
             f"All {_raw_count} intent results are stale (>14 days old). "
-            "No companies survived freshness scoring. Try adding more topics or lowering signal strength."
+            f"No companies survived freshness scoring.\n\n{_bullets}"
         )
     elif not st.session_state.get("_intent_api_error"):
         st.info("No companies found matching criteria.")

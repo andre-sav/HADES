@@ -3,6 +3,7 @@ Lead scoring engine for Intent and Geography workflows.
 """
 
 from datetime import datetime, date
+from statistics import median
 
 from utils import (
     get_scoring_weights,
@@ -13,6 +14,7 @@ from utils import (
     get_proximity_score,
     get_authority_score,
     get_authority_title_keywords,
+    get_intent_topics,
 )
 
 
@@ -521,3 +523,87 @@ def generate_score_summary(lead: dict, workflow_type: str) -> str:
         return " · ".join(p for p in parts if p)
 
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Stale-result guidance helpers
+# ---------------------------------------------------------------------------
+
+STALE_THRESHOLD_DAYS = 14
+
+
+def compute_stale_summary(leads: list[dict]) -> dict:
+    """Compute age distribution for intent leads.
+
+    Args:
+        leads: Raw intent leads (pre-scoring) with ``intentDate`` fields.
+
+    Returns:
+        Dict with min/max/median age in days and stale/total counts.
+    """
+    if not leads:
+        return {
+            "min_age_days": 0,
+            "max_age_days": 0,
+            "median_age_days": 0,
+            "total_count": 0,
+            "stale_count": 0,
+        }
+
+    ages = [calculate_age_days(lead.get("intentDate")) for lead in leads]
+    stale = [a for a in ages if a > STALE_THRESHOLD_DAYS]
+
+    return {
+        "min_age_days": min(ages),
+        "max_age_days": max(ages),
+        "median_age_days": int(median(ages)),
+        "total_count": len(ages),
+        "stale_count": len(stale),
+    }
+
+
+def build_stale_guidance(
+    stale_summary: dict,
+    used_topics: list[str],
+    used_strengths: list[str],
+) -> list[str]:
+    """Build actionable guidance strings for all-stale intent results.
+
+    Args:
+        stale_summary: Output of :func:`compute_stale_summary`.
+        used_topics: Topics the user searched with.
+        used_strengths: Signal strengths the user searched with (e.g. ["High"]).
+
+    Returns:
+        List of plain-text guidance bullets.
+    """
+    lines: list[str] = []
+
+    min_age = stale_summary.get("min_age_days", 0)
+    max_age = stale_summary.get("max_age_days", 0)
+
+    # 1. Age context
+    if min_age == max_age:
+        lines.append(f"All signals are {min_age} days old.")
+    else:
+        lines.append(f"Newest signal: {min_age} days ago. Oldest: {max_age} days ago.")
+
+    # 2. Topic suggestion — offer unused topics when user searched fewer than 3
+    if len(used_topics) < 3:
+        all_topics = get_intent_topics()
+        available = (all_topics.get("primary", []) + all_topics.get("expansion", []))
+        unused = [t for t in available if t not in used_topics]
+        if unused:
+            lines.append(f"Add more topics: {', '.join(unused[:3])}")
+
+    # 3. Strength suggestion
+    all_strengths = {"High", "Medium", "Low"}
+    missing_strengths = sorted(all_strengths - set(used_strengths))
+    if missing_strengths:
+        lines.append(f"Add signal strength: {', '.join(missing_strengths)}")
+
+    # 4. Barely-stale note
+    if min_age <= 17:
+        lines.append("Signals are barely stale \u2014 re-check in a day or two.")
+
+    return lines

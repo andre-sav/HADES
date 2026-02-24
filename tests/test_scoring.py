@@ -16,6 +16,8 @@ from scoring import (
     get_priority_label,
     calculate_age_days,
     _calculate_authority_score,
+    compute_stale_summary,
+    build_stale_guidance,
 )
 
 
@@ -859,3 +861,95 @@ class TestScoreSummary:
         from scoring import generate_score_summary
         result = generate_score_summary({}, "geography")
         assert isinstance(result, str)
+
+
+class TestStaleSummary:
+    """Tests for stale-result summary and guidance helpers."""
+
+    def test_compute_stale_summary_empty(self):
+        """Empty input returns zeroes."""
+        result = compute_stale_summary([])
+        assert result == {
+            "min_age_days": 0,
+            "max_age_days": 0,
+            "median_age_days": 0,
+            "total_count": 0,
+            "stale_count": 0,
+        }
+
+    def test_compute_stale_summary_all_stale(self):
+        """All leads older than 14 days are counted as stale."""
+        leads = [
+            {"intentDate": (date.today() - timedelta(days=18)).isoformat()},
+            {"intentDate": (date.today() - timedelta(days=25)).isoformat()},
+            {"intentDate": (date.today() - timedelta(days=21)).isoformat()},
+        ]
+        result = compute_stale_summary(leads)
+        assert result["min_age_days"] == 18
+        assert result["max_age_days"] == 25
+        assert result["median_age_days"] == 21
+        assert result["total_count"] == 3
+        assert result["stale_count"] == 3
+
+    def test_compute_stale_summary_mixed(self):
+        """Mix of fresh and stale leads."""
+        leads = [
+            {"intentDate": (date.today() - timedelta(days=5)).isoformat()},   # fresh
+            {"intentDate": (date.today() - timedelta(days=20)).isoformat()},  # stale
+            {"intentDate": (date.today() - timedelta(days=10)).isoformat()},  # fresh
+        ]
+        result = compute_stale_summary(leads)
+        assert result["min_age_days"] == 5
+        assert result["max_age_days"] == 20
+        assert result["total_count"] == 3
+        assert result["stale_count"] == 1
+
+    def test_build_guidance_single_topic(self):
+        """With only one topic and High strength, suggests unused topics + Medium/Low."""
+        summary = {
+            "min_age_days": 18,
+            "max_age_days": 25,
+            "median_age_days": 21,
+            "total_count": 50,
+            "stale_count": 50,
+        }
+        guidance = build_stale_guidance(summary, ["Vending Machines"], ["High"])
+        # Should include age context
+        assert any("18" in g and "25" in g for g in guidance)
+        # Should suggest adding topics
+        assert any("Add more topics" in g for g in guidance)
+        # Should suggest adding strengths
+        assert any("Add signal strength" in g for g in guidance)
+        assert any("Medium" in g for g in guidance)
+
+    def test_build_guidance_all_params_used(self):
+        """No expansion suggestions when all topics and strengths used."""
+        summary = {
+            "min_age_days": 20,
+            "max_age_days": 30,
+            "median_age_days": 25,
+            "total_count": 10,
+            "stale_count": 10,
+        }
+        all_topics = ["Vending Machines", "Breakroom Solutions", "Coffee Services", "Water Coolers"]
+        all_strengths = ["High", "Medium", "Low"]
+        guidance = build_stale_guidance(summary, all_topics, all_strengths)
+        # Should still show age line
+        assert any("20" in g for g in guidance)
+        # Should NOT suggest topics (>=3 used)
+        assert not any("Add more topics" in g for g in guidance)
+        # Should NOT suggest strengths (all used)
+        assert not any("Add signal strength" in g for g in guidance)
+
+    def test_build_guidance_barely_stale(self):
+        """Signals at 15-17 days include the re-check message."""
+        summary = {
+            "min_age_days": 15,
+            "max_age_days": 17,
+            "median_age_days": 16,
+            "total_count": 5,
+            "stale_count": 5,
+        }
+        guidance = build_stale_guidance(summary, ["Vending Machines", "Breakroom Solutions"], ["High", "Medium"])
+        assert any("re-check" in g for g in guidance)
+        assert any("barely stale" in g for g in guidance)

@@ -43,7 +43,7 @@ from zoominfo_client import (
     ContactQueryParams,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
-from scoring import score_intent_leads, score_intent_contacts, get_priority_label
+from scoring import score_intent_leads, score_intent_contacts, get_priority_label, compute_stale_summary
 from dedup import dedupe_leads
 from export import export_leads_to_csv
 from export_dedup import get_previously_exported, filter_previously_exported
@@ -109,6 +109,8 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         scored_leads = score_intent_leads(intent_results)
         scored_leads, _ = dedupe_leads(scored_leads)
         summary["scored_results"] = len(scored_leads)
+        if not scored_leads:
+            summary["stale_summary"] = compute_stale_summary(intent_results)
 
         # Cross-session dedup
         if db is not None:
@@ -201,6 +203,8 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         scored_leads = score_intent_leads(intent_results)
         scored_leads, _dedup_removed = dedupe_leads(scored_leads)
         summary["scored_results"] = len(scored_leads)
+        if not scored_leads:
+            summary["stale_summary"] = compute_stale_summary(intent_results)
 
         # Cross-session dedup: filter previously exported companies
         dedup_days = config.get("dedup_days_back", 180)

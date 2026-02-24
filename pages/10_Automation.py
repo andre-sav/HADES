@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import streamlit as st
 
 from turso_db import get_database
+from scoring import build_stale_guidance
 from utils import get_automation_config, get_budget_config
 from ui_components import (
     inject_base_styles,
@@ -275,6 +276,21 @@ if "dry_run_result" in st.session_state:
             f'</div>',
             unsafe_allow_html=True,
         )
+
+    # Stale guidance — shown when intent results exist but all scored out
+    if preview.get("intent_results", 0) > 0 and preview.get("scored_results", 0) == 0:
+        _stale_summ = preview.get("stale_summary", {})
+        _guidance = build_stale_guidance(
+            _stale_summ,
+            preview.get("topics", []),
+            preview.get("signal_strengths", []),
+        )
+        if _guidance:
+            _bullets = "\n".join(f"- {g}" for g in _guidance)
+            st.warning(
+                f"All {preview['intent_results']} intent results are stale (>14 days old). "
+                f"No companies survived freshness scoring.\n\n{_bullets}"
+            )
 
     # Top companies table
     top_cos = preview.get("top_companies", [])
