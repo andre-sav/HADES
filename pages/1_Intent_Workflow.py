@@ -62,6 +62,9 @@ from ui_components import (
     workflow_summary_strip,
     last_run_indicator,
     format_contact_label,
+    COLORS,
+    FONT_SIZES,
+    SPACING,
 )
 
 st.set_page_config(page_title="Intent", page_icon="🎯", layout="wide")
@@ -746,11 +749,25 @@ if st.session_state.intent_search_executed and not st.session_state.intent_compa
         _used_topics = _qp.get("topics", [])
         _used_strengths = _qp.get("signal_strengths", [])
         _guidance = build_stale_guidance(_stale_summ, _used_topics, _used_strengths)
-        _bullets = "\n".join(f"- {g}" for g in _guidance) if _guidance else ""
-        st.warning(
-            f"All {_raw_count} intent results are stale (>14 days old). "
-            f"No companies survived freshness scoring.\n\n{_bullets}"
-        )
+
+        st.warning(f"All {_raw_count} intent results are stale (>14 days old). No companies survived freshness scoring.")
+
+        if _guidance:
+            import html as _html
+            _items = "".join(
+                f'<div style="padding:{SPACING["xs"]} 0;color:{COLORS["text_secondary"]};">'
+                f'<span style="color:{COLORS["warning"]};margin-right:{SPACING["xs"]};">→</span>'
+                f'{_html.escape(g)}</div>'
+                for g in _guidance
+            )
+            st.markdown(
+                f'<div style="background:{COLORS["bg_secondary"]};border-left:3px solid {COLORS["warning_dark"]};'
+                f'border-radius:0 6px 6px 0;padding:{SPACING["sm"]} {SPACING["md"]};margin-top:-{SPACING["sm"]};">'
+                f'<div style="font-size:{FONT_SIZES["xs"]};color:{COLORS["text_muted"]};'
+                f'text-transform:uppercase;letter-spacing:0.05em;margin-bottom:{SPACING["xs"]};">Try next</div>'
+                f'{_items}</div>',
+                unsafe_allow_html=True,
+            )
     elif not st.session_state.get("_intent_api_error"):
         st.info("No companies found matching criteria.")
 

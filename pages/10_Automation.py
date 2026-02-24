@@ -285,11 +285,24 @@ if "dry_run_result" in st.session_state:
             preview.get("topics", []),
             preview.get("signal_strengths", []),
         )
+
+        _n = preview["intent_results"]
+        st.warning(f"All {_n} intent results are stale (>14 days old). No companies survived freshness scoring.")
+
         if _guidance:
-            _bullets = "\n".join(f"- {g}" for g in _guidance)
-            st.warning(
-                f"All {preview['intent_results']} intent results are stale (>14 days old). "
-                f"No companies survived freshness scoring.\n\n{_bullets}"
+            _items = "".join(
+                f'<div style="padding:{SPACING["xs"]} 0;color:{COLORS["text_secondary"]};">'
+                f'<span style="color:{COLORS["warning"]};margin-right:{SPACING["xs"]};">→</span>'
+                f'{html.escape(g)}</div>'
+                for g in _guidance
+            )
+            st.markdown(
+                f'<div style="background:{COLORS["bg_tertiary"]};border-left:3px solid {COLORS["warning_dark"]};'
+                f'border-radius:0 6px 6px 0;padding:{SPACING["sm"]} {SPACING["md"]};margin-top:{SPACING["xs"]};">'
+                f'<div style="font-size:{FONT_SIZES["xs"]};color:{COLORS["text_muted"]};'
+                f'text-transform:uppercase;letter-spacing:0.05em;margin-bottom:{SPACING["xs"]};">Try next</div>'
+                f'{_items}</div>',
+                unsafe_allow_html=True,
             )
 
     # Top companies table
