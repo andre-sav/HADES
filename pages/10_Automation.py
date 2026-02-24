@@ -234,12 +234,12 @@ if dry_run:
 
             if result["success"]:
                 st.session_state["dry_run_result"] = result["summary"]
+                st.rerun()
             else:
                 st.error(f"Preview failed: {result.get('error', 'Unknown error')}")
     except Exception as e:
         logger.error(f"Dry run error: {e}")
         st.error("Preview failed. Please try again or check the logs.")
-    st.rerun()
 
 # Render dry-run preview
 if "dry_run_result" in st.session_state:
