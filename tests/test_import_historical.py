@@ -7,7 +7,8 @@ from unittest.mock import MagicMock
 sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
-from scripts.import_historical import normalize_state, normalize_zip
+from scripts.import_historical import normalize_state
+from utils import normalize_zip
 
 
 class TestNormalizeState:

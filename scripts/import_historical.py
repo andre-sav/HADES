@@ -21,6 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from calibrate_scoring import extract_sic, parse_employees, load_overrides
+from utils import normalize_zip
 
 LOCATINGS_PATH = PROJECT_ROOT / "data" / "enriched_locatings.csv"
 NONHLM_PATH = PROJECT_ROOT / "data" / "enriched_nonhlm_deliveries.csv"
@@ -57,22 +58,6 @@ def normalize_state(raw: str | None) -> str | None:
     # Full state name
     abbrev = STATE_ABBREV.get(val.lower())
     return abbrev
-
-
-def normalize_zip(raw: str | None) -> str | None:
-    """Normalize ZIP to 5-digit string."""
-    if not raw or not raw.strip():
-        return None
-    val = raw.strip()
-    # Handle 9-digit ZIPs (e.g., "75201-1234")
-    if "-" in val:
-        val = val.split("-")[0]
-    # Pad 4-digit ZIPs (e.g., leading zero dropped)
-    if len(val) == 4 and val.isdigit():
-        val = "0" + val
-    if len(val) == 5 and val.isdigit():
-        return val
-    return None
 
 
 def import_locatings(imported_at: str) -> list[tuple]:
