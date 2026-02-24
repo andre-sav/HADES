@@ -230,6 +230,17 @@ def inject_base_styles():
         100% {{ background-position: -200% 0; }}
     }}
 
+    /* Respect user motion preferences (WCAG 2.1 SC 2.3.3) */
+    @media (prefers-reduced-motion: reduce) {{
+        .main .block-container > div {{
+            animation: none;
+        }}
+        * {{
+            animation-duration: 0.01ms !important;
+            transition-duration: 0.01ms !important;
+        }}
+    }}
+
     /* ================================================================
        NATIVE WIDGET OVERRIDES - BUTTONS
        ================================================================ */
@@ -285,7 +296,7 @@ def inject_base_styles():
     div[data-testid="stNumberInput"] input:focus,
     div[data-testid="stTextArea"] textarea:focus {{
         border-color: {COLORS['primary']} !important;
-        box-shadow: 0 0 0 2px {COLORS['primary']}20 !important;
+        box-shadow: 0 0 0 2px {COLORS['primary']}50 !important;
     }}
 
     /* Input labels */

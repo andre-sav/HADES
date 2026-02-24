@@ -52,6 +52,8 @@ def load_credentials() -> dict:
         "TURSO_AUTH_TOKEN": _get("TURSO_AUTH_TOKEN", required=True),
         "ZOOMINFO_CLIENT_ID": _get("ZOOMINFO_CLIENT_ID", required=True),
         "ZOOMINFO_CLIENT_SECRET": _get("ZOOMINFO_CLIENT_SECRET", required=True),
+        # Optional — VanillaSoft push skipped if missing
+        "VANILLASOFT_WEB_LEAD_ID": _get("VANILLASOFT_WEB_LEAD_ID"),
         # Optional — email delivery skipped if missing
         "SMTP_USER": _get("SMTP_USER"),
         "SMTP_PASSWORD": _get("SMTP_PASSWORD"),

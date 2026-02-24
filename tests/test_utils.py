@@ -387,18 +387,18 @@ class TestXSSEscaping:
     """Tests for XSS escaping in HTML-rendering functions."""
 
     def test_friendly_error_uses_html_escape(self):
-        """_friendly_error in 9_Automation.py must call html.escape on fallback messages."""
+        """_friendly_error in 10_Automation.py must call html.escape on fallback messages."""
         from pathlib import Path
-        source = Path("pages/9_Automation.py").read_text()
+        source = Path("pages/10_Automation.py").read_text()
         # The function must use html.escape for the truncated fallback
         assert "html.escape" in source
         # And import html
         assert "import html" in source
 
     def test_health_indicator_uses_html_escape(self):
-        """health_indicator in 10_Pipeline_Health.py must escape the detail parameter."""
+        """health_indicator in 11_Pipeline_Health.py must escape the detail parameter."""
         from pathlib import Path
-        source = Path("pages/10_Pipeline_Health.py").read_text()
+        source = Path("pages/11_Pipeline_Health.py").read_text()
         assert "html.escape" in source
         assert "import html" in source
 
