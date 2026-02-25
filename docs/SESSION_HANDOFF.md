@@ -1,7 +1,57 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-25
-**Status:** All 4 epics implemented (18 stories complete). 738 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40).
+**Status:** All 4 epics implemented (18 stories complete). 738 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41).
+
+## Session Summary (2026-02-25, Session 41)
+
+### What Was Done
+
+Production verification via Chrome MCP browser tools + bug fixes + explanatory tooltips. 738 tests passing.
+
+**Pipeline Failure Investigation (HADES-pjq — CLOSED)**
+- Investigated 2/23 and 2/24 automation failures via GitHub Actions logs
+- 2/23: `exclude_org_exported` sent to ZoomInfo API → 400 (already fixed in prior session)
+- 2/24: `TypeError: 'list' → 'PyTuple'` in `record_lead_outcomes_batch` (already fixed in 505d866)
+- 2/25 run succeeded (9 leads exported), confirming both fixes work in production
+- Closed HADES-pjq with detailed root cause analysis
+
+**Production Verification (11 pages via Chrome MCP)**
+- Dashboard, Intent, Geography, Operators, CSV Export, Usage, Executive Summary, Score Calibration, Pipeline Test, API Discovery, Pipeline Health — all OK
+- **Automation page crash found**: `ImportError: cannot import name 'get_call_center_agents' from 'export'` — function is in `utils.py`, not `export.py`. Fixed import.
+- Added GITHUB_TOKEN to `.streamlit/secrets.toml` — schedule toggle now working
+- Hidden Pipeline_Test from sidebar nav (matching existing API_Discovery CSS rule) for production handoff
+- Zero console errors across all pages
+
+**Explanatory Tooltips for Sales Team (~15 tooltips)**
+- Geography Workflow: stage callout at results (both modes), dedup checkbox help, metric card help text, column help (Score, Accuracy, Priority), manual selection guidance caption
+- CSV Export: staged exports callout, validation section guidance, VanillaSoft push button help, CSV download button help
+- Dashboard: enhanced Staged Leads detail text, Weekly Credits/Leads Found/Operators help text
+- Two-layer approach: `help=` on widgets (? icon) + `st.caption()` for stage transitions
+
+### Key Files Modified
+```
+pages/10_Automation.py          — import fix (get_call_center_agents from utils)
+pages/2_Geography_Workflow.py   — 5 tooltip additions (results callout, dedup help, metrics, columns, selection)
+pages/4_CSV_Export.py           — 4 tooltip additions (staged, validation, push, download)
+app.py                          — 4 tooltip enhancements (staged leads detail, metric help text)
+ui_components.py                — hide Pipeline_Test from sidebar nav
+.streamlit/secrets.toml         — added GITHUB_TOKEN (gitignored)
+```
+
+### Uncommitted Changes
+None — all changes committed and pushed (3 commits: 1c55329, 71c191d, 800a09b).
+
+Untracked from prior sessions: `system-test/` (12 screenshots + report)
+
+### Known Issues
+- SMTP credentials configured in GitHub repo secrets but not yet tested (need live automation run to verify email delivery)
+- Re-enrichment is free per ZoomInfo policy — no credit cost for recovering leads
+
+### What Needs Doing Next Session
+1. **Re-run automation pipeline** from UI to verify email delivery with SMTP credentials
+2. **HADES-dgr** [P4] — Show budget remaining in Run Now confirmation dialog
+3. **HADES-iic** [P4] — Add Zoho CRM dedup check at export time
 
 ## Session Summary (2026-02-25, Sessions 39-40)
 
