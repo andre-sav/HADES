@@ -10,9 +10,27 @@ import json
 import logging
 
 import streamlit as st
-
-logger = logging.getLogger(__name__)
 import pandas as pd
+
+# Configure logging for pipeline visibility
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+
+# Also ensure library loggers are at INFO so their messages show
+for _lib in ("scoring", "dedup", "expand_search", "zoominfo_client"):
+    _lib_logger = logging.getLogger(_lib)
+    if not _lib_logger.handlers:
+        _lib_logger.addHandler(_handler)
+        _lib_logger.setLevel(logging.INFO)
 from datetime import datetime
 
 from turso_db import get_database
@@ -35,6 +53,7 @@ from scoring import (
 from dedup import dedupe_leads
 from cost_tracker import CostTracker
 from expand_search import build_contacts_by_company
+from db._title_prefs import normalize_title
 from utils import (
     get_intent_topics,
     get_sic_codes,
@@ -241,7 +260,9 @@ if _run_state != "idle":
     _strip_items.append({"label": "Mode", "value": "Autopilot" if st.session_state.intent_mode == "autopilot" else "Manual"})
     if st.session_state.intent_companies:
         _strip_items.append({"label": "Companies", "value": len(st.session_state.intent_companies)})
-    if st.session_state.intent_contacts_by_company:
+    if st.session_state.intent_enrichment_done and st.session_state.intent_results:
+        _strip_items.append({"label": "Contacts", "value": len(st.session_state.intent_results)})
+    elif st.session_state.intent_contacts_by_company:
         _total_contacts = sum(len(d["contacts"]) for d in st.session_state.intent_contacts_by_company.values())
         _strip_items.append({"label": "Contacts", "value": _total_contacts})
     if budget["has_cap"]:
@@ -256,8 +277,9 @@ if _run_state != "idle":
 # =============================================================================
 def get_current_step() -> int:
     is_manual = st.session_state.intent_mode == "manual"
+    total = 4 if is_manual else 3
     if st.session_state.intent_enrichment_done:
-        return 4 if is_manual else 3
+        return total + 1  # All steps completed
     if st.session_state.intent_contacts_by_company:
         return 3 if is_manual else 2
     if st.session_state.intent_companies_confirmed or (
@@ -291,6 +313,7 @@ intent_accuracy_min = get_default_accuracy()
 intent_phone_fields = get_default_phone_fields()
 target_companies = 25
 search_clicked = False
+_is_pending = st.session_state.intent_search_pending
 
 if _results_showing:
     _qp = st.session_state.get("intent_query_params") or {}
@@ -442,6 +465,8 @@ if st.session_state.intent_search_pending:
     _p_signals = _pending.get("signal_strengths", signal_strengths)
     _p_target = _pending.get("target_companies", target_companies)
 
+    logger.info("Intent search starting: topics=%s, signals=%s, target=%d", _p_topics, _p_signals, _p_target)
+
     # Cache-first lookup
     _cache_key = _intent_cache_key(_p_topics, _p_signals)
     _force_refresh = st.session_state.get("_intent_force_refresh", False)
@@ -451,6 +476,7 @@ if st.session_state.intent_search_pending:
 
     if cached_leads is not None:
         # Cache hit — use cached results directly
+        logger.info("Cache HIT: %d raw leads from cache", len(cached_leads))
         st.session_state["_intent_from_cache"] = True
         st.session_state["_intent_api_response_summary"] = {"total_results": len(cached_leads)}
         st.session_state.pop("_intent_stale_summary", None)
@@ -498,13 +524,16 @@ if st.session_state.intent_search_pending:
                 if cid:
                     auto_selected[cid] = lead
             st.session_state.intent_selected_companies = auto_selected
+            logger.info("Autopilot auto-selected %d/%d companies", len(auto_selected), len(deduped))
             if auto_selected:
                 st.session_state.intent_companies_confirmed = True
 
+        logger.info("Intent search complete (cached): %d companies ready", len(deduped))
         st.rerun()
 
     else:
         # Cache miss — call API
+        logger.info("Cache MISS: querying ZoomInfo Intent API")
         st.session_state["_intent_from_cache"] = False
         with st.status("Searching for intent companies...", expanded=True) as status:
             try:
@@ -537,8 +566,12 @@ if st.session_state.intent_search_pending:
                     "query_params": None,
                 }
 
+                def _intent_page_progress(current_page, total_pages):
+                    status.update(label=f"Querying Intent API — page {current_page}/{total_pages}")
+                    st.write(f"Fetched page {current_page} of {total_pages}")
+
                 st.write("Querying ZoomInfo Intent API...")
-                leads = client.search_intent_all_pages(params, max_pages=5)
+                leads = client.search_intent_all_pages(params, max_pages=5, progress_callback=_intent_page_progress)
 
                 st.session_state["_intent_api_response_summary"] = {
                     "total_results": len(leads),
@@ -549,17 +582,20 @@ if st.session_state.intent_search_pending:
 
                 # Check if user cancelled during the API call
                 if not st.session_state.intent_search_pending:
+                    logger.info("Intent search cancelled by user")
                     status.update(label="Search cancelled", state="error")
                     st.stop()
 
                 if not leads:
+                    logger.info("Intent search returned 0 results")
                     st.write("No companies found matching criteria.")
                     st.session_state.intent_companies = None
                     st.session_state.intent_search_executed = True
                     st.session_state.intent_search_pending = False
                     status.update(label="No results found", state="complete")
                 else:
-                    st.write(f"Found {len(leads)} companies. Scoring and deduplicating...")
+                    logger.info("Intent API returned %d raw companies", len(leads))
+                    st.write(f"Found {len(leads)} companies. Scoring...")
                     # Cache raw leads for future lookups
                     db.cache_results(
                         cache_id=_cache_key,
@@ -572,6 +608,7 @@ if st.session_state.intent_search_pending:
                     scored = score_intent_leads(leads)
                     if not scored:
                         st.session_state["_intent_stale_summary"] = compute_stale_summary(leads)
+                    st.write(f"Scored: {len(scored)}/{len(leads)} survived freshness filter. Deduplicating...")
                     deduped, removed = dedupe_leads(scored)
 
                     for lead in deduped:
@@ -619,13 +656,20 @@ if st.session_state.intent_search_pending:
                             if cid:
                                 auto_selected[cid] = lead
                         st.session_state.intent_selected_companies = auto_selected
+                        logger.info("Autopilot auto-selected %d/%d companies", len(auto_selected), len(deduped))
                         if auto_selected:
                             st.session_state.intent_companies_confirmed = True
 
+                    _summary = f"{len(leads)} raw → {len(scored)} scored → {len(deduped)} deduped"
+                    if removed:
+                        _summary += f" ({removed} duplicates removed)"
+                    st.write(_summary)
+                    logger.info("Intent search complete (API): %s", _summary)
                     status.update(label=f"Found {len(deduped)} companies", state="complete")
                     st.rerun()
 
             except PipelineError as e:
+                logger.error("Intent search failed: %s", e.user_message)
                 st.session_state.intent_search_pending = False
                 st.session_state["_intent_api_error"] = str(e.user_message)
                 st.session_state["_intent_api_exchange"] = getattr(client, "last_exchange", None)
@@ -954,13 +998,15 @@ if (
     # Phase 1: Resolve hashed company IDs → numeric IDs (via cache or enrich)
     # Phase 2: Contact Search with full ICP filters using numeric IDs
     if st.session_state.intent_contacts_by_company is None:
-        with st.status(f"🔍 Finding contacts at {len(company_ids)} companies...", expanded=True) as search_status:
+        logger.info("Contact search starting: %d companies selected", len(company_ids))
+        with st.status(f"Finding contacts at {len(company_ids)} companies...", expanded=True) as search_status:
             try:
                 client = get_zoominfo_client()
                 db = get_database()
 
                 # Phase 1: Resolve hashed → numeric company IDs
-                st.write("Phase 1: Resolving company IDs...")
+                st.write("Resolving company IDs...")
+                search_status.update(label=f"Phase 1: Resolving {len(company_ids)} company IDs...")
                 cached = db.get_company_ids_bulk(company_ids)
                 numeric_map = {}  # hashed_id → numeric_id
 
@@ -969,20 +1015,25 @@ if (
                     if hid in cached:
                         numeric_map[hid] = cached[hid]["numeric_id"]
 
+                logger.info("Company ID resolution: %d cached, %d need enrichment", len(numeric_map), len(company_ids) - len(numeric_map))
+
                 # Enrich 1 recommended contact per uncached company to get numeric IDs
                 uncached = [hid for hid in company_ids if hid not in numeric_map]
                 if uncached:
-                    st.write(f"Enriching {len(uncached)} contacts to resolve company IDs ({len(cached)} cached)...")
-                    for hid in uncached:
+                    st.write(f"Enriching {len(uncached)} contacts to resolve IDs ({len(numeric_map)} cached)...")
+                    for idx, hid in enumerate(uncached, 1):
                         company_lead = selected_companies[hid]
+                        company_name = company_lead.get("companyName", hid[:8])
                         recommended = company_lead.get("recommendedContacts", [])
                         if not recommended:
+                            logger.warning("No recommended contacts for %s — skipping", company_name)
                             continue
                         # Enrich first recommended contact
                         pid = recommended[0].get("id")
                         if not pid:
                             continue
                         try:
+                            search_status.update(label=f"Phase 1: Resolving company IDs ({idx}/{len(uncached)})...")
                             enriched = client.enrich_contacts_batch(
                                 person_ids=[pid],
                                 output_fields=["id", "companyId", "companyName"],
@@ -991,19 +1042,27 @@ if (
                                 company = enriched[0].get("company")
                                 company = company if isinstance(company, dict) else {}
                                 numeric_id = company.get("id") or enriched[0].get("companyId")
-                                company_name = company.get("name") or enriched[0].get("companyName", "")
+                                resolved_name = company.get("name") or enriched[0].get("companyName", "")
                                 if numeric_id:
                                     numeric_map[hid] = int(numeric_id)
-                                    db.save_company_id(hid, int(numeric_id), company_name)
+                                    db.save_company_id(hid, int(numeric_id), resolved_name)
+                                    logger.info("Resolved %s → %s (ID %s)", company_name, resolved_name, numeric_id)
                         except Exception as e:
-                            st.caption(f"⚠️ Could not resolve {hid[:8]}…: {e}")
+                            logger.warning("Could not resolve %s: %s", company_name, e)
+                            st.caption(f"Could not resolve {company_name}: {e}")
+                else:
+                    st.write(f"All {len(numeric_map)} company IDs found in cache.")
+
+                st.write(f"Resolved {len(numeric_map)}/{len(company_ids)} company IDs.")
+                logger.info("Company ID resolution complete: %d/%d resolved", len(numeric_map), len(company_ids))
 
                 if not numeric_map:
-                    search_status.update(label="⚠️ Could not resolve any company IDs", state="complete")
+                    search_status.update(label="Could not resolve any company IDs", state="complete")
                     st.warning("Could not resolve company IDs. No contacts to search.")
                 else:
                     # Phase 2: Contact Search with ICP filters
-                    st.write(f"Phase 2: Searching {len(numeric_map)} companies with ICP filters...")
+                    st.write(f"Searching {len(numeric_map)} companies with ICP filters...")
+                    search_status.update(label=f"Phase 2: Contact search ({len(numeric_map)} companies)...")
                     numeric_ids = [str(nid) for nid in numeric_map.values()]
 
                     params = ContactQueryParams(
@@ -1014,25 +1073,55 @@ if (
                         required_fields_operator="or",
                     )
 
-                    contacts = client.search_contacts_all_pages(params, max_pages=5)
+                    def _contact_page_progress(current_page, total_pages):
+                        search_status.update(label=f"Phase 2: Contact search — page {current_page}/{total_pages}")
+                        st.write(f"Contact search: page {current_page}/{total_pages}")
+
+                    contacts = client.search_contacts_all_pages(params, max_pages=5, progress_callback=_contact_page_progress)
 
                     if not contacts:
-                        search_status.update(label="⚠️ No ICP contacts found", state="complete")
+                        logger.info("Contact search returned 0 results")
+                        search_status.update(label="No ICP contacts found", state="complete")
                         st.warning("No contacts matched ICP filters. Try adjusting filters or selecting more companies.")
                     else:
+                        logger.info("Contact search returned %d contacts", len(contacts))
+                        st.write(f"Found {len(contacts)} contacts. Grouping by company...")
                         contacts_by_company = build_contacts_by_company(contacts)
                         st.session_state.intent_contacts_by_company = contacts_by_company
 
-                        # Auto-select best contact per company (highest accuracy score)
+                        # Auto-select best contact per company
+                        # Factor in learned title preferences when available
+                        _title_prefs = {}
+                        try:
+                            _title_prefs = db.get_title_preferences()
+                        except Exception:
+                            pass  # No prefs yet — use default ranking
                         auto_selected = {}
                         for cid, data in contacts_by_company.items():
                             if data["contacts"]:
-                                auto_selected[cid] = data["contacts"][0]
+                                if _title_prefs:
+                                    # Re-rank: accuracy stays primary, title preference breaks ties
+                                    def _rank_key(c):
+                                        raw = c.get("contactAccuracyScore", 0) or 0
+                                        try:
+                                            acc = int(raw)
+                                        except (ValueError, TypeError):
+                                            acc = 0
+                                        return (acc, _title_prefs.get(normalize_title(c.get("jobTitle", "")), 0.5))
+                                    best = max(data["contacts"], key=_rank_key)
+                                    auto_selected[cid] = best
+                                else:
+                                    auto_selected[cid] = data["contacts"][0]
                         st.session_state.intent_selected_contacts = auto_selected
+                        if _title_prefs:
+                            logger.info("Auto-select used %d title preferences for ranking", len(_title_prefs))
 
                         found_companies = len(contacts_by_company)
+                        _contact_summary = f"Found {len(contacts)} contacts at {found_companies} companies (best auto-selected)"
+                        st.write(_contact_summary)
+                        logger.info("Contact resolution complete: %s", _contact_summary)
                         search_status.update(
-                            label=f"✅ Found {len(contacts)} ICP contacts at {found_companies} companies",
+                            label=f"Found {len(contacts)} ICP contacts at {found_companies} companies",
                             state="complete",
                             expanded=False,
                         )
@@ -1072,6 +1161,22 @@ if (
         _skipped_count = len(contacts_by_company) - len(st.session_state.intent_selected_contacts)
         _skip_note = f" ({_skipped_count} skipped)" if _skipped_count > 0 else ""
         st.info(f"**{total_contacts}** contacts across **{len(contacts_by_company)}** companies. Select 1 per company or skip.{_skip_note}")
+
+        # Show learning preference tooltip
+        _pref_count = 0
+        try:
+            _pref_count = len(db.get_title_preferences())
+        except Exception:
+            pass
+        if _pref_count > 0:
+            st.caption(
+                f"Preference learning active — tracking {_pref_count} title pattern{'s' if _pref_count != 1 else ''}. "
+                "Your selections train auto-select to prefer titles you pick and deprioritize ones you skip."
+            )
+        else:
+            st.caption(
+                "Preference learning: your selections here teach the system which job titles to prefer in future auto-selects."
+            )
 
         _selected_co_count = len(st.session_state.intent_selected_companies)
         _matched_co_count = len(contacts_by_company)
@@ -1217,6 +1322,30 @@ if (
             if st.session_state.intent_test_mode:
                 st.caption("🧪 Test mode: no credits used")
 
+    def _record_title_preferences():
+        """Record which titles were selected/skipped for learning. Called after successful enrichment."""
+        selected_contacts = list(st.session_state.intent_selected_contacts.values())
+        _sel_titles = [c.get("jobTitle", "") for c in selected_contacts if c.get("jobTitle")]
+
+        # Only record skip signals in manual mode — autopilot skips are system choices, not user intent
+        if st.session_state.intent_mode == "manual":
+            _sel_pids = {c.get("personId") or c.get("id") for c in selected_contacts}
+            _skip_titles = list({
+                _contact["jobTitle"]
+                for _cdata in (st.session_state.intent_contacts_by_company or {}).values()
+                for _contact in _cdata.get("contacts", [])
+                if (_contact.get("personId") or _contact.get("id")) not in _sel_pids
+                and _contact.get("jobTitle")
+            })
+        else:
+            _skip_titles = []
+
+        if _sel_titles or _skip_titles:
+            try:
+                db.record_title_selections(_sel_titles, _skip_titles)
+            except Exception:
+                logger.debug("Title preference recording failed", exc_info=True)
+
     # --- ENRICHMENT (both modes) ---
     should_enrich = (
         st.session_state.intent_contacts_by_company
@@ -1238,7 +1367,8 @@ if (
 
             if person_ids:
                 if st.session_state.intent_test_mode:
-                    st.info("🧪 **Test Mode**: Using search data as mock enrichment (no credits used)")
+                    logger.info("Enrichment (test mode): %d contacts, 0 credits", len(person_ids))
+                    st.info("**Test Mode**: Using search data as mock enrichment (no credits used)")
                     mock_enriched = []
                     for contact in selected_contacts:
                         enriched = contact.copy()
@@ -1252,19 +1382,36 @@ if (
                         mock_enriched.append(enriched)
                     st.session_state.intent_enriched_contacts = mock_enriched
                     st.session_state.intent_enrichment_done = True
+                    _record_title_preferences()
                     st.rerun()
                 else:
-                    with st.spinner(f"Enriching {len(person_ids)} contacts... (using credits)"):
+                    _num_batches = (len(person_ids) + 24) // 25
+                    logger.info("Enrichment starting: %d contacts in %d batches (USES %d CREDITS)", len(person_ids), _num_batches, len(person_ids))
+                    with st.status(f"Enriching {len(person_ids)} contacts ({len(person_ids)} credits)...", expanded=True) as enrich_status:
                         try:
                             client = get_zoominfo_client()
+
+                            def _enrich_progress(enriched_count, total_count):
+                                _batch = (enriched_count + 24) // 25
+                                enrich_status.update(label=f"Enriching contacts — {enriched_count}/{total_count} ({_batch}/{_num_batches} batches)")
+                                st.write(f"Enriched {enriched_count}/{total_count} contacts")
+
+                            st.write(f"Starting enrichment: {len(person_ids)} contacts, {_num_batches} batch(es)...")
                             enriched = client.enrich_contacts_batch(
                                 person_ids=person_ids,
                                 output_fields=DEFAULT_ENRICH_OUTPUT_FIELDS,
+                                progress_callback=_enrich_progress,
                             )
+                            logger.info("Enrichment complete: %d/%d contacts returned", len(enriched), len(person_ids))
+                            st.write(f"Enrichment complete: {len(enriched)} contacts returned")
+                            enrich_status.update(label=f"Enriched {len(enriched)} contacts", state="complete")
                             st.session_state.intent_enriched_contacts = enriched
                             st.session_state.intent_enrichment_done = True
+                            _record_title_preferences()
                             st.rerun()
                         except PipelineError as e:
+                            logger.error("Enrichment failed: %s", e.user_message)
+                            enrich_status.update(label="Enrichment failed", state="error")
                             st.error(f"Enrichment failed: {e.user_message}")
                             try:
                                 db.log_error(
@@ -1278,6 +1425,7 @@ if (
                                 pass  # Never let error logging cause secondary failures
                         except Exception:
                             logger.exception("Enrichment failed")
+                            enrich_status.update(label="Enrichment failed", state="error")
                             st.error("Enrichment failed unexpectedly. Check application logs.")
 
 
@@ -1294,6 +1442,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         st.subheader("Step 3 — Results")
 
     enriched_contacts = st.session_state.intent_enriched_contacts
+    logger.info("Results step: scoring %d enriched contacts", len(enriched_contacts))
 
     # Merge pre-enrichment metadata
     # Enrichment replaces contact objects entirely, losing search-only fields
@@ -1464,6 +1613,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
             hide_index=True,
             column_config=_col_config,
         )
+        st.markdown("")  # Space between table and score details
 
         # Score breakdown expander — only show leads matching current filters
         _filtered_indices = set(filtered_df["_idx"].tolist())
@@ -1483,12 +1633,21 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
 
         export_quality_warnings(scored_leads)
 
-        col1, col2, col3 = st.columns([2, 1, 1])
+        col1, col2, col3 = st.columns([1, 1, 1])
+
+        with col1:
+            if st.session_state.intent_mode == "manual":
+                if outline_button("Back to Contact Selection", key="intent_back_btn"):
+                    st.session_state.intent_enrichment_done = False
+                    st.session_state.intent_enriched_contacts = None
+                    st.session_state.intent_enrich_clicked = False
+                    st.session_state.intent_usage_logged = False
+                    st.rerun()
 
         with col2:
             csv = filtered_df.drop(columns=["_idx", "_priority_label"]).to_csv(index=False)
             st.download_button(
-                "📥 Quick Preview CSV",
+                "Quick Preview CSV",
                 data=csv,
                 file_name=f"intent_preview_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                 mime="text/csv",
@@ -1514,13 +1673,3 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
                 st.session_state.intent_leads_staged = True
 
     intent_results_table(scored)
-
-    # Back button (manual mode)
-    if st.session_state.intent_mode == "manual":
-        st.markdown("---")
-        if outline_button("Back to Contact Selection", key="intent_back_btn"):
-            st.session_state.intent_enrichment_done = False
-            st.session_state.intent_enriched_contacts = None
-            st.session_state.intent_enrich_clicked = False
-            st.session_state.intent_usage_logged = False
-            st.rerun()

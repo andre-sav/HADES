@@ -4,10 +4,12 @@ import html
 import logging
 from datetime import datetime, timedelta, timezone
 
+import requests
 import streamlit as st
 
 from turso_db import get_database
-from scoring import build_stale_guidance
+from scoring import build_stale_guidance, score_intent_contacts, get_priority_label
+from export import export_leads_to_csv, get_call_center_agents
 from utils import get_automation_config, get_budget_config
 from ui_components import (
     inject_base_styles,
@@ -65,6 +67,51 @@ def _next_scheduled_run() -> tuple[str, str]:
     else:
         countdown = f"{hours // 24}d {hours % 24}h"
     return day_label, countdown
+
+
+_GH_REPO = "andre-sav/HADES"
+_GH_WORKFLOW = "intent-poll.yml"
+
+
+def _get_github_token() -> str | None:
+    """Get GitHub token from Streamlit secrets."""
+    try:
+        return st.secrets.get("GITHUB_TOKEN")
+    except Exception:
+        return None
+
+
+def _get_workflow_state(token: str) -> str | None:
+    """Get GitHub Actions workflow state ('active' or 'disabled_manually').
+
+    Returns None on API error.
+    """
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{_GH_REPO}/actions/workflows/{_GH_WORKFLOW}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("state")
+    except Exception:
+        logger.debug("GitHub workflow state check failed", exc_info=True)
+    return None
+
+
+def _set_workflow_enabled(token: str, enable: bool) -> bool:
+    """Enable or disable the GitHub Actions workflow. Returns True on success."""
+    action = "enable" if enable else "disable"
+    try:
+        resp = requests.put(
+            f"https://api.github.com/repos/{_GH_REPO}/actions/workflows/{_GH_WORKFLOW}/{action}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+            timeout=10,
+        )
+        return resp.status_code == 204
+    except Exception:
+        logger.debug("GitHub workflow %s failed", action, exc_info=True)
+    return False
 
 
 _STATUS_MAP = {
@@ -154,13 +201,40 @@ budget_pct = min(100, (weekly_used / weekly_cap * 100)) if weekly_cap else 0
 # --- Header ---
 page_header("Automation", "Daily intent polling · Mon–Fri 7:00 AM ET")
 
+# --- Schedule Toggle ---
+_gh_token = _get_github_token()
+_wf_state = _get_workflow_state(_gh_token) if _gh_token else None
+if _gh_token and _wf_state is not None:
+        _is_active = _wf_state == "active"
+        _toggle_col1, _toggle_col2 = st.columns([1, 5])
+        with _toggle_col1:
+            _new_state = st.toggle(
+                "Schedule enabled",
+                value=_is_active,
+                key="auto_schedule_toggle",
+            )
+        with _toggle_col2:
+            if _is_active:
+                st.caption("Daily pipeline runs Mon–Fri at 7:00 AM ET")
+            else:
+                st.caption("Schedule paused — only manual runs via Run Now")
+
+        if _new_state != _is_active:
+            if _set_workflow_enabled(_gh_token, _new_state):
+                st.rerun()
+            else:
+                st.error("Failed to update workflow — check GITHUB_TOKEN permissions")
+
 
 # --- Metrics Row ---
 col1, col2, col3 = st.columns(3)
 
 with col1:
     day_label, countdown = _next_scheduled_run()
-    metric_card("Next Run", countdown, delta=day_label, delta_color="neutral")
+    if _wf_state == "disabled_manually":
+        metric_card("Next Run", "Paused", delta="Schedule disabled", delta_color="error")
+    else:
+        metric_card("Next Run", countdown, delta=day_label, delta_color="neutral")
 
 with col2:
     if runs:
@@ -428,11 +502,81 @@ else:
                             st.json(summary)
                     else:
                         st.json(summary)
+
+                # Re-export button for successful runs with a batch ID
+                if run["status"] == "success" and run.get("batch_id") and run.get("leads_exported", 0) > 0:
+                    if st.button(
+                        f"Re-export {run['leads_exported']} leads",
+                        key=f"reexport_{run['id']}",
+                    ):
+                        st.session_state["_reexport_batch_id"] = run["batch_id"]
+                        st.session_state["_reexport_run_id"] = run["id"]
+                        st.rerun()
+
                 st.divider()
 
     # Show more indicator
     if len(runs) > 10:
         st.caption(f"{len(runs) - 10} older runs not shown")
+
+# --- Re-export execution ---
+_reexport_batch = st.session_state.pop("_reexport_batch_id", None)
+st.session_state.pop("_reexport_run_id", None)
+if _reexport_batch:
+    st.markdown("---")
+    outcomes = db.get_outcomes_by_batch(_reexport_batch)
+    person_ids = [o["person_id"] for o in outcomes if o.get("person_id")]
+
+    if not person_ids:
+        st.error(f"No person IDs found for batch {_reexport_batch}")
+    else:
+        with st.status(f"Re-enriching {len(person_ids)} contacts from batch {_reexport_batch}...", expanded=True) as reexport_status:
+            try:
+                from zoominfo_client import get_zoominfo_client, DEFAULT_ENRICH_OUTPUT_FIELDS
+
+                st.write(f"Found {len(person_ids)} person IDs in lead_outcomes")
+                client = get_zoominfo_client()
+                enriched = client.enrich_contacts_batch(
+                    person_ids=person_ids,
+                    output_fields=DEFAULT_ENRICH_OUTPUT_FIELDS,
+                )
+                st.write(f"Enriched {len(enriched)} contacts")
+
+                # Restore scores and metadata from lead_outcomes
+                outcome_by_pid = {o["person_id"]: o for o in outcomes}
+                for contact in enriched:
+                    pid = str(contact.get("id") or contact.get("personId") or "")
+                    outcome = outcome_by_pid.get(pid, {})
+                    contact["_score"] = outcome.get("hades_score", 50)
+                    contact["_priority"] = get_priority_label(contact["_score"])
+                    contact["_lead_source"] = f"ZoomInfo Intent (re-export {_reexport_batch})"
+                    # Restore fields enrichment may not return
+                    if not contact.get("sicCode") and outcome.get("sic_code"):
+                        contact["sicCode"] = outcome["sic_code"]
+                    if not contact.get("employees") and outcome.get("employee_count"):
+                        contact["employees"] = outcome["employee_count"]
+
+                # Stage for CSV Export page
+                db.save_staged_export(
+                    workflow_type="intent",
+                    leads=enriched,
+                    query_params={"re_export_batch": _reexport_batch},
+                )
+                staged_rows = db.get_staged_exports(limit=1)
+                if staged_rows:
+                    db.mark_staged_exported(staged_rows[0]["id"], _reexport_batch)
+
+                st.write(f"Staged {len(enriched)} leads for export")
+                reexport_status.update(
+                    label=f"Re-exported {len(enriched)} leads — go to CSV Export to download",
+                    state="complete",
+                )
+                st.page_link("pages/4_CSV_Export.py", label="Open CSV Export", icon="📤")
+
+            except Exception as e:
+                reexport_status.update(label="Re-export failed", state="error")
+                logger.exception("Re-export failed")
+                st.error("Re-export failed. Check application logs for details.")
 
 
 # --- Configuration ---

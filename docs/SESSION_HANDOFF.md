@@ -1,7 +1,103 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-24
-**Status:** All 4 epics implemented (18 stories complete). 727 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38).
+**Date:** 2026-02-25
+**Status:** All 4 epics implemented (18 stories complete). 738 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40).
+
+## Session Summary (2026-02-25, Sessions 39-40)
+
+### What Was Done
+
+Large session spanning two context windows. 738 tests passing (+11 from session 38).
+
+**Intent Workflow Fixes (from session 39)**
+- Fixed `NameError: _is_pending` — variable scoped inside `else:` block but referenced at top level
+- Added structured console logging (`logging.StreamHandler`) for pipeline visibility
+- Replaced `st.spinner` with `st.status` showing real-time progress (intent search pages, contact search pages, enrichment batches)
+- Fixed step indicator showing purple instead of green on completion (`get_current_step()` returns `total + 1`)
+- Fixed summary strip showing pre-enrichment contact count instead of post-enrichment
+- Aligned export buttons (Back/CSV/VanillaSoft) on one row
+- Added spacing between dataframe and score details expander
+
+**Title Preference Learning System (NEW)**
+- Created `db/_title_prefs.py` — mixin with `record_title_selections()`, `get_title_preferences()`, `get_title_preference()`, `get_title_stats()`, `normalize_title()`
+- Added `title_preferences` table to schema
+- Wired into both Intent and Geography workflows:
+  - Auto-select uses preferences to break ties (accuracy stays primary)
+  - Records selected/skipped titles after successful enrichment
+  - Only records skip signals in manual mode (autopilot skips are system choices, not user intent)
+  - Tooltip explains learning system when contact selection is available
+- 11 new tests in `tests/test_title_prefs.py`
+
+**Automation Pipeline Fixes (CRITICAL)**
+- **Bug: Leads lost after automation run** — `run_pipeline()` generated CSV in memory but never called `save_staged_export()`. After `st.rerun()`, leads vanished. Fixed: now stages leads to DB after CSV generation.
+- **Bug: No email from UI** — email logic was in `main()` (CLI-only). Fixed: moved into `run_pipeline()` with `send_email_flag` param. CLI passes `--no-email`/`--dry-run` flags; UI defaults to True.
+- **Bug: Duplicate email from CLI** — removed duplicate email block from `main()` since `run_pipeline()` now handles it.
+
+**Re-export from Lead Outcomes (NEW)**
+- Added "Re-export N leads" button in Automation page run details
+- Pulls `person_id` values from `lead_outcomes`, re-enriches (free per ZoomInfo policy), stages for CSV Export
+- Expanded `get_outcomes_by_batch()` to return `person_id`, `company_id`, `zip_code`, `state`
+
+**GitHub Actions Workflow Toggle (NEW)**
+- Added enable/disable toggle at top of Automation page
+- Uses GitHub API (`/actions/workflows/{id}/enable|disable`) with `GITHUB_TOKEN` from secrets
+- Shows "Paused" in Next Run metric when disabled
+- Requires `GITHUB_TOKEN` with `actions` scope in `.streamlit/secrets.toml`
+
+**Code Review Fixes (2 rounds)**
+- Replaced manual median with `statistics.median` in scoring log lines
+- Moved `setLevel(INFO)` inside handler guard
+- Moved title preference recording to after successful enrichment
+- Deduplicated skip titles via set comprehension
+- Fixed race condition: use `save_staged_export()` return value instead of querying by position
+- Popped orphaned `_reexport_run_id` from session state
+- Eliminated duplicate GitHub API call per render
+- Safe `int()` coercion for `contactAccuracyScore` in ranking key (may be string `"95%"`)
+
+**UX Review Skill**
+- Created `.claude/commands/ux-review.md` — 5-step protocol for autonomous UX testing
+
+### Test Count
+738 tests passing (+11 from session 38: 5 normalize_title + 6 title_prefs)
+
+### Key Files Modified
+```
+pages/1_Intent_Workflow.py      — logging, progress, UX fixes, title prefs, code review fixes
+pages/2_Geography_Workflow.py   — title prefs (auto-select, tooltip, recording)
+pages/10_Automation.py          — re-export, workflow toggle, GitHub API helpers
+scripts/run_intent_pipeline.py  — save_staged_export, email in run_pipeline, send_email_flag
+scripts/_credentials.py         — added optional GITHUB_TOKEN
+db/_title_prefs.py              — NEW: title preference mixin
+db/__init__.py                  — added TitlePrefsMixin
+db/_schema.py                   — title_preferences table
+db/_outcomes.py                 — expanded get_outcomes_by_batch
+scoring.py                      — logging, statistics.median
+dedup.py                        — logging
+expand_search.py                — logging
+tests/test_title_prefs.py       — NEW: 11 tests
+tests/test_turso_db.py          — updated outcomes mock
+.claude/commands/ux-review.md   — NEW: UX review skill
+```
+
+### Uncommitted Changes
+All changes listed above are uncommitted (13 modified + 3 new files, +488/-69 lines). Need to commit and push.
+
+Untracked from prior sessions: `system-test/` (12 screenshots + report), `docs/plans/`
+
+### Known Issues
+- Anthropic API intermittent 500s during this session (auto-retried, no impact on code)
+- SMTP credentials not yet configured for email delivery (user adding Gmail app password)
+- GITHUB_TOKEN not yet added to `.streamlit/secrets.toml` (user generating fine-grained PAT)
+- Previous automation run's 9 leads are NOT recoverable (full contact data was never persisted; `lead_outcomes` only has metadata). Re-run needed after fix.
+- Re-enrichment is free per ZoomInfo policy — no credit cost for recovering leads
+
+### What Needs Doing Next Session
+1. **Commit and push** all session 39-40 changes
+2. **Re-run automation pipeline** from UI to verify staged export + email delivery
+3. **Verify GITHUB_TOKEN** toggle works once user adds the PAT
+4. **HADES-pjq** [P2] — Investigate 2 recent automation pipeline failures (may be resolved by staged export fix)
+5. **HADES-dgr** [P4] — Show budget remaining in Run Now confirmation dialog
+6. **HADES-iic** [P4] — Add Zoho CRM dedup check at export time
 
 ## Session Summary (2026-02-24, Session 38)
 

@@ -31,6 +31,7 @@ from zoominfo_client import (
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
 from scoring import score_geography_leads, get_priority_label, get_priority_action
+from db._title_prefs import normalize_title
 from export_dedup import apply_export_dedup
 from cost_tracker import CostTracker
 from utils import (
@@ -1087,12 +1088,30 @@ if has_operator:
 
             st.session_state.geo_contacts_by_company = contacts_by_company
 
-            # Auto-select best contact per company
+            # Auto-select best contact per company (title preferences break ties)
+            _title_prefs = {}
+            try:
+                _title_prefs = db.get_title_preferences()
+            except Exception:
+                pass
             auto_selected = {}
             for company_id, data in contacts_by_company.items():
                 if data["contacts"]:
-                    auto_selected[company_id] = data["contacts"][0]
+                    if _title_prefs:
+                        def _rank_key(c):
+                            raw = c.get("contactAccuracyScore", 0) or 0
+                            try:
+                                acc = int(raw)
+                            except (ValueError, TypeError):
+                                acc = 0
+                            return (acc, _title_prefs.get(normalize_title(c.get("jobTitle", "")), 0.5))
+                        best = max(data["contacts"], key=_rank_key)
+                        auto_selected[company_id] = best
+                    else:
+                        auto_selected[company_id] = data["contacts"][0]
             st.session_state.geo_selected_contacts = auto_selected
+            if _title_prefs:
+                logger.info("Auto-select used %d title preferences for ranking", len(_title_prefs))
 
             # Store query params
             st.session_state.geo_query_params = {
@@ -1169,6 +1188,22 @@ if (
 ):
     labeled_divider("Step 3: Review & Select")
     st.caption("📋 **Preview data** - no credits used yet. Select contacts to enrich.")
+
+    # Show learning preference tooltip
+    _pref_count = 0
+    try:
+        _pref_count = len(db.get_title_preferences())
+    except Exception:
+        pass
+    if _pref_count > 0:
+        st.caption(
+            f"Preference learning active — tracking {_pref_count} title pattern{'s' if _pref_count != 1 else ''}. "
+            "Your selections train auto-select to prefer titles you pick and deprioritize ones you skip."
+        )
+    else:
+        st.caption(
+            "Preference learning: your selections here teach the system which job titles to prefer in future auto-selects."
+        )
 
     # Cross-session export dedup banner
     _geo_dedup = st.session_state.get("geo_dedup_result")
@@ -1469,6 +1504,31 @@ if (
             st.caption("🧪 Test mode: no credits used")
 
 
+def _record_geo_title_preferences():
+    """Record which titles were selected/skipped for learning. Called after successful enrichment."""
+    selected_contacts = list(st.session_state.geo_selected_contacts.values())
+    _sel_titles = [c.get("jobTitle", "") for c in selected_contacts if c.get("jobTitle")]
+
+    # Only record skip signals in manual mode — autopilot skips are system choices, not user intent
+    if st.session_state.geo_mode == "manual":
+        _sel_pids = {c.get("personId") or c.get("id") for c in selected_contacts}
+        _skip_titles = list({
+            _contact["jobTitle"]
+            for _cdata in (st.session_state.geo_contacts_by_company or {}).values()
+            for _contact in _cdata.get("contacts", [])
+            if (_contact.get("personId") or _contact.get("id")) not in _sel_pids
+            and _contact.get("jobTitle")
+        })
+    else:
+        _skip_titles = []
+
+    if _sel_titles or _skip_titles:
+        try:
+            db.record_title_selections(_sel_titles, _skip_titles)
+        except Exception:
+            logger.debug("Title preference recording failed", exc_info=True)
+
+
 # =============================================================================
 # ENRICHMENT STEP - After selection confirmed (both modes)
 # =============================================================================
@@ -1504,6 +1564,7 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
 
             st.session_state.geo_enriched_contacts = mock_enriched
             st.session_state.geo_enrichment_done = True
+            _record_geo_title_preferences()
             st.rerun()
         else:
             # PRODUCTION MODE: Call actual ZoomInfo API
@@ -1516,6 +1577,7 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                     )
                     st.session_state.geo_enriched_contacts = enriched
                     st.session_state.geo_enrichment_done = True
+                    _record_geo_title_preferences()
                     st.rerun()
                 except PipelineError as e:
                     st.error(f"Enrichment failed: {e.user_message}")

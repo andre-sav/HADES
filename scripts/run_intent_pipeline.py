@@ -59,8 +59,13 @@ logger = logging.getLogger("intent_pipeline")
 # ---------------------------------------------------------------------------
 
 def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
-                 trigger: str = "scheduled", db=None) -> dict:
+                 trigger: str = "scheduled", db=None,
+                 send_email_flag: bool = True) -> dict:
     """Execute the full intent pipeline.
+
+    Args:
+        send_email_flag: Send email with CSV if SMTP creds are available.
+            Set False for --dry-run / --no-email CLI flags.
 
     Returns:
         {success, csv_content, csv_filename, batch_id, summary, error}
@@ -366,6 +371,14 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         summary["contacts_exported"] = len(scored_contacts)
         summary["batch_id"] = batch_id
 
+        # Persist leads for CSV Export page (survives st.rerun / session loss)
+        staged_id = db.save_staged_export(
+            workflow_type="intent",
+            leads=scored_contacts,
+            query_params={"topics": config["topics"], "trigger": trigger},
+        )
+        db.mark_staged_exported(staged_id, batch_id)
+
         # Top 5 leads for email summary
         for lead in scored_contacts[:5]:
             co = lead.get("company") if isinstance(lead.get("company"), dict) else {}
@@ -395,7 +408,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             summary.get("credits_used", 0), len(scored_contacts), None,
         )
 
-        return {
+        result = {
             "success": True,
             "csv_content": csv_content,
             "csv_filename": csv_filename,
@@ -403,6 +416,18 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             "summary": summary,
             "error": None,
         }
+
+        # Send email if SMTP credentials are available and not suppressed
+        if send_email_flag and _has_smtp_creds(creds):
+            try:
+                date_str = datetime.now().strftime("%Y-%m-%d")
+                msg = build_email(result, creds, date_str)
+                send_email(msg, creds)
+                logger.info("Email sent to %s", creds.get("EMAIL_RECIPIENTS", ""))
+            except Exception:
+                logger.warning("Email delivery failed — leads are saved", exc_info=True)
+
+        return result
     except PipelineError as e:
         db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, e.user_message)
         raise
@@ -573,7 +598,9 @@ def main():
 
     # Run pipeline
     try:
-        result = run_pipeline(config, creds, dry_run=args.dry_run, trigger=args.trigger)
+        _send = not args.dry_run and not args.no_email
+        result = run_pipeline(config, creds, dry_run=args.dry_run,
+                              trigger=args.trigger, send_email_flag=_send)
     except Exception:
         logger.exception("Pipeline failed")
 
@@ -605,27 +632,10 @@ def main():
                 s.get("companies_selected", 0), s.get("contacts_found", 0),
                 s.get("contacts_exported", 0))
 
-    # Email delivery
-    if args.dry_run or args.no_email:
-        if result.get("csv_content"):
-            logger.info("CSV ready: %s (%d bytes)",
-                        result["csv_filename"], len(result["csv_content"]))
-        return
-
-    if not _has_smtp_creds(creds):
-        logger.warning("SMTP credentials not configured — skipping email")
-        if result.get("csv_content"):
-            logger.info("CSV ready: %s (%d bytes)",
-                        result["csv_filename"], len(result["csv_content"]))
-        return
-
-    try:
-        msg = build_email(result, creds, date_str)
-        send_email(msg, creds)
-        logger.info("Email sent to %s", creds.get("EMAIL_RECIPIENTS", ""))
-    except Exception:
-        logger.exception("Email delivery failed")
-        sys.exit(1)
+    # Email is now sent inside run_pipeline() when send_email_flag=True
+    if result.get("csv_content"):
+        logger.info("CSV ready: %s (%d bytes)",
+                    result["csv_filename"], len(result["csv_content"]))
 
 
 def _has_smtp_creds(creds: dict) -> bool:

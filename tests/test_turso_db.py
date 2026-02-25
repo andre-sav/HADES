@@ -526,8 +526,9 @@ class TestLeadOutcomes:
         db, mock_conn = mock_db
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
-            (1, "HADES-20260212-001", "Acme Corp", "7011", 150, 85,
-             "geography", "2026-02-12", None, None),
+            (1, "HADES-20260212-001", "Acme Corp", "C123", "P456",
+             "7011", 150, 85, "geography", "2026-02-12", None, None,
+             "75201", "TX"),
         ]
         mock_conn.execute.return_value = mock_cursor
 
@@ -536,6 +537,8 @@ class TestLeadOutcomes:
         assert len(result) == 1
         assert result[0]["company_name"] == "Acme Corp"
         assert result[0]["batch_id"] == "HADES-20260212-001"
+        assert result[0]["company_id"] == "C123"
+        assert result[0]["person_id"] == "P456"
         assert result[0]["outcome"] is None
 
     def test_get_all_outcomes_for_calibration(self, mock_db):

@@ -152,6 +152,11 @@ def build_contacts_by_company(contacts_list: list) -> dict:
         )
         data.pop("_seen_person_ids", None)
 
+    total_contacts = sum(len(d["contacts"]) for d in contacts_by_company.values())
+    logger.info(
+        "Grouped %d contacts into %d companies",
+        total_contacts, len(contacts_by_company),
+    )
     return contacts_by_company
 
 

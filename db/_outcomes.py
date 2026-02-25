@@ -56,10 +56,11 @@ class OutcomesMixin:
         )
 
     def get_outcomes_by_batch(self, batch_id: str) -> list[dict]:
-        """Get all lead outcomes for a batch."""
+        """Get all lead outcomes for a batch (includes person_id and company_id)."""
         rows = self.execute(
-            """SELECT id, batch_id, company_name, sic_code, employee_count,
-                      hades_score, workflow_type, exported_at, outcome, outcome_at
+            """SELECT id, batch_id, company_name, company_id, person_id,
+                      sic_code, employee_count, hades_score, workflow_type,
+                      exported_at, outcome, outcome_at, zip_code, state
                FROM lead_outcomes WHERE batch_id = ?
                ORDER BY id""",
             (batch_id,),
@@ -67,9 +68,10 @@ class OutcomesMixin:
         return [
             {
                 "id": r[0], "batch_id": r[1], "company_name": r[2],
-                "sic_code": r[3], "employee_count": r[4], "hades_score": r[5],
-                "workflow_type": r[6], "exported_at": r[7], "outcome": r[8],
-                "outcome_at": r[9],
+                "company_id": r[3], "person_id": r[4],
+                "sic_code": r[5], "employee_count": r[6], "hades_score": r[7],
+                "workflow_type": r[8], "exported_at": r[9], "outcome": r[10],
+                "outcome_at": r[11], "zip_code": r[12], "state": r[13],
             }
             for r in rows
         ]

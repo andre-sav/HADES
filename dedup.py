@@ -2,8 +2,11 @@
 Deduplication logic for phone numbers and cross-workflow leads.
 """
 
+import logging
 import re
 from functools import lru_cache
+
+logger = logging.getLogger(__name__)
 
 from rapidfuzz.fuzz import token_sort_ratio
 from utils import load_config, normalize_phone
@@ -176,6 +179,7 @@ def dedupe_leads(leads: list[dict]) -> tuple[list[dict], int]:
         seen_keys.add(key)
         deduped.append(lead)
 
+    logger.info("Dedup: %d in → %d out (%d duplicates removed)", len(leads), len(deduped), removed)
     return deduped, removed
 
 

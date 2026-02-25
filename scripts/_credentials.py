@@ -59,4 +59,6 @@ def load_credentials() -> dict:
         "SMTP_PASSWORD": _get("SMTP_PASSWORD"),
         "EMAIL_RECIPIENTS": _get("EMAIL_RECIPIENTS"),
         "EMAIL_FROM": _get("EMAIL_FROM"),
+        # Optional — GitHub workflow toggle (needs actions scope)
+        "GITHUB_TOKEN": _get("GITHUB_TOKEN"),
     }

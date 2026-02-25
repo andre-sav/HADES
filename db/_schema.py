@@ -190,6 +190,15 @@ class SchemaMixin:
             """,
             "CREATE INDEX IF NOT EXISTS idx_error_log_created ON error_log(created_at)",
             "CREATE INDEX IF NOT EXISTS idx_error_log_workflow ON error_log(workflow_type)",
+            # Title preferences — learn which job titles users prefer to enrich
+            """
+            CREATE TABLE IF NOT EXISTS title_preferences (
+                title TEXT PRIMARY KEY,
+                selected_count INTEGER NOT NULL DEFAULT 0,
+                skipped_count INTEGER NOT NULL DEFAULT 0,
+                last_selected TIMESTAMP
+            )
+            """,
         ]
 
         for statement in schema_statements:

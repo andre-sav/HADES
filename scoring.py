@@ -2,8 +2,11 @@
 Lead scoring engine for Intent and Geography workflows.
 """
 
+import logging
 from datetime import datetime, date
 from statistics import median
+
+logger = logging.getLogger(__name__)
 
 from utils import (
     get_scoring_weights,
@@ -214,13 +217,16 @@ def score_intent_leads(leads: list[dict]) -> list[dict]:
         List of leads with score data added, excluding stale leads.
         Sorted by score descending.
     """
+    logger.info("Scoring %d intent leads", len(leads))
     scored_leads = []
+    stale_count = 0
 
     for lead in leads:
         score_data = calculate_intent_score(lead)
 
         # Skip excluded (stale) leads
         if score_data["excluded"]:
+            stale_count += 1
             continue
 
         # Add score data to lead
@@ -237,6 +243,16 @@ def score_intent_leads(leads: list[dict]) -> list[dict]:
 
     # Sort by score descending
     scored_leads.sort(key=lambda x: x["_score"], reverse=True)
+
+    if scored_leads:
+        scores = [l["_score"] for l in scored_leads]
+        logger.info(
+            "Scoring complete: %d scored, %d stale excluded | scores: %d–%d (median %d)",
+            len(scored_leads), stale_count, min(scores), max(scores),
+            int(median(scores)),
+        )
+    else:
+        logger.info("Scoring complete: 0 scored, %d stale excluded (all filtered)", stale_count)
 
     return scored_leads
 
@@ -344,6 +360,7 @@ def score_intent_contacts(
     Returns:
         List of contacts with scoring fields added, sorted by score descending.
     """
+    logger.info("Scoring %d intent contacts against %d companies", len(contacts), len(company_scores))
     weights = get_scoring_weights("intent_contact")
     scored = []
 
@@ -417,6 +434,15 @@ def score_intent_contacts(
         scored.append(scored_contact)
 
     scored.sort(key=lambda x: x["_score"], reverse=True)
+
+    if scored:
+        scores = [c["_score"] for c in scored]
+        logger.info(
+            "Contact scoring complete: %d contacts | scores: %d–%d (median %d)",
+            len(scored), min(scores), max(scores),
+            int(median(scores)),
+        )
+
     return scored
 
 
