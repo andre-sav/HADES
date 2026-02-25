@@ -1177,6 +1177,9 @@ def inject_base_styles():
     }}
 
     /* Hide dev-only pages from sidebar navigation */
+    [data-testid="stSidebarNav"] a[href*="Pipeline_Test"] {{
+        display: none !important;
+    }}
     [data-testid="stSidebarNav"] a[href*="API_Discovery"] {{
         display: none !important;
     }}
