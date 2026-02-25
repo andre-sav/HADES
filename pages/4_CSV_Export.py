@@ -74,7 +74,7 @@ if not intent_leads and not geo_leads:
     staged = db.get_staged_exports(limit=10)
 
     if staged:
-        st.caption("Previous runs available for export")
+        st.caption("Previous runs available for export — click **Load** to resume where you left off.")
 
         table_data = []
         for s in staged:
@@ -283,6 +283,7 @@ with col3:
 # PRE-EXPORT VALIDATION
 # =============================================================================
 labeled_divider("Validation")
+st.caption("Pre-export checks ensure data quality. Red items need attention before exporting; yellow items are OK to proceed.")
 checks = export_validation_checklist(leads_to_export)
 
 # Show warning summary if any checks failed
@@ -431,6 +432,7 @@ with col2:
         type="primary",
         use_container_width=True,
         disabled=not _vs_push_available,
+        help="Send leads directly to VanillaSoft call queue. Each lead becomes a new record.",
     )
     if not _vs_push_available:
         st.caption("VanillaSoft push unavailable — configure `VANILLASOFT_WEB_LEAD_ID` in secrets.")
@@ -442,6 +444,7 @@ with col3:
         file_name=filename,
         mime="text/csv",
         use_container_width=True,
+        help="Download a CSV file formatted for VanillaSoft import (31 columns).",
     )
 
 # Open confirmation dialog on button click

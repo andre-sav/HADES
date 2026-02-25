@@ -1220,6 +1220,7 @@ if (
                 "Include previously exported",
                 value=_prev_val,
                 key="geo_include_exported_cb",
+                help="Show contacts exported in the last 180 days. Useful if you want to re-contact previous leads.",
             )
             if _new_val != _prev_val:
                 st.session_state.geo_include_exported = _new_val
@@ -1351,6 +1352,7 @@ if (
 
         # Show pagination info
         st.caption(f"Showing {len(page_items)} of {len(company_items)} companies (Page {current_page}/{total_pages})")
+        st.caption("Select one contact per company. The system pre-selects the highest-scored — change if you know a better fit.")
 
         # Display companies on current page
         for company_id, data in page_items:
@@ -1608,9 +1610,10 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
 
     if st.session_state.geo_mode == "manual":
         labeled_divider("Step 4: Results")
+        st.caption("Enriched contacts with verified phone numbers and emails. Review the table below, then go to **CSV Export** to download or push to VanillaSoft.")
     else:
         labeled_divider("Step 3: Results")
-        st.caption("Auto-selected and enriched highest-scored contact per company")
+        st.caption("Auto-selected the highest-scored contact per company and enriched with verified data. Go to **CSV Export** when ready.")
 
     # Cross-session export dedup banner (Results section — shown for both modes)
     _geo_dedup_r = st.session_state.get("geo_dedup_result")
@@ -1720,13 +1723,13 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        metric_card("Contacts Enriched", len(enriched_contacts))
+        metric_card("Contacts Enriched", len(enriched_contacts), help_text="Verified contacts with updated phone and email")
 
     with col2:
-        metric_card("Preview Found", preview_count)
+        metric_card("Preview Found", preview_count, help_text="Total from initial search before enrichment")
 
     with col3:
-        metric_card("Companies", companies)
+        metric_card("Companies", companies, help_text="Unique companies represented")
 
     # Results table + filters (fragment for instant filter response)
     @st.fragment
@@ -1801,9 +1804,9 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                 "City": st.column_config.TextColumn("City", width="small"),
                 "State": st.column_config.TextColumn("State", width="small"),
                 "Loc Type": st.column_config.TextColumn("Loc Type", width="small", help="HQ+Person = local HQ, Person-only = branch office"),
-                "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, width="small"),
-                "Accuracy": st.column_config.NumberColumn("Accuracy", width="small"),
-                "Priority": st.column_config.TextColumn("Priority", width="medium"),
+                "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, width="small", help="Lead quality score (0-100) based on proximity, on-site likelihood, authority, and company size"),
+                "Accuracy": st.column_config.NumberColumn("Accuracy", width="small", help="ZoomInfo's confidence (0-100) that this person still works here. 95+ is high quality."),
+                "Priority": st.column_config.TextColumn("Priority", width="medium", help="High = 70+, Medium = 50-69, Low = 30-49, Very Low = under 30"),
                 "Phone": st.column_config.TextColumn("Phone", width="medium"),
                 "Email": st.column_config.TextColumn("Email", width="medium"),
             },

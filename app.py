@@ -174,7 +174,7 @@ _status_items = [
         "label": "Staged Leads",
         "badge": status_badge("info", f"{total_staged} staged") if total_staged > 0
         else status_badge("neutral", "None"),
-        "detail": "Ready to export" if total_staged > 0 else "",
+        "detail": "Go to CSV Export to download or push" if total_staged > 0 else "Run a workflow to generate leads",
     },
 ]
 
@@ -212,16 +212,16 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     weekly_credits = db.get_weekly_usage()
-    metric_card("Weekly Credits", weekly_credits, help_text="Since Monday")
+    metric_card("Weekly Credits", weekly_credits, help_text="ZoomInfo API credits used since Monday. Resets weekly.")
 
 with col2:
     recent = db.get_recent_queries(limit=100)
     total_leads = sum(q.get("leads_returned", 0) or 0 for q in recent)
-    metric_card("Leads Found", total_leads, help_text="Last 100 queries")
+    metric_card("Leads Found", total_leads, help_text="Total leads returned across your last 100 searches")
 
 with col3:
     operators = db.get_operators()
-    metric_card("Operators", len(operators), help_text="Active records")
+    metric_card("Operators", len(operators), help_text="Sales team members available for lead assignment")
 
 
 # =============================================================================
