@@ -9,8 +9,8 @@ import streamlit as st
 
 from turso_db import get_database
 from scoring import build_stale_guidance, score_intent_contacts, get_priority_label
-from export import export_leads_to_csv, get_call_center_agents
-from utils import get_automation_config, get_budget_config
+from export import export_leads_to_csv
+from utils import get_automation_config, get_budget_config, get_call_center_agents
 from ui_components import (
     inject_base_styles,
     page_header,
