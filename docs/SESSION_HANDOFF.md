@@ -1,7 +1,62 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-26
-**Status:** All 4 epics implemented (18 stories complete). 738 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42).
+**Status:** All 4 epics implemented (18 stories complete). 750 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43).
+
+## Session Summary (2026-02-26, Session 43)
+
+### What Was Done
+
+Fixed address field loss in enrichment pipeline, designed and implemented `merge_contact()` refactor, browser-tested all 9 pages, backfilled 96 leads across 2 staged exports. 750 tests passing.
+
+**Address Field Fix (60f00c0)**
+- Dashboard user reported addresses unfilled in exports
+- Root cause: 3 failure points — nested company handler in `export.py` missing address fields, pre-enrichment merge in both workflows didn't save/restore address fields, headless pipeline had no pre-enrichment merge at all
+- Fixed all 3 paths, added 2 regression tests
+
+**merge_contact() Refactor (60ac553)**
+- Designed via brainstorming skill: generic merge function with no hardcoded field list
+- Replaced 3 copy-pasted snapshot/restore blocks (~120 lines) with single `merge_contact()` function
+- Enriched values win when non-empty, search values fill gaps, nested `company` object auto-flattened
+- Code review found 1 issue (dead `personZip` reference) — fixed in 2a7f342
+- 12 new tests added across the session
+
+**Contact Enrich Field Fix (1ebe4b8)**
+- `employeeCount`, `sicCode`, `industry` are company-level fields rejected by Contact Enrich API (400 error)
+- Removed from `DEFAULT_ENRICH_OUTPUT_FIELDS` — these fields come from Contact Search and are preserved by `merge_contact()`
+- This also explains why the Automation page "Re-export" button was failing
+
+**Backfill Script (1ebe4b8)**
+- Created `scripts/backfill_exports.py` for re-enriching staged exports
+- Successfully backfilled 96 leads (export 5: 7 intent, export 6: 89 geography)
+- Address fields now populated; SIC/industry/employeeCount unavailable via Contact Enrich (only from Contact Search)
+
+### Key Files Modified
+```
+export.py                       — merge_contact() function, nested company address extraction
+pages/1_Intent_Workflow.py      — replaced snapshot/restore with merge_contact
+pages/2_Geography_Workflow.py   — replaced snapshot/restore with merge_contact, removed dead personZip
+scripts/run_intent_pipeline.py  — replaced snapshot/restore with merge_contact
+zoominfo_client.py              — removed disallowed company fields from enrich output
+scripts/backfill_exports.py     — NEW: backfill staged exports via re-enrichment
+tests/test_export.py            — 12 new tests (merge_contact, edge cases, address extraction)
+docs/plans/2026-02-26-enrichment-merge-design.md — design doc for merge refactor
+```
+
+### Uncommitted Changes
+None — all changes committed and pushed.
+
+Untracked: `system-test/` (screenshots from prior session)
+
+### Known Issues
+- `sicCode`, `industry`, `employeeCount` cannot be backfilled for older exports — only available from Contact Search, not Contact Enrich
+- SMTP credentials configured in GitHub repo secrets but not yet tested
+- `directPhone` still commented out in Enrich output fields (may require ZoomInfo subscription upgrade)
+
+### What Needs Doing Next Session
+1. **Re-run automation pipeline** to verify email delivery with SMTP credentials
+2. **HADES-dgr** [P4] — Show budget remaining in Run Now confirmation dialog
+3. **HADES-iic** [P4] — Add Zoho CRM dedup check at export time
 
 ## Session Summary (2026-02-26, Session 42)
 
