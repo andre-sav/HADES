@@ -1649,7 +1649,6 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         # Compute distance from contact ZIP to center ZIP
         contact_zip = (
             contact.get("zipCode")
-            or contact.get("personZip")
             or contact.get("companyZipCode", "")
         )
         if contact_zip and center_zip and contact_zip in centroids and center_zip in centroids:

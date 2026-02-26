@@ -396,6 +396,23 @@ class TestMergeContact:
         assert merged["city"] == "Dallas"
         assert merged["state"] == "TX"
 
+    def test_no_search_match_returns_enriched_only(self):
+        """When no search contact matches, enriched data is returned with company flattened."""
+        search = {}
+        enriched = {"id": "999", "firstName": "Jane", "company": {"name": "Corp"}}
+        merged = merge_contact(search, enriched)
+        assert merged["firstName"] == "Jane"
+        assert merged["companyName"] == "Corp"
+        assert merged["id"] == "999"
+        assert merged["personId"] == "999"
+
+    def test_numeric_zero_preserved(self):
+        """Numeric 0 and False are valid non-empty values and should overwrite."""
+        search = {"employeeCount": "500"}
+        enriched = {"employeeCount": 0}
+        merged = merge_contact(search, enriched)
+        assert merged["employeeCount"] == 0
+
     def test_end_to_end_field_preservation(self):
         """Every ZOOMINFO_TO_VANILLASOFT field from search should survive through merge + export."""
         # Phone fields need valid numbers (format_phone strips invalid data)
