@@ -33,6 +33,7 @@ from zoominfo_client import (
 from scoring import score_geography_leads, get_priority_label, get_priority_action
 from db._title_prefs import normalize_title
 from export_dedup import apply_export_dedup
+from export import merge_contact
 from cost_tracker import CostTracker
 from utils import (
     get_sic_codes,
@@ -1626,69 +1627,30 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
 
     enriched_contacts = st.session_state.geo_enriched_contacts
 
-    # Merge pre-enrichment metadata and compute distance
-    # Enrichment replaces contact objects entirely, losing search-only fields
-    # (sicCode, employeeCount, industry require additional subscription and aren't in enrich output)
-    pre_enrichment = {}
+    # Merge search-phase data with enriched contacts
+    # Enrichment replaces contact objects entirely — merge preserves all search fields
+    search_by_pid = {}
     for company_id, contact in st.session_state.geo_selected_contacts.items():
         pid = str(contact.get("personId") or contact.get("id") or "")
         if pid:
-            pre_enrichment[pid] = {
-                "_location_type": contact.get("_location_type", ""),
-                "personZip": contact.get("zipCode") or contact.get("personZip") or contact.get("companyZipCode", ""),
-                "companyName": contact.get("companyName", ""),
-                "companyId": contact.get("companyId", ""),
-                "website": contact.get("website") or contact.get("companyWebsite", ""),
-                "sicCode": contact.get("sicCode", ""),
-                "employees": contact.get("employees") or contact.get("employeeCount", ""),
-                "industry": contact.get("industry", ""),
-                "directPhone": contact.get("directPhone", ""),
-                # Address fields — enrich API may return blanks
-                "street": contact.get("street", ""),
-                "city": contact.get("city", ""),
-                "state": contact.get("state", ""),
-                "zipCode": contact.get("zipCode", ""),
-                "companyStreet": contact.get("companyStreet", ""),
-                "companyCity": contact.get("companyCity", ""),
-                "companyState": contact.get("companyState", ""),
-                "companyZipCode": contact.get("companyZipCode", ""),
-            }
+            search_by_pid[pid] = contact
 
     center_zip = st.session_state.geo_query_params.get("center_zip") or (
         st.session_state.geo_query_params.get("zip_codes", [""])[0]
     )
     centroids = load_zip_centroids()
 
-    for contact in enriched_contacts:
+    for i, contact in enumerate(enriched_contacts):
         pid = str(contact.get("id") or contact.get("personId") or "")
-        pre = pre_enrichment.get(pid, {})
-
-        # Restore fields from pre-enrichment data that enrichment drops
-        # Enrich API may return blanks for address/company fields
-        for field in (
-            "_location_type", "companyName", "companyId", "website", "sicCode", "employees", "industry", "directPhone",
-            "street", "city", "state", "zipCode",
-            "companyStreet", "companyCity", "companyState", "companyZipCode",
-        ):
-            if not contact.get(field) and pre.get(field):
-                contact[field] = pre[field]
-
-        # Normalize enrich-specific field names to match search field names
-        if not contact.get("companyName"):
-            contact["companyName"] = (
-                contact.get("company", {}).get("name", "")
-                if isinstance(contact.get("company"), dict)
-                else ""
-            )
-        if not contact.get("website") and contact.get("companyWebsite"):
-            contact["website"] = contact["companyWebsite"]
+        search_data = search_by_pid.get(pid, {})
+        enriched_contacts[i] = merge_contact(search_data, contact)
+        contact = enriched_contacts[i]
 
         # Compute distance from contact ZIP to center ZIP
         contact_zip = (
             contact.get("zipCode")
             or contact.get("personZip")
-            or contact.get("companyZipCode")
-            or pre.get("personZip", "")
+            or contact.get("companyZipCode", "")
         )
         if contact_zip and center_zip and contact_zip in centroids and center_zip in centroids:
             c_lat, c_lng, _ = centroids[contact_zip]

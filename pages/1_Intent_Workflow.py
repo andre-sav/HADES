@@ -52,6 +52,7 @@ from scoring import (
     build_stale_guidance,
 )
 from dedup import dedupe_leads
+from export import merge_contact
 from cost_tracker import CostTracker
 from expand_search import build_contacts_by_company
 from db._title_prefs import normalize_title
@@ -1447,45 +1448,18 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
     enriched_contacts = st.session_state.intent_enriched_contacts
     logger.info("Results step: scoring %d enriched contacts", len(enriched_contacts))
 
-    # Merge pre-enrichment metadata
-    # Enrichment replaces contact objects entirely, losing search-only fields
-    pre_enrichment = {}
+    # Merge search-phase data with enriched contacts
+    # Enrichment replaces contact objects entirely — merge preserves all search fields
+    search_by_pid = {}
     for company_id, contact in (st.session_state.intent_selected_contacts or {}).items():
         pid = str(contact.get("personId") or contact.get("id") or "")
         if pid:
-            pre_enrichment[pid] = {
-                "companyName": contact.get("companyName", ""),
-                "companyId": contact.get("companyId", ""),
-                "sicCode": contact.get("sicCode", ""),
-                "employees": contact.get("employees") or contact.get("employeeCount", ""),
-                "industry": contact.get("industry", ""),
-                "directPhone": contact.get("directPhone", ""),
-                # Address fields — enrich API may return blanks
-                "street": contact.get("street", ""),
-                "city": contact.get("city", ""),
-                "state": contact.get("state", ""),
-                "zipCode": contact.get("zipCode", ""),
-                "companyStreet": contact.get("companyStreet", ""),
-                "companyCity": contact.get("companyCity", ""),
-                "companyState": contact.get("companyState", ""),
-                "companyZipCode": contact.get("companyZipCode", ""),
-            }
+            search_by_pid[pid] = contact
 
-    for contact in enriched_contacts:
+    for i, contact in enumerate(enriched_contacts):
         pid = str(contact.get("id") or contact.get("personId") or "")
-        pre = pre_enrichment.get(pid, {})
-        # Restore fields from pre-enrichment data that enrichment drops
-        for field in (
-            "companyName", "companyId", "sicCode", "employees", "industry", "directPhone",
-            "street", "city", "state", "zipCode",
-            "companyStreet", "companyCity", "companyState", "companyZipCode",
-        ):
-            if not contact.get(field) and pre.get(field):
-                contact[field] = pre[field]
-        # Normalize enrich-specific field names
-        if not contact.get("companyName"):
-            co = contact.get("company")
-            contact["companyName"] = co.get("name", "") if isinstance(co, dict) else ""
+        search_data = search_by_pid.get(pid, {})
+        enriched_contacts[i] = merge_contact(search_data, contact)
 
     # Build company_scores dict for scoring
     company_scores = {}

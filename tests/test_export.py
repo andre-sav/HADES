@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
-from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary, generate_batch_id
-from utils import VANILLASOFT_COLUMNS
+from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary, generate_batch_id, merge_contact
+from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT
 
 
 class TestBuildVanillasoftRow:
@@ -317,6 +317,110 @@ class TestEnrichmentFieldMapping:
         row = build_vanillasoft_row(lead)
         assert row["Address"] == "456 Elm St"
         assert row["City"] == "Austin"
+
+
+class TestMergeContact:
+    """Tests for merge_contact function."""
+
+    def test_enrich_wins_when_both_have_data(self):
+        """Enriched value should overwrite search value for same field."""
+        search = {"firstName": "Bob", "companyName": "Search Corp"}
+        enriched = {"firstName": "Robert", "companyName": "Enrich Corp"}
+        merged = merge_contact(search, enriched)
+        assert merged["firstName"] == "Robert"
+        assert merged["companyName"] == "Enrich Corp"
+
+    def test_search_fills_gap_when_enrich_empty(self):
+        """Search value preserved when enrich field is empty or None."""
+        search = {"sicCode": "7011", "industry": "Hotels", "street": "123 Main St"}
+        enriched = {"sicCode": "", "industry": None, "firstName": "Jane"}
+        merged = merge_contact(search, enriched)
+        assert merged["sicCode"] == "7011"
+        assert merged["industry"] == "Hotels"
+        assert merged["street"] == "123 Main St"
+        assert merged["firstName"] == "Jane"
+
+    def test_nested_company_flattened(self):
+        """Nested company object should be flattened to companyX fields."""
+        search = {}
+        enriched = {"company": {
+            "name": "Nested Corp",
+            "street": "456 Elm St",
+            "city": "Dallas",
+            "state": "TX",
+            "zipCode": "75201",
+            "id": "12345",
+        }}
+        merged = merge_contact(search, enriched)
+        assert merged["companyName"] == "Nested Corp"
+        assert merged["companyStreet"] == "456 Elm St"
+        assert merged["companyCity"] == "Dallas"
+        assert merged["companyState"] == "TX"
+        assert merged["companyZipCode"] == "75201"
+        assert merged["companyId"] == "12345"
+
+    def test_flat_enrich_beats_nested_company(self):
+        """Flat enrich fields should take precedence over flattened nested company."""
+        search = {}
+        enriched = {
+            "companyName": "Flat Corp",
+            "company": {"name": "Nested Corp", "city": "Austin"},
+        }
+        merged = merge_contact(search, enriched)
+        assert merged["companyName"] == "Flat Corp"
+
+    def test_person_id_normalization(self):
+        """Both id and personId should be set after merge."""
+        # Enrich returns 'id', search returns 'personId'
+        search = {"personId": "999"}
+        enriched = {"id": "999", "firstName": "Jane"}
+        merged = merge_contact(search, enriched)
+        assert merged["id"] == "999"
+        assert merged["personId"] == "999"
+
+    def test_computed_fields_survive(self):
+        """Underscore-prefixed computed fields from search phase survive merge."""
+        search = {"_location_type": "PersonAndHQ", "_custom_tag": "test", "companyName": "Corp"}
+        enriched = {"firstName": "Jane"}
+        merged = merge_contact(search, enriched)
+        assert merged["_location_type"] == "PersonAndHQ"
+        assert merged["_custom_tag"] == "test"
+        assert merged["companyName"] == "Corp"
+
+    def test_empty_strings_dont_overwrite(self):
+        """Empty strings and whitespace-only values in enrich should not overwrite search data."""
+        search = {"street": "123 Main St", "city": "Dallas", "state": "TX"}
+        enriched = {"street": "", "city": "   ", "state": None}
+        merged = merge_contact(search, enriched)
+        assert merged["street"] == "123 Main St"
+        assert merged["city"] == "Dallas"
+        assert merged["state"] == "TX"
+
+    def test_end_to_end_field_preservation(self):
+        """Every ZOOMINFO_TO_VANILLASOFT field from search should survive through merge + export."""
+        # Phone fields need valid numbers (format_phone strips invalid data)
+        phone_fields = {"mobilePhone", "directPhone", "companyHQPhone", "companyPhone", "phone"}
+
+        # Build a search contact with every mapped ZoomInfo field populated
+        search = {}
+        for zi_field in ZOOMINFO_TO_VANILLASOFT:
+            if zi_field in phone_fields:
+                search[zi_field] = "(214) 555-0100"
+            else:
+                search[zi_field] = f"test_{zi_field}"
+
+        # Sparse enrich — only has identity fields
+        enriched = {"id": "123", "firstName": "Jane", "lastName": "Doe"}
+
+        merged = merge_contact(search, enriched)
+        row = build_vanillasoft_row(merged)
+
+        # Every VanillaSoft column that has a source field should be populated
+        for zi_field, vs_col in ZOOMINFO_TO_VANILLASOFT.items():
+            assert row[vs_col] != "", (
+                f"VanillaSoft column '{vs_col}' is blank — "
+                f"ZoomInfo field '{zi_field}' was lost in the pipeline"
+            )
 
 
 class TestExportLeadsToCsv:

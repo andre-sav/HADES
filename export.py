@@ -35,6 +35,39 @@ def generate_batch_id(db) -> str:
     return f"HADES-{today}-{seq:03d}"
 
 
+def merge_contact(search_contact: dict, enriched_contact: dict) -> dict:
+    """Merge enriched contact onto search-phase contact.
+
+    Enriched values win when non-empty; search values fill gaps.
+    Automatically flattens nested 'company' object from Enrich API.
+    """
+    merged = dict(search_contact)
+
+    # Flatten nested company object (Enrich API sometimes nests these)
+    company = enriched_contact.get("company")
+    if isinstance(company, dict):
+        for key, val in company.items():
+            if val is not None and str(val).strip():
+                # street → companyStreet, name → companyName, id → companyId
+                flat_key = f"company{key[0].upper()}{key[1:]}"
+                merged[flat_key] = val
+
+    # Enrich values overwrite when non-empty
+    for key, val in enriched_contact.items():
+        if key == "company":
+            continue  # already flattened above
+        if val is not None and str(val).strip():
+            merged[key] = val
+
+    # Normalize personId / id (enrich returns 'id', search returns 'personId')
+    pid = merged.get("id") or merged.get("personId")
+    if pid:
+        merged["id"] = pid
+        merged["personId"] = pid
+
+    return merged
+
+
 def build_vanillasoft_row(
     lead: dict,
     operator: dict | None = None,

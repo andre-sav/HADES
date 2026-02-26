@@ -46,7 +46,7 @@ from zoominfo_client import (
 )
 from scoring import score_intent_leads, score_intent_contacts, get_priority_label, compute_stale_summary
 from dedup import dedupe_leads
-from export import export_leads_to_csv
+from export import export_leads_to_csv, merge_contact
 from export_dedup import get_previously_exported, filter_previously_exported
 from expand_search import build_contacts_by_company
 from cost_tracker import CostTracker
@@ -331,27 +331,12 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             if c.get("personId") or c.get("id")
         ]
 
-        # Snapshot pre-enrichment data (enrich replaces contact objects, losing search-only fields)
-        pre_enrichment = {}
+        # Build search-phase lookup for merge after enrichment
+        search_by_pid = {}
         for c in selected_contacts:
             pid = str(c.get("personId") or c.get("id") or "")
             if pid:
-                pre_enrichment[pid] = {
-                    "companyName": c.get("companyName", ""),
-                    "companyId": c.get("companyId", ""),
-                    "sicCode": c.get("sicCode", ""),
-                    "employees": c.get("employees") or c.get("employeeCount", ""),
-                    "industry": c.get("industry", ""),
-                    "directPhone": c.get("directPhone", ""),
-                    "street": c.get("street", ""),
-                    "city": c.get("city", ""),
-                    "state": c.get("state", ""),
-                    "zipCode": c.get("zipCode", ""),
-                    "companyStreet": c.get("companyStreet", ""),
-                    "companyCity": c.get("companyCity", ""),
-                    "companyState": c.get("companyState", ""),
-                    "companyZipCode": c.get("companyZipCode", ""),
-                }
+                search_by_pid[pid] = c
 
         enriched = client.enrich_contacts_batch(
             person_ids=person_ids,
@@ -360,21 +345,11 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         summary["contacts_enriched"] = len(enriched)
         summary["credits_used"] = len(enriched)
 
-        # Restore fields from pre-enrichment data that enrichment may drop
-        for contact in enriched:
+        # Merge search-phase data with enriched contacts (preserves all fields)
+        for i, contact in enumerate(enriched):
             pid = str(contact.get("id") or contact.get("personId") or "")
-            pre = pre_enrichment.get(pid, {})
-            for field in (
-                "companyName", "companyId", "sicCode", "employees", "industry", "directPhone",
-                "street", "city", "state", "zipCode",
-                "companyStreet", "companyCity", "companyState", "companyZipCode",
-            ):
-                if not contact.get(field) and pre.get(field):
-                    contact[field] = pre[field]
-            # Handle nested company object
-            if not contact.get("companyName"):
-                co = contact.get("company")
-                contact["companyName"] = co.get("name", "") if isinstance(co, dict) else ""
+            search_data = search_by_pid.get(pid, {})
+            enriched[i] = merge_contact(search_data, contact)
 
         # Log credit usage
         cost_tracker.log_usage(
