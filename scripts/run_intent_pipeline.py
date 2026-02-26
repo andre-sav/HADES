@@ -16,6 +16,7 @@ Cron setup (daily at 6:00 AM):
 """
 
 import argparse
+import html as _html
 import json
 import logging
 import os
@@ -477,10 +478,10 @@ def build_email(result: dict, creds: dict, date_str: str) -> MIMEMultipart:
 
 def _build_html_body(summary: dict, batch_id: str | None) -> str:
     """Build HTML summary table."""
-    topics = ", ".join(summary.get("topics", []))
+    topics = _html.escape(", ".join(summary.get("topics", [])))
     rows = [
         ("Topics", topics),
-        ("Signal Strengths", ", ".join(summary.get("signal_strengths", []))),
+        ("Signal Strengths", _html.escape(", ".join(summary.get("signal_strengths", [])))),
         ("Intent Results", summary.get("intent_results", 0)),
         ("Scored (non-stale)", summary.get("scored_results", 0)),
         ("Previously Exported (filtered)", summary.get("dedup_filtered", 0)),
@@ -502,11 +503,11 @@ def _build_html_body(summary: dict, batch_id: str | None) -> str:
     top_leads_html = ""
     if summary.get("top_leads"):
         lead_rows = "".join(
-            f"<tr><td style='padding:4px 8px'>{l['name']}</td>"
-            f"<td style='padding:4px 8px'>{l['company']}</td>"
-            f"<td style='padding:4px 8px'>{l['title']}</td>"
+            f"<tr><td style='padding:4px 8px'>{_html.escape(str(l['name']))}</td>"
+            f"<td style='padding:4px 8px'>{_html.escape(str(l['company']))}</td>"
+            f"<td style='padding:4px 8px'>{_html.escape(str(l['title']))}</td>"
             f"<td style='padding:4px 8px'>{l['score']}</td>"
-            f"<td style='padding:4px 8px'>{l['topic']}</td></tr>"
+            f"<td style='padding:4px 8px'>{_html.escape(str(l['topic']))}</td></tr>"
             for l in summary["top_leads"]
         )
         top_leads_html = f"""

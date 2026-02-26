@@ -247,11 +247,12 @@ if intent_leads and geo_leads:
                         filtered.append(lead)
                         continue
                     # Keep if this lead scores >= the other version
-                    key_matches = [d for d in duplicates if d["lead1"] is lead or d["lead2"] is lead]
+                    lead_pid = str(lead.get("personId", ""))
+                    key_matches = [d for d in duplicates if str(d["lead1"].get("personId", "")) == lead_pid or str(d["lead2"].get("personId", "")) == lead_pid]
                     if key_matches:
                         dup = key_matches[0]
                         my_score = lead.get("_score", 0)
-                        other_score = (dup["score2"] if dup["lead1"] is lead else dup["score1"])
+                        other_score = (dup["score2"] if str(dup["lead1"].get("personId", "")) == lead_pid else dup["score1"])
                         if my_score >= other_score:
                             filtered.append(lead)
                     else:

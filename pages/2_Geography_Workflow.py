@@ -106,7 +106,7 @@ require_auth()
 
 
 # Initialize services
-@st.cache_resource
+@st.cache_resource(ttl=3600)
 def get_services():
     db = get_database()
     return db, CostTracker(db)
@@ -166,6 +166,7 @@ defaults = {
     # Background search (stop button support)
     "geo_search_job": None,  # SearchJob instance while thread running
     "_geo_progress_log": None,  # Shared list for real-time progress from thread
+    "geo_leads_staged": False,
 }
 for key, default in defaults.items():
     if key not in st.session_state:
@@ -1856,12 +1857,12 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             filtered_indices = filtered_df["_idx"].tolist()
             st.session_state.geo_export_leads = [scored_leads[i] for i in filtered_indices]
 
-            # Persist to DB for re-export after session loss
+            # Persist to DB for re-export after session loss (full set, not filtered)
             if not st.session_state.get("geo_leads_staged"):
                 op = st.session_state.get("geo_operator")
                 db.save_staged_export(
                     "geography",
-                    st.session_state.geo_export_leads,
+                    scored_leads,
                     query_params=st.session_state.get("geo_query_params"),
                     operator_id=op.get("id") if op else None,
                 )

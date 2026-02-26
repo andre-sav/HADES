@@ -1,6 +1,7 @@
 """Connection management and query execution core."""
 
 import logging
+from contextlib import contextmanager
 
 import libsql_experimental as libsql
 
@@ -14,6 +15,7 @@ class ConnectionMixin:
         self.url = url
         self.auth_token = auth_token
         self._conn = None
+        self._in_transaction = False
 
     @property
     def connection(self):
@@ -32,6 +34,27 @@ class ConnectionMixin:
         msg = str(exc).lower()
         return "stream not found" in msg or ("hrana" in msg and "404" in msg)
 
+    @contextmanager
+    def transaction(self):
+        """Context manager for grouping writes into a single transaction.
+
+        Usage::
+
+            with db.transaction():
+                db.execute_write("INSERT ...")
+                db.execute_write("UPDATE ...")
+            # committed here (or rolled back on exception)
+        """
+        self._in_transaction = True
+        try:
+            yield
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        finally:
+            self._in_transaction = False
+
     def execute(self, query: str, params: tuple = ()) -> list:
         """Execute query and return results. Reconnects on stale stream."""
         try:
@@ -45,17 +68,23 @@ class ConnectionMixin:
             raise
 
     def execute_write(self, query: str, params: tuple = ()) -> int:
-        """Execute insert/update/delete and return lastrowid. Reconnects on stale stream."""
+        """Execute insert/update/delete and return lastrowid. Reconnects on stale stream.
+
+        When called inside a ``transaction()`` context manager, the commit is
+        deferred until the context exits.
+        """
         try:
             cursor = self.connection.execute(query, params)
-            self.connection.commit()
+            if not self._in_transaction:
+                self.connection.commit()
             return cursor.lastrowid
         except Exception as e:
             if self._is_stale_stream_error(e):
                 logger.warning("Stale Hrana stream detected, reconnecting...")
                 conn = self._reconnect()
                 cursor = conn.execute(query, params)
-                conn.commit()
+                if not self._in_transaction:
+                    conn.commit()
                 return cursor.lastrowid
             raise
 

@@ -52,6 +52,20 @@ class ErrorLogMixin:
         )
         return [self._row_to_error(r) for r in rows]
 
+    def purge_old_error_logs(self, days: int = 90) -> int:
+        """Delete error log entries older than *days*. Returns count deleted."""
+        rows = self.execute(
+            "SELECT COUNT(*) FROM error_log WHERE created_at < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        count = rows[0][0] if rows else 0
+        if count > 0:
+            self.execute_write(
+                "DELETE FROM error_log WHERE created_at < datetime('now', ?)",
+                (f"-{days} days",),
+            )
+        return count
+
     @staticmethod
     def _row_to_error(row: tuple) -> dict:
         return {

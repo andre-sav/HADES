@@ -171,6 +171,8 @@ cache:
 
 # Call Center Agents (round-robin Contact Owner assignment)
 # These emails are assigned to records evenly across each export batch
+# NOTE: These emails are checked into version control.
+# For public/shared repos, move to .streamlit/secrets.toml as CALL_CENTER_AGENTS.
 call_center_agents:
   - "courtney@hlmii.com"
   - "caitlyn@hlmii.com"

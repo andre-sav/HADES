@@ -69,7 +69,7 @@ def _next_scheduled_run() -> tuple[str, str]:
     return day_label, countdown
 
 
-_GH_REPO = "andre-sav/HADES"
+_GH_REPO = st.secrets.get("GITHUB_REPO", "andre-sav/HADES")
 _GH_WORKFLOW = "intent-poll.yml"
 
 
@@ -164,7 +164,7 @@ def _run_card_html(run: dict) -> str:
             f'<div style="margin-top:{SPACING["xs"]};color:{COLORS["error_light"]};'
             f'font-size:{FONT_SIZES["xs"]};">{friendly}</div>'
         )
-    elif status == "complete" and leads == 0:
+    elif status == "success" and leads == 0:
         context_html = (
             f'<div style="margin-top:{SPACING["xs"]};color:{COLORS["text_muted"]};'
             f'font-size:{FONT_SIZES["xs"]};">No new intent signals matched filters</div>'
@@ -484,7 +484,7 @@ else:
                     st.markdown(f"**Credits:** {run.get('credits_used', 0)}")
                     _detail_leads = run.get('leads_exported', 0)
                     st.markdown(f"**Leads:** {_detail_leads}")
-                    if run["status"] == "complete" and _detail_leads == 0:
+                    if run["status"] == "success" and _detail_leads == 0:
                         st.caption("No new intent signals matched filters")
                     st.markdown(f"**Started:** {run.get('started_at', '—')}")
                     st.markdown(f"**Completed:** {run.get('completed_at', '—')}")

@@ -6,6 +6,7 @@ Dual mode: Autopilot (auto-select) and Manual Review (user selects companies + c
 """
 
 import hashlib
+import html
 import json
 import logging
 
@@ -97,7 +98,7 @@ require_auth()
 
 
 # Initialize services
-@st.cache_resource
+@st.cache_resource(ttl=3600)
 def get_services():
     db = get_database()
     return db, CostTracker(db)
@@ -132,6 +133,7 @@ defaults = {
     "intent_enriched_contacts": None,
     "intent_enrichment_done": False,
     "intent_usage_logged": False,
+    "intent_leads_staged": False,
     # Step 4: Final results
     "intent_results": None,
     "intent_export_leads": None,
@@ -388,8 +390,8 @@ else:
         _strength_to_score_preview = {"High": 90, "Medium": 75, "Low": 60}
         _min_score = min(_strength_to_score_preview.get(s, 60) for s in signal_strengths)
         _preview_parts = [
-            f"<strong>Topics</strong>: {', '.join(selected_topics)}",
-            f"<strong>Signal</strong>: {', '.join(signal_strengths)} (score >= {_min_score})",
+            f"<strong>Topics</strong>: {html.escape(', '.join(selected_topics))}",
+            f"<strong>Signal</strong>: {html.escape(', '.join(signal_strengths))} (score >= {_min_score})",
             f"<strong>Employees</strong>: {get_employee_minimum():,}–{get_employee_maximum():,}",
             f"<strong>Industries</strong>: {len(get_sic_codes())} SIC codes",
         ]
@@ -830,11 +832,10 @@ if st.session_state.intent_search_executed and not st.session_state.intent_compa
         st.warning(f"All {_raw_count} intent results are stale (>14 days old). No companies survived freshness scoring.")
 
         if _guidance:
-            import html as _html
             _items = "".join(
                 f'<div style="padding:{SPACING["xs"]} 0;color:{COLORS["text_secondary"]};">'
                 f'<span style="color:{COLORS["warning"]};margin-right:{SPACING["xs"]};">→</span>'
-                f'{_html.escape(g)}</div>'
+                f'{html.escape(g)}</div>'
                 for g in _guidance
             )
             st.markdown(
@@ -1663,11 +1664,11 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
             filtered_indices = filtered_df["_idx"].tolist()
             st.session_state.intent_export_leads = [scored_leads[i] for i in filtered_indices]
 
-            # Persist to DB for re-export after session loss
+            # Persist to DB for re-export after session loss (full set, not filtered)
             if not st.session_state.get("intent_leads_staged"):
                 db.save_staged_export(
                     "intent",
-                    st.session_state.intent_export_leads,
+                    scored_leads,
                     query_params=st.session_state.get("intent_query_params"),
                 )
                 st.session_state.intent_leads_staged = True

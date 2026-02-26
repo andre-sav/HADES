@@ -509,6 +509,7 @@ class TestLeadOutcomes:
         db = TursoDatabase.__new__(TursoDatabase)
         db._conn = sqlite3.connect(":memory:")
         db.url = ":memory:"
+        db._in_transaction = False
         db.init_schema()
 
         row = (
@@ -842,6 +843,7 @@ class TestPipelineRuns:
         db = TursoDatabase.__new__(TursoDatabase)
         db._conn = sqlite3.connect(":memory:")
         db.url = ":memory:"
+        db._in_transaction = False
         db.init_schema()
         return db
 
@@ -955,6 +957,7 @@ class TestStagedExportPushTracking:
         db = TursoDatabase.__new__(TursoDatabase)
         db._conn = sqlite3.connect(":memory:")
         db.url = ":memory:"
+        db._in_transaction = False
         db.init_schema()
         return db
 
@@ -995,6 +998,7 @@ class TestPurgeOldStagedExports:
         db = TursoDatabase.__new__(TursoDatabase)
         db._conn = sqlite3.connect(":memory:")
         db.url = ":memory:"
+        db._in_transaction = False
         db.init_schema()
         return db
 

@@ -17,17 +17,23 @@ class UsageMixin:
         )
 
     def get_weekly_usage(self, workflow_type: str | None = None) -> int:
-        """Get total credits used this week."""
+        """Get total credits used this week (Monday-based calendar week).
+
+        Uses ``strftime('%w')`` (0=Sun … 6=Sat) to compute the most recent
+        Monday: ``(dow + 6) % 7`` gives days since Monday.
+        """
+        # SQLite expression for "most recent Monday at midnight"
+        monday = "date('now', '-' || (cast(strftime('%w', 'now') as integer) + 6) % 7 || ' days')"
         if workflow_type:
             rows = self.execute(
                 "SELECT COALESCE(SUM(credits_used), 0) FROM credit_usage "
-                "WHERE workflow_type = ? AND created_at >= date('now', '-7 days')",
+                f"WHERE workflow_type = ? AND created_at >= {monday}",
                 (workflow_type,),
             )
         else:
             rows = self.execute(
                 "SELECT COALESCE(SUM(credits_used), 0) FROM credit_usage "
-                "WHERE created_at >= date('now', '-7 days')"
+                f"WHERE created_at >= {monday}"
             )
         return rows[0][0] if rows else 0
 

@@ -12,22 +12,25 @@ from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT, format_phone
 def generate_batch_id(db) -> str:
     """Generate a sequential batch ID for this export: HADES-YYYYMMDD-NNN.
 
-    Uses sync_metadata table with atomic upsert to avoid race conditions.
+    Uses sync_metadata table with atomic upsert + RETURNING to avoid race
+    conditions (single statement instead of write-then-read).
     """
     today = datetime.now().strftime("%Y%m%d")
     seq_key = f"hades_batch_seq_{today}"
 
-    # Atomic upsert: insert 1 or increment existing value in a single statement.
-    # Intentionally raw SQL — MetadataMixin.set_sync_value can't express CAST increment.
-    db.execute_write(
+    # Atomic upsert with RETURNING — one round-trip, no read-after-write race.
+    rows = db.execute(
         """INSERT INTO sync_metadata (key, value, updated_at)
            VALUES (?, '1', CURRENT_TIMESTAMP)
-           ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT),
-               updated_at = CURRENT_TIMESTAMP""",
+           ON CONFLICT(key) DO UPDATE
+               SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT),
+                   updated_at = CURRENT_TIMESTAMP
+           RETURNING CAST(value AS INTEGER)""",
         (seq_key,),
     )
+    db.connection.commit()
 
-    seq = int(db.get_sync_value(seq_key))
+    seq = rows[0][0]
 
     return f"HADES-{today}-{seq:03d}"
 

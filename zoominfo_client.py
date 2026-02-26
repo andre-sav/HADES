@@ -15,7 +15,6 @@ import requests
 import streamlit as st
 
 from errors import (
-    PipelineError,
     ZoomInfoError,
     ZoomInfoAuthError,
     ZoomInfoRateLimitError,
@@ -605,7 +604,7 @@ class ZoomInfoClient:
                 "totalResults": total,
                 "pageSize": params.page_size,
                 "currentPage": params.page,
-                "totalPages": (total + params.page_size - 1) // params.page_size if total > 0 else 1,
+                "totalPages": (total + max(1, params.page_size) - 1) // max(1, params.page_size) if total > 0 else 1,
             },
             "_raw_keys": list(raw_data[0].keys()) if raw_data else [],
             "_raw_sample": raw_data[0] if raw_data else {},
@@ -646,7 +645,7 @@ class ZoomInfoClient:
                 "totalResults": response.get("totalResults", 0),
                 "pageSize": params.page_size,
                 "currentPage": params.page,
-                "totalPages": (response.get("totalResults", 0) + params.page_size - 1) // params.page_size,
+                "totalPages": (response.get("totalResults", 0) + max(1, params.page_size) - 1) // max(1, params.page_size),
             },
         }
         logger.info(f"Company Search complete: {len(result['data'])} results on page {params.page}, {result['pagination']['totalResults']} total")
@@ -781,6 +780,16 @@ class ZoomInfoClient:
             # Company ID search - no location filters
             # ZoomInfo companyId field: comma-separated string, 500 char limit
             company_id_str = ",".join(params.company_ids)
+            if len(company_id_str) > 500:
+                # Truncate at comma boundary to fit API 500-char limit
+                max_ids = len(params.company_ids)
+                while len(",".join(params.company_ids[:max_ids])) > 500 and max_ids > 1:
+                    max_ids -= 1
+                company_id_str = ",".join(params.company_ids[:max_ids])
+                logger.warning(
+                    "company_id list truncated from %d to %d IDs (API 500-char limit)",
+                    len(params.company_ids), max_ids,
+                )
             request_body = {
                 "companyId": company_id_str,
             }
@@ -855,7 +864,7 @@ class ZoomInfoClient:
                 "totalResults": response.get("totalResults", 0),
                 "pageSize": params.page_size,
                 "currentPage": params.page,
-                "totalPages": (response.get("totalResults", 0) + params.page_size - 1) // params.page_size,
+                "totalPages": (response.get("totalResults", 0) + max(1, params.page_size) - 1) // max(1, params.page_size),
             },
         }
         logger.info(f"Contact Search complete: {len(result['data'])} results on page {params.page}, {result['pagination']['totalResults']} total")

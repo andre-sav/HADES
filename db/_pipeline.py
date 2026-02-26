@@ -61,10 +61,15 @@ class PipelineRunsMixin:
             for r in rows
         ]
 
-    def has_running_pipeline(self, workflow_type: str) -> bool:
-        """Check if any pipeline run is currently in 'running' status."""
+    def has_running_pipeline(self, workflow_type: str, max_age_minutes: int = 30) -> bool:
+        """Check if any pipeline run is currently in 'running' status.
+
+        Runs older than *max_age_minutes* are treated as stale (crashed without
+        cleanup) and ignored so the lock auto-expires.
+        """
         rows = self.execute(
-            "SELECT id FROM pipeline_runs WHERE workflow_type = ? AND status = 'running' LIMIT 1",
-            (workflow_type,),
+            "SELECT id FROM pipeline_runs WHERE workflow_type = ? AND status = 'running' "
+            "AND started_at > datetime('now', ?) LIMIT 1",
+            (workflow_type, f"-{max_age_minutes} minutes"),
         )
         return len(rows) > 0

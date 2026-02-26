@@ -5,7 +5,8 @@ HADES - ZoomInfo Lead Pipeline
 import logging
 
 import streamlit as st
-from datetime import datetime
+import html
+from datetime import datetime, timezone
 from ui_components import (
     inject_base_styles,
     page_header,
@@ -90,7 +91,7 @@ def _freshness_badge(last_query):
     try:
         ts = last_query.get("created_at", "")
         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        delta = datetime.now() - dt.replace(tzinfo=None)
+        delta = datetime.now(timezone.utc) - dt
         if delta.days > 0:
             ago = f"{delta.days}d ago"
         elif delta.seconds >= 3600:
@@ -137,7 +138,7 @@ def _auto_detail(run):
     if ts:
         try:
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            delta = datetime.now() - dt.replace(tzinfo=None)
+            delta = datetime.now(timezone.utc) - dt
             if delta.days > 0:
                 parts.append(f"{delta.days}d ago")
             elif delta.seconds >= 3600:

@@ -285,7 +285,7 @@ class TestFullPipeline:
         db.get_company_ids_bulk.return_value = {}  # No cache hits
         db.get_exported_company_ids.return_value = {}  # No previous exports
         db.execute_write = MagicMock()
-        db.execute.return_value = [("1",)]  # batch ID sequence
+        db.execute.return_value = [(1,)]  # batch ID sequence
 
         # Mock cost tracker
         budget = MagicMock()
@@ -578,7 +578,7 @@ class TestPipelineRunLogging:
         db.get_company_ids_bulk.return_value = {}
         db.get_exported_company_ids.return_value = {}
         db.execute_write = MagicMock()
-        db.execute.return_value = [("1",)]
+        db.execute.return_value = [(1,)]
         db.start_pipeline_run.return_value = 42
 
         result = run_pipeline(config, creds, trigger="manual")

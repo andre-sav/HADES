@@ -486,12 +486,14 @@ def normalize_phone(phone: str) -> str:
 
 def format_phone(phone: str) -> str:
     """Format phone number as (XXX) XXX-XXXX."""
+    if not phone:
+        return ""
     digits = normalize_phone(phone)
-
     if len(digits) == 10:
         return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
-
-    return phone  # Return original if can't format
+    if len(digits) == 11 and digits[0] == "1":
+        return f"({digits[1:4]}) {digits[4:7]}-{digits[7:]}"
+    return ""  # Don't propagate garbage
 
 
 # --- VanillaSoft Column Mapping ---

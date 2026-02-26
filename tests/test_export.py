@@ -513,20 +513,21 @@ class TestGenerateBatchId:
     def test_first_batch_of_day(self):
         """Test first batch ID generation for a day."""
         mock_db = MagicMock()
-        # Atomic upsert writes first, then get_sync_value reads back the value
-        mock_db.get_sync_value.return_value = "1"
+        # Atomic upsert + RETURNING gives [(1,)] for first batch
+        mock_db.execute.return_value = [(1,)]
 
         batch_id = generate_batch_id(mock_db)
 
         assert batch_id.startswith("HADES-")
         assert batch_id.endswith("-001")
-        mock_db.execute_write.assert_called_once()
+        mock_db.execute.assert_called_once()
+        mock_db.connection.commit.assert_called_once()
 
     def test_sequential_batch_ids(self):
         """Test that batch IDs increment correctly."""
         mock_db = MagicMock()
-        # Atomic upsert already incremented; get_sync_value returns new value
-        mock_db.get_sync_value.return_value = "4"
+        # RETURNING gives the incremented value directly
+        mock_db.execute.return_value = [(4,)]
 
         batch_id = generate_batch_id(mock_db)
 
@@ -537,7 +538,7 @@ class TestGenerateBatchId:
         import re
 
         mock_db = MagicMock()
-        mock_db.get_sync_value.return_value = "1"
+        mock_db.execute.return_value = [(1,)]
 
         batch_id = generate_batch_id(mock_db)
 
@@ -586,7 +587,7 @@ class TestExportWithBatchId:
     def test_batch_id_with_db(self):
         """Test that batch_id is generated when db is provided."""
         mock_db = MagicMock()
-        mock_db.execute.return_value = [("1",)]
+        mock_db.execute.return_value = [(1,)]
 
         leads = [{"companyName": "Test"}]
         csv_content, filename, batch_id = export_leads_to_csv(leads, db=mock_db)
@@ -597,7 +598,7 @@ class TestExportWithBatchId:
     def test_batch_id_in_csv_content(self):
         """Test that batch_id appears in CSV Import Notes."""
         mock_db = MagicMock()
-        mock_db.execute.return_value = [("1",)]
+        mock_db.execute.return_value = [(1,)]
 
         leads = [{"companyName": "Test", "_score": 90}]
         csv_content, _, batch_id = export_leads_to_csv(leads, db=mock_db)

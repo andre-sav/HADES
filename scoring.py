@@ -3,6 +3,7 @@ Lead scoring engine for Intent and Geography workflows.
 """
 
 import logging
+import re
 from datetime import datetime, date
 from statistics import median
 
@@ -114,7 +115,10 @@ def calculate_intent_score(lead: dict) -> dict:
     # Employee scale bonus (0-5 points) — larger companies = more machines
     employees = lead.get("employees") or 0
     if isinstance(employees, str):
-        employees = int(employees) if employees.isdigit() else 0
+        try:
+            employees = int(re.sub(r"[^\d]", "", employees)) if re.search(r"\d", employees) else 0
+        except (ValueError, TypeError):
+            employees = 0
     employee_bonus = min(5, employees // 200) if employees else 0
 
     # Calculate weighted composite score
@@ -331,6 +335,8 @@ def calculate_age_days(date_str: str | None) -> int:
             # Date only: 2026-01-24
             intent_date = datetime.strptime(date_s[:10], "%Y-%m-%d").date()
 
+        # intent_date is date-only (no TZ); date.today() matches local server time.
+        # On Streamlit Community Cloud (UTC), this is consistent with API timestamps.
         age = (date.today() - intent_date).days
         return max(0, age)  # Don't return negative days
 
