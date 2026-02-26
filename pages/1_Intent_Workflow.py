@@ -505,11 +505,12 @@ if st.session_state.intent_search_pending:
         st.session_state["_intent_dedup_removed"] = removed
 
         # Log cache hit (credits=0) so it appears in Usage Dashboard
+        # leads_returned=0 because these are intermediate results, not exported leads
         cost_tracker.log_usage(
             workflow_type="intent",
             query_params=st.session_state.intent_query_params,
             credits_used=0,
-            leads_returned=len(deduped),
+            leads_returned=0,
         )
         db.log_query(
             workflow_type="intent",
@@ -637,11 +638,12 @@ if st.session_state.intent_search_pending:
                     }
 
                     # Log intent search usage (search is free — credits only on enrich)
+                    # leads_returned=0 because these are companies found, not exported leads
                     cost_tracker.log_usage(
                         workflow_type="intent",
                         query_params=st.session_state.intent_query_params,
                         credits_used=0,
-                        leads_returned=len(deduped),
+                        leads_returned=0,
                     )
                     db.log_query(
                         workflow_type="intent",
