@@ -136,10 +136,9 @@ DEFAULT_ENRICH_OUTPUT_FIELDS = [
     "companyCity",
     "companyState",
     "companyZipCode",
-    # Company detail fields
-    "employeeCount",
-    "sicCode",
-    "industry",
+    # NOTE: employeeCount, sicCode, industry are company-level fields
+    # NOT available in Contact Enrich API (400 error: disallowed).
+    # These fields come from Contact Search and are preserved by merge_contact().
 ]
 
 
