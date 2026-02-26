@@ -1,7 +1,71 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-02-25
-**Status:** All 4 epics implemented (18 stories complete). 738 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41).
+**Date:** 2026-02-26
+**Status:** All 4 epics implemented (18 stories complete). 738 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42).
+
+## Session Summary (2026-02-26, Session 42)
+
+### What Was Done
+
+Comprehensive code review (19 findings fixed), Executive Summary data accuracy fix, CSV export missing fields fix, browser walkthrough for stakeholder presentation. 738 tests passing.
+
+**Code Review — 19 Findings Fixed (afec278)**
+- 3 parallel review agents (CodeRabbit + 2 feature-dev reviewers) found 19 issues
+- Security: HTML-escaped API data in `unsafe_allow_html=True` calls (Intent Workflow, Geography, headless pipeline email report)
+- Reliability: TTL on `@st.cache_resource` singletons, transaction context manager in `db/_core.py`, stale pipeline guard (30-min timeout), calendar-week budget alignment
+- Correctness: `is` → `personId` key dedup in CSV Export, `datetime.now()` → `datetime.now(timezone.utc)`, `format_phone` returns `""` on garbage input, employee count regex parsing for comma-formatted numbers, `page_size=0` division guards
+- Data safety: session state reset keys for Intent/Geo workflows, `save_staged_export` uses full `scored_leads` not filtered subset
+- Infrastructure: atomic `RETURNING` for batch ID generation, error log retention policy, configurable GitHub repo in Automation
+
+**Executive Summary Data Fix (27e8d25)**
+- "Leads Exported" showed 297 vs 125 credits — double-counting from search-phase `log_usage` calls setting `leads_returned` to intermediate company count
+- Fixed search-phase calls to set `leads_returned=0` (only enrichment-phase calls should count leads)
+- Corrected 18 historical rows in Turso DB (216 inflated leads removed)
+
+**CSV Export Missing Fields Fix (485ab42)**
+- Stakeholder complaint: Primary SIC, Primary Line of Business, Number of Employees empty in export
+- Root cause: `employeeCount`, `sicCode`, `industry` commented out in `DEFAULT_ENRICH_OUTPUT_FIELDS` ("requires additional subscription" note)
+- Uncommented fields — VanillaSoft mapping in `utils.py` already handles them correctly
+
+**Browser Walkthrough (Chrome MCP)**
+- Navigated all 9 visible pages, zero console errors
+- Exported GIF walkthrough for stakeholder presentation
+
+### Key Files Modified
+```
+zoominfo_client.py              — Enrich output fields fix, companyId length guard, page_size=0 guards
+pages/1_Intent_Workflow.py      — HTML escaping, session state reset, search-phase leads_returned=0
+pages/2_Geography_Workflow.py   — HTML escaping, session state reset, save full scored_leads
+pages/4_CSV_Export.py           — personId-based dedup (was object identity)
+pages/10_Automation.py          — status mismatch fix, configurable GitHub repo
+app.py                          — timezone-aware datetime comparisons
+scripts/run_intent_pipeline.py  — HTML escaping in email report
+db/_core.py                     — transaction context manager, conditional commit
+db/_pipeline.py                 — stale pipeline guard (30-min timeout)
+db/_usage.py                    — calendar-week budget alignment
+db/_error_log.py                — error log retention policy
+export.py                       — atomic RETURNING for batch ID
+scoring.py                      — regex employee count parsing
+utils.py                        — format_phone empty string on failure
+config/icp.yaml                 — PII warning comment
+tests/test_export.py            — mock updates for RETURNING API
+tests/test_run_intent_pipeline.py — mock updates
+tests/test_turso_db.py          — _in_transaction attribute setup
+```
+
+### Uncommitted Changes
+None — all changes committed and pushed (3 commits: afec278, 27e8d25, 485ab42).
+
+Untracked: `system-test/` (screenshots from prior session)
+
+### Known Issues
+- SMTP credentials configured in GitHub repo secrets but not yet tested
+- `directPhone` still commented out in Enrich output fields (may require ZoomInfo subscription upgrade)
+
+### What Needs Doing Next Session
+1. **Re-run automation pipeline** to verify email delivery with SMTP credentials
+2. **HADES-dgr** [P4] — Show budget remaining in Run Now confirmation dialog
+3. **HADES-iic** [P4] — Add Zoho CRM dedup check at export time
 
 ## Session Summary (2026-02-25, Session 41)
 
