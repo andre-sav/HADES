@@ -136,8 +136,10 @@ DEFAULT_ENRICH_OUTPUT_FIELDS = [
     "companyCity",
     "companyState",
     "companyZipCode",
-    # Fields below require additional subscription:
-    # "directPhone", "employeeCount", "revenue", "sicCode", "naicsCode", "industry"
+    # Company detail fields
+    "employeeCount",
+    "sicCode",
+    "industry",
 ]
 
 
