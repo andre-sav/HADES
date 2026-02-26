@@ -1460,13 +1460,26 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
                 "employees": contact.get("employees") or contact.get("employeeCount", ""),
                 "industry": contact.get("industry", ""),
                 "directPhone": contact.get("directPhone", ""),
+                # Address fields — enrich API may return blanks
+                "street": contact.get("street", ""),
+                "city": contact.get("city", ""),
+                "state": contact.get("state", ""),
+                "zipCode": contact.get("zipCode", ""),
+                "companyStreet": contact.get("companyStreet", ""),
+                "companyCity": contact.get("companyCity", ""),
+                "companyState": contact.get("companyState", ""),
+                "companyZipCode": contact.get("companyZipCode", ""),
             }
 
     for contact in enriched_contacts:
         pid = str(contact.get("id") or contact.get("personId") or "")
         pre = pre_enrichment.get(pid, {})
         # Restore fields from pre-enrichment data that enrichment drops
-        for field in ("companyName", "companyId", "sicCode", "employees", "industry", "directPhone"):
+        for field in (
+            "companyName", "companyId", "sicCode", "employees", "industry", "directPhone",
+            "street", "city", "state", "zipCode",
+            "companyStreet", "companyCity", "companyState", "companyZipCode",
+        ):
             if not contact.get(field) and pre.get(field):
                 contact[field] = pre[field]
         # Normalize enrich-specific field names

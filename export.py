@@ -73,6 +73,15 @@ def build_vanillasoft_row(
             row["Company"] = str(company_obj["name"])
         if not row.get("Web site") and company_obj.get("website"):
             row["Web site"] = str(company_obj["website"])
+        # Address fields may also be nested under company object
+        for co_field, vs_col in (
+            ("street", "Address"),
+            ("city", "City"),
+            ("state", "State"),
+            ("zipCode", "ZIP code"),
+        ):
+            if not row.get(vs_col) and company_obj.get(co_field):
+                row[vs_col] = str(company_obj[co_field])
 
     # Fallback: use generic "phone" only if directPhone didn't map
     if not row.get("Business") and lead.get("phone"):

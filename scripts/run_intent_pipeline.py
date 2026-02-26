@@ -331,12 +331,50 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             if c.get("personId") or c.get("id")
         ]
 
+        # Snapshot pre-enrichment data (enrich replaces contact objects, losing search-only fields)
+        pre_enrichment = {}
+        for c in selected_contacts:
+            pid = str(c.get("personId") or c.get("id") or "")
+            if pid:
+                pre_enrichment[pid] = {
+                    "companyName": c.get("companyName", ""),
+                    "companyId": c.get("companyId", ""),
+                    "sicCode": c.get("sicCode", ""),
+                    "employees": c.get("employees") or c.get("employeeCount", ""),
+                    "industry": c.get("industry", ""),
+                    "directPhone": c.get("directPhone", ""),
+                    "street": c.get("street", ""),
+                    "city": c.get("city", ""),
+                    "state": c.get("state", ""),
+                    "zipCode": c.get("zipCode", ""),
+                    "companyStreet": c.get("companyStreet", ""),
+                    "companyCity": c.get("companyCity", ""),
+                    "companyState": c.get("companyState", ""),
+                    "companyZipCode": c.get("companyZipCode", ""),
+                }
+
         enriched = client.enrich_contacts_batch(
             person_ids=person_ids,
             output_fields=DEFAULT_ENRICH_OUTPUT_FIELDS,
         )
         summary["contacts_enriched"] = len(enriched)
         summary["credits_used"] = len(enriched)
+
+        # Restore fields from pre-enrichment data that enrichment may drop
+        for contact in enriched:
+            pid = str(contact.get("id") or contact.get("personId") or "")
+            pre = pre_enrichment.get(pid, {})
+            for field in (
+                "companyName", "companyId", "sicCode", "employees", "industry", "directPhone",
+                "street", "city", "state", "zipCode",
+                "companyStreet", "companyCity", "companyState", "companyZipCode",
+            ):
+                if not contact.get(field) and pre.get(field):
+                    contact[field] = pre[field]
+            # Handle nested company object
+            if not contact.get("companyName"):
+                co = contact.get("company")
+                contact["companyName"] = co.get("name", "") if isinstance(co, dict) else ""
 
         # Log credit usage
         cost_tracker.log_usage(

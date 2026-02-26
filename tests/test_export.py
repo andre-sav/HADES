@@ -291,6 +291,33 @@ class TestEnrichmentFieldMapping:
         # zipCode appears before companyZipCode in the mapping dict
         assert row["ZIP code"] == "75201"
 
+    def test_nested_company_address_extracted(self):
+        """Enrich API may nest address fields under 'company' object."""
+        lead = {"company": {
+            "name": "Nested Corp",
+            "street": "123 Main St",
+            "city": "Dallas",
+            "state": "TX",
+            "zipCode": "75201",
+        }}
+        row = build_vanillasoft_row(lead)
+        assert row["Company"] == "Nested Corp"
+        assert row["Address"] == "123 Main St"
+        assert row["City"] == "Dallas"
+        assert row["State"] == "TX"
+        assert row["ZIP code"] == "75201"
+
+    def test_flat_address_preferred_over_nested(self):
+        """Flat address fields should be preferred over nested company address."""
+        lead = {
+            "street": "456 Elm St",
+            "city": "Austin",
+            "company": {"street": "123 Main St", "city": "Dallas"},
+        }
+        row = build_vanillasoft_row(lead)
+        assert row["Address"] == "456 Elm St"
+        assert row["City"] == "Austin"
+
 
 class TestExportLeadsToCsv:
     """Tests for export_leads_to_csv function."""

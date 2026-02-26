@@ -1643,6 +1643,15 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                 "employees": contact.get("employees") or contact.get("employeeCount", ""),
                 "industry": contact.get("industry", ""),
                 "directPhone": contact.get("directPhone", ""),
+                # Address fields — enrich API may return blanks
+                "street": contact.get("street", ""),
+                "city": contact.get("city", ""),
+                "state": contact.get("state", ""),
+                "zipCode": contact.get("zipCode", ""),
+                "companyStreet": contact.get("companyStreet", ""),
+                "companyCity": contact.get("companyCity", ""),
+                "companyState": contact.get("companyState", ""),
+                "companyZipCode": contact.get("companyZipCode", ""),
             }
 
     center_zip = st.session_state.geo_query_params.get("center_zip") or (
@@ -1655,9 +1664,12 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         pre = pre_enrichment.get(pid, {})
 
         # Restore fields from pre-enrichment data that enrichment drops
-        # Enrich API doesn't return sicCode, employeeCount, industry (subscription-gated)
-        # and may return companyName/website under different keys
-        for field in ("_location_type", "companyName", "companyId", "website", "sicCode", "employees", "industry", "directPhone"):
+        # Enrich API may return blanks for address/company fields
+        for field in (
+            "_location_type", "companyName", "companyId", "website", "sicCode", "employees", "industry", "directPhone",
+            "street", "city", "state", "zipCode",
+            "companyStreet", "companyCity", "companyState", "companyZipCode",
+        ):
             if not contact.get(field) and pre.get(field):
                 contact[field] = pre[field]
 
