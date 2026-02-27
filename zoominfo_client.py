@@ -142,6 +142,23 @@ DEFAULT_ENRICH_OUTPUT_FIELDS = [
 ]
 
 
+@dataclass
+class CompanyEnrichParams:
+    """Parameters for Company Enrich API query."""
+
+    company_ids: list[str]  # List of companyId values
+    output_fields: list[str] | None = None  # Fields to return (None = default)
+
+
+DEFAULT_COMPANY_ENRICH_OUTPUT_FIELDS = [
+    "id",
+    "name",
+    "employeeCount",
+    "sicCodes",       # Array of {id, name} — use most specific (last entry)
+    "primaryIndustry",  # Array of industry names
+]
+
+
 class ZoomInfoClient:
     """
     ZoomInfo API client with authentication, rate limiting, and error handling.
@@ -1229,6 +1246,73 @@ class ZoomInfoClient:
                 progress_callback(len(all_enriched), total)
 
         logger.info(f"Contact Enrich Batch complete: {len(all_enriched)} contacts enriched from {total} requested")
+        return all_enriched
+
+    def enrich_companies(self, params: CompanyEnrichParams) -> dict:
+        """
+        Enrich companies by companyId to get SIC, industry, employee count.
+
+        Free when company's contact was already enriched (under management).
+
+        Args:
+            params: Enrich parameters with company_ids and optional output_fields
+
+        Returns:
+            Dict with 'data' (list of enriched companies)
+        """
+        logger.info(f"Company Enrich: {len(params.company_ids)} companies")
+        output_fields = params.output_fields or DEFAULT_COMPANY_ENRICH_OUTPUT_FIELDS
+
+        request_body = {
+            "matchCompanyInput": [
+                {"companyId": str(cid)} for cid in params.company_ids
+            ],
+            "outputFields": output_fields,
+        }
+
+        response = self._request("POST", "/enrich/company", json=request_body)
+
+        # Parse response: data.result[i].data[0] → company dict
+        companies = []
+        raw_data = response.get("data", {})
+        if isinstance(raw_data, dict):
+            for item in raw_data.get("result", []):
+                if isinstance(item, dict) and item.get("data"):
+                    companies.append(item["data"][0])
+
+        logger.info(f"Company Enrich complete: {len(companies)} companies returned")
+        return {"data": companies, "success": response.get("success")}
+
+    def enrich_companies_batch(
+        self,
+        company_ids: list[str],
+        output_fields: list[str] | None = None,
+        batch_size: int = 25,
+    ) -> list[dict]:
+        """
+        Enrich companies in batches (max 25 per request).
+
+        Returns:
+            List of enriched company dicts
+        """
+        total = len(company_ids)
+        num_batches = (total + batch_size - 1) // batch_size
+        logger.info(f"Company Enrich Batch: {total} companies in {num_batches} batches")
+
+        all_enriched = []
+        for i in range(0, total, batch_size):
+            batch_num = (i // batch_size) + 1
+            batch_ids = company_ids[i:i + batch_size]
+            logger.info(f"  Company batch {batch_num}/{num_batches} ({len(batch_ids)} companies)")
+
+            params = CompanyEnrichParams(
+                company_ids=batch_ids,
+                output_fields=output_fields,
+            )
+            result = self.enrich_companies(params)
+            all_enriched.extend(result.get("data", []))
+
+        logger.info(f"Company Enrich Batch complete: {len(all_enriched)} companies from {total} requested")
         return all_enriched
 
     def estimate_credits(self, total_results: int) -> int:

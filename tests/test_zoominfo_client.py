@@ -21,6 +21,7 @@ from zoominfo_client import (
     GeoQueryParams,
     ContactQueryParams,
     ContactEnrichParams,
+    CompanyEnrichParams,
 )
 
 
@@ -1159,6 +1160,115 @@ class TestContactEnrich:
 
         assert len(result["data"]) == 1
         assert result["data"][0]["firstName"] == "TopLevel"
+
+
+class TestCompanyEnrich:
+    """Tests for Company Enrich API response parsing."""
+
+    @pytest.fixture
+    def client(self):
+        client = ZoomInfoClient("id", "secret")
+        client._get_token = MagicMock(return_value="token")
+        return client
+
+    def test_enrich_companies_parses_response(self, client):
+        """Company Enrich returns {data: {result: [{input, data: [company], matchStatus}]}}."""
+        mock_response = {
+            "success": True,
+            "data": {
+                "outputFields": [["id", "name", "employeeCount", "sicCodes", "primaryIndustry"]],
+                "result": [
+                    {
+                        "input": {"companyid": "369577586"},
+                        "data": [
+                            {
+                                "id": 369577586,
+                                "name": "BaneCare",
+                                "employeeCount": 144,
+                                "sicCodes": [
+                                    {"id": "80", "name": "Health Services"},
+                                    {"id": "805", "name": "Nursing And Personal Care Facilities"},
+                                    {"id": "8051", "name": "Skilled Nursing Care Facilities"},
+                                ],
+                                "primaryIndustry": ["Hospitals & Physicians Clinics"],
+                            }
+                        ],
+                        "matchStatus": "FULL_MATCH",
+                    }
+                ],
+            },
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            params = CompanyEnrichParams(company_ids=["369577586"])
+            result = client.enrich_companies(params)
+
+        assert len(result["data"]) == 1
+        company = result["data"][0]
+        assert company["id"] == 369577586
+        assert company["name"] == "BaneCare"
+        assert company["employeeCount"] == 144
+        assert company["sicCodes"][-1]["id"] == "8051"
+        assert company["primaryIndustry"][0] == "Hospitals & Physicians Clinics"
+
+    def test_enrich_companies_no_match(self, client):
+        """Companies that don't match should not appear in results."""
+        mock_response = {
+            "success": True,
+            "data": {
+                "outputFields": [["id", "name"]],
+                "result": [
+                    {
+                        "input": {"companyid": "999999"},
+                        "data": [],
+                        "matchStatus": "NO_MATCH",
+                    }
+                ],
+            },
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            params = CompanyEnrichParams(company_ids=["999999"])
+            result = client.enrich_companies(params)
+
+        assert len(result["data"]) == 0
+
+    def test_enrich_companies_batch(self, client):
+        """Batch splits into groups of 25 and aggregates results."""
+        def mock_request(method, endpoint, json=None, **kwargs):
+            ids = [item["companyId"] for item in json["matchCompanyInput"]]
+            return {
+                "success": True,
+                "data": {
+                    "result": [
+                        {
+                            "input": {"companyid": cid},
+                            "data": [{"id": int(cid), "name": f"Company {cid}", "employeeCount": 100}],
+                            "matchStatus": "FULL_MATCH",
+                        }
+                        for cid in ids
+                    ],
+                },
+            }
+
+        with patch.object(client, "_request", side_effect=mock_request):
+            company_ids = [str(i) for i in range(30)]
+            result = client.enrich_companies_batch(company_ids, batch_size=25)
+
+        assert len(result) == 30
+
+    def test_enrich_companies_request_body(self, client):
+        """Verify request body format matches ZoomInfo API spec."""
+        mock_response = {"success": True, "data": {"result": []}}
+
+        with patch.object(client, "_request", return_value=mock_response) as mock_req:
+            params = CompanyEnrichParams(company_ids=["111", "222"])
+            client.enrich_companies(params)
+
+        call_args = mock_req.call_args
+        body = call_args[1]["json"] if "json" in call_args[1] else call_args[0][2]
+        assert body["matchCompanyInput"] == [{"companyId": "111"}, {"companyId": "222"}]
+        assert "outputFields" in body
 
 
 class TestContactSearchByCompanyId:
