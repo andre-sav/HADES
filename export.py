@@ -68,6 +68,50 @@ def merge_contact(search_contact: dict, enriched_contact: dict) -> dict:
     return merged
 
 
+def merge_company_data(leads: list[dict], companies: list[dict]) -> list[dict]:
+    """Merge Company Enrich data onto leads.
+
+    Maps ZoomInfo Company Enrich field names to VanillaSoft-compatible keys:
+    - sicCodes[-1]["id"] → sicCode (most specific SIC code)
+    - primaryIndustry[0] → industry
+    - employeeCount → employeeCount
+
+    Only fills gaps — does not overwrite existing values.
+    """
+    # Index companies by id (coerce to str for matching)
+    company_by_id = {}
+    for co in companies:
+        cid = str(co.get("id", ""))
+        if cid:
+            company_by_id[cid] = co
+
+    for lead in leads:
+        cid = str(lead.get("companyId") or "")
+        co = company_by_id.get(cid)
+        if not co:
+            continue
+
+        # SIC code: last entry in sicCodes array is the most specific
+        if not lead.get("sicCode"):
+            sic_list = co.get("sicCodes") or []
+            if sic_list:
+                lead["sicCode"] = sic_list[-1].get("id", "")
+
+        # Industry: first entry in primaryIndustry array
+        if not lead.get("industry"):
+            ind_list = co.get("primaryIndustry") or []
+            if ind_list:
+                lead["industry"] = ind_list[0]
+
+        # Employee count
+        if not lead.get("employeeCount"):
+            emp = co.get("employeeCount")
+            if emp is not None:
+                lead["employeeCount"] = emp
+
+    return leads
+
+
 def build_vanillasoft_row(
     lead: dict,
     operator: dict | None = None,

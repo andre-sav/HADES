@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
-from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary, generate_batch_id, merge_contact
+from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary, generate_batch_id, merge_contact, merge_company_data
 from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT
 
 
@@ -754,3 +754,78 @@ class TestExportWithBatchId:
         reader = csv.DictReader(io.StringIO(csv_content))
         rows = list(reader)
         assert f"Batch: {batch_id}" in rows[0]["Import Notes"]
+
+
+class TestMergeCompanyData:
+    """Tests for merge_company_data — maps Company Enrich response onto leads."""
+
+    def test_extracts_most_specific_sic_code(self):
+        """sicCodes array: last entry is most specific (4-digit code)."""
+        leads = [{"companyId": "123", "firstName": "Alice"}]
+        companies = [{
+            "id": 123,
+            "sicCodes": [
+                {"id": "80", "name": "Health Services"},
+                {"id": "805", "name": "Nursing"},
+                {"id": "8051", "name": "Skilled Nursing Care Facilities"},
+            ],
+            "primaryIndustry": ["Hospitals & Physicians Clinics"],
+            "employeeCount": 144,
+        }]
+        result = merge_company_data(leads, companies)
+        assert result[0]["sicCode"] == "8051"
+
+    def test_extracts_industry_and_employee_count(self):
+        leads = [{"companyId": "123"}]
+        companies = [{
+            "id": 123,
+            "primaryIndustry": ["Hospitals & Physicians Clinics"],
+            "employeeCount": 250,
+        }]
+        result = merge_company_data(leads, companies)
+        assert result[0]["industry"] == "Hospitals & Physicians Clinics"
+        assert result[0]["employeeCount"] == 250
+
+    def test_no_company_match_preserves_lead(self):
+        """Leads without a matching company in enrich results keep original data."""
+        leads = [{"companyId": "999", "firstName": "Bob"}]
+        companies = []
+        result = merge_company_data(leads, companies)
+        assert result[0]["firstName"] == "Bob"
+        assert result[0].get("sicCode") is None
+
+    def test_handles_missing_sic_codes(self):
+        """Company with no sicCodes field doesn't crash."""
+        leads = [{"companyId": "123"}]
+        companies = [{"id": 123, "employeeCount": 50}]
+        result = merge_company_data(leads, companies)
+        assert result[0]["employeeCount"] == 50
+        assert result[0].get("sicCode") is None
+
+    def test_handles_empty_sic_codes_array(self):
+        """Company with empty sicCodes array doesn't crash."""
+        leads = [{"companyId": "123"}]
+        companies = [{"id": 123, "sicCodes": [], "primaryIndustry": []}]
+        result = merge_company_data(leads, companies)
+        assert result[0].get("sicCode") is None
+        assert result[0].get("industry") is None
+
+    def test_multiple_leads_same_company(self):
+        """Multiple leads sharing the same companyId all get enriched."""
+        leads = [
+            {"companyId": "123", "firstName": "Alice"},
+            {"companyId": "123", "firstName": "Bob"},
+        ]
+        companies = [{"id": 123, "employeeCount": 200, "sicCodes": [{"id": "7011", "name": "Hotels"}]}]
+        result = merge_company_data(leads, companies)
+        assert result[0]["employeeCount"] == 200
+        assert result[1]["employeeCount"] == 200
+
+    def test_does_not_overwrite_existing_values(self):
+        """If lead already has sicCode/industry/employeeCount, don't overwrite."""
+        leads = [{"companyId": "123", "sicCode": "9999", "industry": "Custom", "employeeCount": 500}]
+        companies = [{"id": 123, "employeeCount": 200, "sicCodes": [{"id": "7011", "name": "Hotels"}], "primaryIndustry": ["Hotels"]}]
+        result = merge_company_data(leads, companies)
+        assert result[0]["sicCode"] == "9999"
+        assert result[0]["industry"] == "Custom"
+        assert result[0]["employeeCount"] == 500
