@@ -1,9 +1,9 @@
-"""Backfill staged exports with missing fields by re-enriching contacts.
+"""Backfill staged exports with missing fields by re-enriching contacts and companies.
 
-Re-enriches contacts from staged exports using the current
-DEFAULT_ENRICH_OUTPUT_FIELDS (which now includes SIC, industry,
-employee count, and address fields). Uses merge_contact to preserve
-all existing data while filling in gaps.
+Re-enriches contacts and their companies from staged exports using the
+ZoomInfo Contact Enrich and Company Enrich APIs. Uses merge_contact to
+preserve all existing data while filling in gaps, and merge_company_data
+to add SIC code, industry, and employee count from Company Enrich.
 
 Usage:
     python scripts/backfill_exports.py              # list staged exports
@@ -106,6 +106,8 @@ def main():
                        if not sample.get(f)]
             logger.info("DRY RUN: Would re-enrich %d contacts. Missing fields in sample: %s",
                         len(person_ids), missing or "none")
+            company_ids = list({str(l.get("companyId") or "") for l in leads} - {""})
+            logger.info("DRY RUN: Would also company-enrich %d unique companies", len(company_ids))
             continue
 
         # Re-enrich
@@ -119,12 +121,38 @@ def main():
             logger.error("Re-enrichment failed for export %d: %s", export_id, e)
             continue
 
+        # Company Enrich — fills sicCode, industry, employeeCount
+        company_ids = list({str(l.get("companyId") or "") for l in leads} - {""})
+        company_data_map = {}
+        if company_ids:
+            try:
+                company_data = client.enrich_companies_batch(company_ids)
+                logger.info("Company Enrich: %d companies returned", len(company_data))
+                for co in company_data:
+                    cid = str(co.get("id", ""))
+                    if cid:
+                        company_data_map[cid] = co
+            except Exception as e:
+                logger.warning("Company Enrich failed (non-fatal): %s", e)
+
         # Merge: original lead data (with scores, metadata) + fresh enrich data
         merged_leads = []
         for enriched_contact in enriched:
             pid = str(enriched_contact.get("id") or enriched_contact.get("personId") or "")
             original = leads_by_pid.get(pid, {})
             merged = merge_contact(original, enriched_contact)
+            # Apply company data
+            cid = str(merged.get("companyId") or "")
+            co = company_data_map.get(cid)
+            if co:
+                sic_list = co.get("sicCodes") or []
+                if sic_list and not merged.get("sicCode"):
+                    merged["sicCode"] = sic_list[-1].get("id", "")
+                ind_list = co.get("primaryIndustry") or []
+                if ind_list and not merged.get("industry"):
+                    merged["industry"] = ind_list[0]
+                if co.get("employeeCount") and not merged.get("employeeCount"):
+                    merged["employeeCount"] = co["employeeCount"]
             merged_leads.append(merged)
 
         # Include any leads that weren't in the enriched response (no personId match)
