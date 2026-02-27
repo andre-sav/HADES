@@ -33,7 +33,7 @@ from zoominfo_client import (
 from scoring import score_geography_leads, get_priority_label, get_priority_action
 from db._title_prefs import normalize_title
 from export_dedup import apply_export_dedup
-from export import merge_contact
+from export import merge_contact, merge_company_data
 from cost_tracker import CostTracker
 from utils import (
     get_sic_codes,
@@ -1655,6 +1655,16 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             c_lat, c_lng, _ = centroids[contact_zip]
             t_lat, t_lng, _ = centroids[center_zip]
             contact["distance"] = round(haversine_distance(c_lat, c_lng, t_lat, t_lng), 2)
+
+    # Company Enrich — fills sicCode, industry, employeeCount (free if contact already enriched)
+    company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
+    if company_ids:
+        try:
+            company_data = client.enrich_companies_batch(company_ids)
+            merge_company_data(enriched_contacts, company_data)
+            logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
+        except Exception as e:
+            logger.warning("Company Enrich failed (non-fatal): %s", e)
 
     # Score the enriched contacts
     scored = score_geography_leads(

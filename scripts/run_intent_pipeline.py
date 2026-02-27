@@ -46,7 +46,7 @@ from zoominfo_client import (
 )
 from scoring import score_intent_leads, score_intent_contacts, get_priority_label, compute_stale_summary
 from dedup import dedupe_leads
-from export import export_leads_to_csv, merge_contact
+from export import export_leads_to_csv, merge_contact, merge_company_data
 from export_dedup import get_previously_exported, filter_previously_exported
 from expand_search import build_contacts_by_company
 from cost_tracker import CostTracker
@@ -350,6 +350,16 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             pid = str(contact.get("id") or contact.get("personId") or "")
             search_data = search_by_pid.get(pid, {})
             enriched[i] = merge_contact(search_data, contact)
+
+        # Company Enrich — fills sicCode, industry, employeeCount
+        company_ids = list({str(c.get("companyId") or "") for c in enriched} - {""})
+        if company_ids:
+            try:
+                company_data = client.enrich_companies_batch(company_ids)
+                merge_company_data(enriched, company_data)
+                logger.info("Company Enrich: merged %d companies", len(company_data))
+            except Exception as e:
+                logger.warning("Company Enrich failed (non-fatal): %s", e)
 
         # Log credit usage
         cost_tracker.log_usage(
