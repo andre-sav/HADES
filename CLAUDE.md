@@ -276,13 +276,14 @@ states = get_states_from_zips(zips)
 
 ## Status
 
-- **704 tests passing** (all tests green)
+- **761 tests passing** (all tests green)
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
 - ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).
 - ✅ **Target Contacts Expansion** - Implemented 2026-02-03
 - ✅ **DB Mixin Architecture** - 11 domain-specific mixins in db/ package
 - ✅ **Score Calibration** - HLM delivery data calibrated SIC/employee scores
-- 🔧 **Contact Enrich** - API returns data, response parsing fixed (needs production test)
+- ✅ **Contact Enrich** - API working, response parsing verified in production
+- ✅ **Company Enrich** - Fills SIC code, industry, employee count (0 additional credits)
 - See `docs/SESSION_HANDOFF.md` for detailed debugging context
 
 ## API Format Notes (CRITICAL)

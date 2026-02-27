@@ -1,57 +1,61 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-02-26
-**Status:** All 4 epics implemented (18 stories complete). 750 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43).
+**Status:** All 4 epics implemented (18 stories complete). 761 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44).
 
-## Session Summary (2026-02-26, Session 43)
+## Session Summary (2026-02-26, Session 44)
 
 ### What Was Done
 
-Fixed address field loss in enrichment pipeline, designed and implemented `merge_contact()` refactor, browser-tested all 9 pages, backfilled 96 leads across 2 staged exports. 750 tests passing.
+Implemented Company Enrich integration across all 3 pipeline paths, added `merge_company_data()` helper, backfilled all 96 leads with SIC code, industry, and employee count. 761 tests passing.
 
-**Address Field Fix (60f00c0)**
-- Dashboard user reported addresses unfilled in exports
-- Root cause: 3 failure points — nested company handler in `export.py` missing address fields, pre-enrichment merge in both workflows didn't save/restore address fields, headless pipeline had no pre-enrichment merge at all
-- Fixed all 3 paths, added 2 regression tests
+**Company Enrich API Methods (344f35a)**
+- Added `CompanyEnrichParams` dataclass, `DEFAULT_COMPANY_ENRICH_OUTPUT_FIELDS`, `enrich_companies()`, `enrich_companies_batch()` to `zoominfo_client.py`
+- Field name discovery: `sicCode`/`industry` (singular) are disallowed; `sicCodes` (plural) and `primaryIndustry` work
+- Credit cost: 0 additional credits when company already "under management" (verified via live test)
 
-**merge_contact() Refactor (60ac553)**
-- Designed via brainstorming skill: generic merge function with no hardcoded field list
-- Replaced 3 copy-pasted snapshot/restore blocks (~120 lines) with single `merge_contact()` function
-- Enriched values win when non-empty, search values fill gaps, nested `company` object auto-flattened
-- Code review found 1 issue (dead `personZip` reference) — fixed in 2a7f342
-- 12 new tests added across the session
+**merge_company_data Helper (9d9d415)**
+- Added `merge_company_data()` to `export.py` — maps Company Enrich response onto leads
+- `sicCodes[-1]["id"]` → `sicCode`, `primaryIndustry[0]` → `industry`, `employeeCount` direct
+- Only fills gaps, never overwrites existing values
 
-**Contact Enrich Field Fix (1ebe4b8)**
-- `employeeCount`, `sicCode`, `industry` are company-level fields rejected by Contact Enrich API (400 error)
-- Removed from `DEFAULT_ENRICH_OUTPUT_FIELDS` — these fields come from Contact Search and are preserved by `merge_contact()`
-- This also explains why the Automation page "Re-export" button was failing
+**Pipeline Integration (95d5ff6, bd5c9d5)**
+- Added Company Enrich step to all 3 enrichment paths (Intent Workflow, Geography Workflow, headless pipeline)
+- Flow: Contact Search → Contact Enrich → merge_contact → **Company Enrich → merge_company_data** → Score → Export
+- Non-fatal: Company Enrich failure logged as warning, doesn't block export
 
-**Backfill Script (1ebe4b8)**
-- Created `scripts/backfill_exports.py` for re-enriching staged exports
-- Successfully backfilled 96 leads (export 5: 7 intent, export 6: 89 geography)
-- Address fields now populated; SIC/industry/employeeCount unavailable via Contact Enrich (only from Contact Search)
+**Backfill Script Update (d38554b)**
+- Updated `scripts/backfill_exports.py` with Company Enrich step after Contact Enrich
+- Dry-run mode now shows company count
+
+**Live Backfill Results**
+- Export 5 (intent, 7 leads): 7/7 now have SIC, industry, employeeCount
+- Export 6 (geography, 89 leads): 89/89 now have SIC, industry, employeeCount
+- Sample lead: BaneCare — sicCode='8051', industry='Hospitals & Physicians Clinics', employeeCount=144
 
 ### Key Files Modified
 ```
-export.py                       — merge_contact() function, nested company address extraction
-pages/1_Intent_Workflow.py      — replaced snapshot/restore with merge_contact
-pages/2_Geography_Workflow.py   — replaced snapshot/restore with merge_contact, removed dead personZip
-scripts/run_intent_pipeline.py  — replaced snapshot/restore with merge_contact
-zoominfo_client.py              — removed disallowed company fields from enrich output
-scripts/backfill_exports.py     — NEW: backfill staged exports via re-enrichment
-tests/test_export.py            — 12 new tests (merge_contact, edge cases, address extraction)
-docs/plans/2026-02-26-enrichment-merge-design.md — design doc for merge refactor
+zoominfo_client.py              — CompanyEnrichParams, enrich_companies(), enrich_companies_batch()
+export.py                       — merge_company_data() helper
+pages/1_Intent_Workflow.py      — Company Enrich step after merge_contact
+pages/2_Geography_Workflow.py   — Company Enrich step after merge_contact
+scripts/run_intent_pipeline.py  — Company Enrich step after merge_contact
+scripts/backfill_exports.py     — Company Enrich step in backfill loop
+tests/test_zoominfo_client.py   — 4 new tests (TestCompanyEnrich)
+tests/test_export.py            — 7 new tests (TestMergeCompanyData)
+docs/plans/2026-02-26-company-enrich-design.md  — approved design doc
+docs/plans/2026-02-26-company-enrich-plan.md    — 7-task implementation plan
 ```
 
 ### Uncommitted Changes
-None — all changes committed and pushed.
+None — all changes committed.
 
 Untracked: `system-test/` (screenshots from prior session)
 
 ### Known Issues
-- `sicCode`, `industry`, `employeeCount` cannot be backfilled for older exports — only available from Contact Search, not Contact Enrich
 - SMTP credentials configured in GitHub repo secrets but not yet tested
 - `directPhone` still commented out in Enrich output fields (may require ZoomInfo subscription upgrade)
+- Older exports (1-4) still missing SIC/industry/employeeCount — can be backfilled with `--all` flag
 
 ### What Needs Doing Next Session
 1. **Re-run automation pipeline** to verify email delivery with SMTP credentials
