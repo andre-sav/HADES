@@ -52,7 +52,7 @@ from scoring import (
     build_stale_guidance,
 )
 from dedup import dedupe_leads
-from export import merge_contact
+from export import merge_contact, merge_company_data
 from cost_tracker import CostTracker
 from expand_search import build_contacts_by_company
 from db._title_prefs import normalize_title
@@ -1460,6 +1460,16 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         pid = str(contact.get("id") or contact.get("personId") or "")
         search_data = search_by_pid.get(pid, {})
         enriched_contacts[i] = merge_contact(search_data, contact)
+
+    # Company Enrich — fills sicCode, industry, employeeCount (free if contact already enriched)
+    company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
+    if company_ids:
+        try:
+            company_data = client.enrich_companies_batch(company_ids)
+            merge_company_data(enriched_contacts, company_data)
+            logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
+        except Exception as e:
+            logger.warning("Company Enrich failed (non-fatal): %s", e)
 
     # Build company_scores dict for scoring
     company_scores = {}
