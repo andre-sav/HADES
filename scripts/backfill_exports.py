@@ -65,7 +65,7 @@ def main():
     target_ids = args.id if args.id else [exp["id"] for exp in exports]
 
     from zoominfo_client import get_zoominfo_client, DEFAULT_ENRICH_OUTPUT_FIELDS
-    from export import merge_contact
+    from export import merge_contact, merge_company_data
 
     if not args.dry_run:
         client = get_zoominfo_client()
@@ -121,39 +121,22 @@ def main():
             logger.error("Re-enrichment failed for export %d: %s", export_id, e)
             continue
 
-        # Company Enrich — fills sicCode, industry, employeeCount
-        company_ids = list({str(l.get("companyId") or "") for l in leads} - {""})
-        company_data_map = {}
-        if company_ids:
-            try:
-                company_data = client.enrich_companies_batch(company_ids)
-                logger.info("Company Enrich: %d companies returned", len(company_data))
-                for co in company_data:
-                    cid = str(co.get("id", ""))
-                    if cid:
-                        company_data_map[cid] = co
-            except Exception as e:
-                logger.warning("Company Enrich failed (non-fatal): %s", e)
-
         # Merge: original lead data (with scores, metadata) + fresh enrich data
         merged_leads = []
         for enriched_contact in enriched:
             pid = str(enriched_contact.get("id") or enriched_contact.get("personId") or "")
             original = leads_by_pid.get(pid, {})
-            merged = merge_contact(original, enriched_contact)
-            # Apply company data
-            cid = str(merged.get("companyId") or "")
-            co = company_data_map.get(cid)
-            if co:
-                sic_list = co.get("sicCodes") or []
-                if sic_list and not merged.get("sicCode"):
-                    merged["sicCode"] = sic_list[-1].get("id", "")
-                ind_list = co.get("primaryIndustry") or []
-                if ind_list and not merged.get("industry"):
-                    merged["industry"] = ind_list[0]
-                if co.get("employeeCount") and not merged.get("employeeCount"):
-                    merged["employeeCount"] = co["employeeCount"]
-            merged_leads.append(merged)
+            merged_leads.append(merge_contact(original, enriched_contact))
+
+        # Company Enrich — fills sicCode, industry, employeeCount
+        company_ids = list({str(l.get("companyId") or "") for l in leads} - {""})
+        if company_ids:
+            try:
+                company_data = client.enrich_companies_batch(company_ids)
+                logger.info("Company Enrich: %d companies returned", len(company_data))
+                merge_company_data(merged_leads, company_data)
+            except Exception as e:
+                logger.warning("Company Enrich failed (non-fatal): %s", e)
 
         # Include any leads that weren't in the enriched response (no personId match)
         enriched_pids = {str(c.get("id") or c.get("personId") or "") for c in enriched}

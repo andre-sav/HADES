@@ -103,8 +103,8 @@ def merge_company_data(leads: list[dict], companies: list[dict]) -> list[dict]:
             if ind_list:
                 lead["industry"] = ind_list[0]
 
-        # Employee count
-        if not lead.get("employeeCount"):
+        # Employee count (use `is None` — 0 is a valid value, not "missing")
+        if lead.get("employeeCount") is None:
             emp = co.get("employeeCount")
             if emp is not None:
                 lead["employeeCount"] = emp
