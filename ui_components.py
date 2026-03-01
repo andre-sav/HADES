@@ -1176,11 +1176,11 @@ def inject_base_styles():
         border: 0;
     }}
 
-    /* Hide dev-only pages from sidebar navigation */
-    [data-testid="stSidebarNav"] a[href*="Pipeline_Test"] {{
-        display: none !important;
-    }}
-    [data-testid="stSidebarNav"] a[href*="API_Discovery"] {{
+    /* Hide dev-only pages from sidebar navigation.
+       Use [data-testid="stSidebar"] (stable across Streamlit versions)
+       instead of stSidebarNav which was removed in newer releases. */
+    [data-testid="stSidebar"] a[href*="Pipeline_Test"],
+    [data-testid="stSidebar"] a[href*="API_Discovery"] {{
         display: none !important;
     }}
 
