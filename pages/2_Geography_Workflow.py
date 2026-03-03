@@ -168,10 +168,34 @@ defaults = {
     "geo_search_job": None,  # SearchJob instance while thread running
     "_geo_progress_log": None,  # Shared list for real-time progress from thread
     "geo_leads_staged": False,
+    # Operator change detection
+    "_geo_last_operator_id": None,
 }
 for key, default in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = default
+
+
+def _reset_geo_search_state():
+    """Clear all search/enrichment/export state. Called when operator changes."""
+    st.session_state.geo_preview_contacts = None
+    st.session_state.geo_contacts_by_company = None
+    st.session_state.geo_selected_contacts = {}
+    st.session_state.geo_search_executed = False
+    st.session_state.geo_selection_confirmed = False
+    st.session_state.geo_enriched_contacts = None
+    st.session_state.geo_enrichment_done = False
+    st.session_state.geo_usage_logged = False
+    st.session_state.geo_results = None
+    st.session_state.geo_request_previewed = False
+    st.session_state.geo_pending_search_params = None
+    st.session_state.geo_expansion_result = None
+    st.session_state.geo_search_job = None
+    st.session_state._geo_progress_log = None
+    st.session_state.geo_exported = False
+    st.session_state.geo_leads_staged = False
+    st.session_state.geo_params_hash = None
+    st.session_state.geo_query_params = None
 
 
 # =============================================================================
@@ -434,6 +458,14 @@ else:
 # SEARCH PARAMETERS
 # =============================================================================
 has_operator = st.session_state.geo_operator is not None
+
+# Detect operator change — reset all search state to prevent stale results
+if has_operator:
+    current_op_id = st.session_state.geo_operator.get("id") or st.session_state.geo_operator.get("operator_name")
+    prev_op_id = st.session_state._geo_last_operator_id
+    if prev_op_id is not None and current_op_id != prev_op_id:
+        _reset_geo_search_state()
+    st.session_state._geo_last_operator_id = current_op_id
 
 if has_operator:
     labeled_divider("Step 2: Configure Search")
@@ -944,19 +976,7 @@ if has_operator:
                 existing_job = st.session_state.get("geo_search_job")
                 if existing_job and not existing_job.done.is_set():
                     existing_job.cancel.set()
-                st.session_state.geo_preview_contacts = None
-                st.session_state.geo_contacts_by_company = None
-                st.session_state.geo_selected_contacts = {}
-                st.session_state.geo_search_executed = False
-                st.session_state.geo_selection_confirmed = False
-                st.session_state.geo_enriched_contacts = None
-                st.session_state.geo_enrichment_done = False
-                st.session_state.geo_results = None
-                st.session_state.geo_request_previewed = False
-                st.session_state.geo_pending_search_params = None
-                st.session_state.geo_expansion_result = None
-                st.session_state.geo_search_job = None
-                st.session_state._geo_progress_log = None
+                _reset_geo_search_state()
                 st.rerun()
 
     with search_col3:
