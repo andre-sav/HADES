@@ -178,6 +178,11 @@ for key, default in defaults.items():
 
 def _reset_geo_search_state():
     """Clear all search/enrichment/export state. Called when operator changes."""
+    # Cancel any running background search to prevent stale results race condition
+    existing_job = st.session_state.get("geo_search_job")
+    if existing_job and not existing_job.done.is_set():
+        existing_job.cancel.set()
+
     st.session_state.geo_preview_contacts = None
     st.session_state.geo_contacts_by_company = None
     st.session_state.geo_selected_contacts = {}
@@ -196,6 +201,9 @@ def _reset_geo_search_state():
     st.session_state.geo_leads_staged = False
     st.session_state.geo_params_hash = None
     st.session_state.geo_query_params = None
+    st.session_state.geo_dedup_result = None
+    st.session_state.geo_last_search_params = {}
+    st.session_state.pop("geo_export_leads", None)
 
 
 # =============================================================================
@@ -972,10 +980,6 @@ if has_operator:
     with search_col2:
         if st.session_state.geo_preview_contacts or st.session_state.geo_search_executed:
             if destructive_button("Clear / Reset", key="geo_reset_btn"):
-                # Cancel any running search thread
-                existing_job = st.session_state.get("geo_search_job")
-                if existing_job and not existing_job.done.is_set():
-                    existing_job.cancel.set()
                 _reset_geo_search_state()
                 st.rerun()
 
