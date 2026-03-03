@@ -1,7 +1,54 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-03-02
-**Status:** All 4 epics implemented (18 stories complete). 761 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44). Geography CSV export + P3 fixes + code review (session 45).
+**Date:** 2026-03-03
+**Status:** All 4 epics implemented (18 stories complete). 761 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44). Geography CSV export + P3 fixes + code review (session 45). P1 production bug fix — operator change reset + race condition fix (session 46).
+
+## Session Summary (2026-03-03, Session 46)
+
+### What Was Done
+
+Fixed P1 production bug reported by Mike Bigouette: AZ operator search was exporting NY contacts due to stale session state not being cleared on operator change. Applied code review findings to close a race condition. Drafted response email. 761 tests passing.
+
+**P1 Bug Fix — Operator Change Reset (6e145af, cherry-picked to main)**
+- Root cause: switching operators in Geography Workflow did not clear previous search results, causing stale contacts from one territory to export with another operator's metadata
+- Added `_reset_geo_search_state()` helper and operator change detection via `_geo_last_operator_id` tracking
+- Refactored Reset button to use shared function (DRY)
+
+**Code Review Fix — Race Condition (893f4fa)**
+- HIGH: Added search job cancellation to `_reset_geo_search_state()` — prevents background thread from rewriting stale results after operator change
+- MEDIUM: Added missing state keys to reset: `geo_dedup_result`, `geo_last_search_params`, `geo_export_leads`
+- Simplified Reset button (cancellation now handled centrally)
+
+**Email Draft**
+- Drafted response to Mike explaining both bugs (wrong state + missing SIC/employees/industry) and the fixes deployed
+
+### Key Files Modified
+```
+pages/2_Geography_Workflow.py  — operator change reset + race condition fix
+```
+
+### Uncommitted Changes
+None — all changes committed and pushed to main.
+
+Untracked: `system-test/`, `HADES-geography-*.csv` (export files for user)
+
+### Branch State
+- `main` — fully up to date at 893f4fa, all commits pushed
+- `p4-backlog-items` — exists locally, rebased onto main
+
+### Known Issues
+- Michelle Joiner-Dubois needs to re-run her AZ geography search (old export had wrong data)
+- SMTP credentials configured in GitHub repo secrets but not yet tested
+- `directPhone` still commented out in Enrich output fields (may require ZoomInfo subscription upgrade)
+- Older exports (1-4) still missing SIC/industry/employeeCount — can be backfilled with `--all` flag
+
+### What Needs Doing Next Session
+1. **P4 backlog items** (on `p4-backlog-items` branch):
+   - HADES-dgr — Show budget remaining in Run Now confirmation dialog
+   - HADES-iic — Add Zoho CRM dedup check at export time
+   - HADES-bdr — Pipeline log panel (persistent timestamped build-log UI)
+   - HADES-0qu — WCAG contrast audit for muted text colors
+2. **Re-run automation pipeline** to verify email delivery with SMTP credentials
 
 ## Session Summary (2026-03-02, Session 45)
 
