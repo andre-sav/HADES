@@ -126,5 +126,9 @@ class OperatorsMixin:
         )
 
     def delete_operator(self, operator_id: int) -> None:
-        """Delete operator."""
+        """Delete operator and nullify references in staged_exports."""
+        self.execute_write(
+            "UPDATE staged_exports SET operator_id = NULL WHERE operator_id = ?",
+            (operator_id,),
+        )
         self.execute_write("DELETE FROM operators WHERE id = ?", (operator_id,))
