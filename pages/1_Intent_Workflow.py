@@ -133,6 +133,7 @@ defaults = {
     "intent_enrich_clicked": False,  # Gate for manual mode enrichment
     "intent_enriched_contacts": None,
     "intent_enrichment_done": False,
+    "intent_company_enrich_done": False,
     "intent_usage_logged": False,
     "intent_leads_staged": False,
     # Step 4: Final results
@@ -1462,14 +1463,20 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         enriched_contacts[i] = merge_contact(search_data, contact)
 
     # Company Enrich — fills sicCode, industry, employeeCount (free if contact already enriched)
-    company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
-    if company_ids:
-        try:
-            company_data = client.enrich_companies_batch(company_ids)
-            merge_company_data(enriched_contacts, company_data)
-            logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
-        except Exception as e:
-            logger.warning("Company Enrich failed (non-fatal): %s", e)
+    # Only run once per search (avoid re-calling API on every Streamlit rerun)
+    if not st.session_state.get("intent_company_enrich_done"):
+        company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
+        if company_ids:
+            try:
+                co_client = get_zoominfo_client()
+                company_data = co_client.enrich_companies_batch(company_ids)
+                merge_company_data(enriched_contacts, company_data)
+                logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
+                st.session_state.intent_company_enrich_done = True
+            except Exception as e:
+                logger.warning("Company Enrich failed (non-fatal): %s", e)
+        else:
+            st.session_state.intent_company_enrich_done = True
 
     # Build company_scores dict for scoring
     company_scores = {}
@@ -1639,6 +1646,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
             if st.session_state.intent_mode == "manual":
                 if outline_button("Back to Contact Selection", key="intent_back_btn"):
                     st.session_state.intent_enrichment_done = False
+                    st.session_state.intent_company_enrich_done = False
                     st.session_state.intent_enriched_contacts = None
                     st.session_state.intent_enrich_clicked = False
                     st.session_state.intent_usage_logged = False

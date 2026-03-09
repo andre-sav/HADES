@@ -137,6 +137,7 @@ defaults = {
     # Step 2: Enrich (uses credits)
     "geo_enriched_contacts": None,  # Enriched contacts (credits used)
     "geo_enrichment_done": False,
+    "geo_company_enrich_done": False,  # Company Enrich (SIC/industry/employee)
     "geo_usage_logged": False,  # Prevent double-logging on refresh
     # API Request confirmation
     "geo_request_previewed": False,  # Whether user has seen the full request
@@ -199,6 +200,7 @@ def _reset_geo_search_state():
     st.session_state._geo_progress_log = None
     st.session_state.geo_exported = False
     st.session_state.geo_leads_staged = False
+    st.session_state.geo_company_enrich_done = False
     st.session_state.geo_params_hash = None
     st.session_state.geo_query_params = None
     st.session_state.geo_dedup_result = None
@@ -1681,14 +1683,20 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             contact["distance"] = round(haversine_distance(c_lat, c_lng, t_lat, t_lng), 2)
 
     # Company Enrich — fills sicCode, industry, employeeCount (free if contact already enriched)
-    company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
-    if company_ids:
-        try:
-            company_data = client.enrich_companies_batch(company_ids)
-            merge_company_data(enriched_contacts, company_data)
-            logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
-        except Exception as e:
-            logger.warning("Company Enrich failed (non-fatal): %s", e)
+    # Only run once per search (avoid re-calling API on every Streamlit rerun)
+    if not st.session_state.get("geo_company_enrich_done"):
+        company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
+        if company_ids:
+            try:
+                co_client = get_zoominfo_client()
+                company_data = co_client.enrich_companies_batch(company_ids)
+                merge_company_data(enriched_contacts, company_data)
+                logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
+                st.session_state.geo_company_enrich_done = True
+            except Exception as e:
+                logger.warning("Company Enrich failed (non-fatal): %s", e)
+        else:
+            st.session_state.geo_company_enrich_done = True
 
     # Score the enriched contacts
     scored = score_geography_leads(
@@ -1883,6 +1891,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         if outline_button("Back to Contact Selection", key="geo_back_btn"):
             st.session_state.geo_selection_confirmed = False
             st.session_state.geo_enrichment_done = False
+            st.session_state.geo_company_enrich_done = False
             st.session_state.geo_enriched_contacts = None
             st.session_state.geo_usage_logged = False
             st.rerun()
