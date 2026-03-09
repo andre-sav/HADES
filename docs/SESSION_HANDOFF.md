@@ -1,9 +1,60 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-03-09
-**Status:** All 4 epics implemented (18 stories complete). 761 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44). Geography CSV export + P3 fixes + code review (session 45). P1 production bug fix — operator change reset + race condition fix (session 46). External code review triage + operator deletion cascade fix (session 47).
+**Status:** All 4 epics implemented (18 stories complete). 761 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44). Geography CSV export + P3 fixes + code review (session 45). P1 production bug fix — operator change reset + race condition fix (session 46). External code review triage + operator deletion cascade fix (session 47). P1 Company Enrich silent failure fix + audit prompt (session 48).
 
-## Session Summary (2026-03-09, Session 47)
+## Session Summary (2026-03-09, Session 48)
+
+### What Was Done
+
+Fixed P1 production bug reported by Mike Bigouette (second report): CSV exports missing Number of Employees, Primary SIC, and Primary Line of Business columns. 761 tests passing.
+
+**P1 Bug Fix — Company Enrich Silent Failure (a541513)**
+- Root cause: `client` variable was assigned inside conditional blocks (search/enrichment) that only execute on specific Streamlit reruns. The results block (different rerun) referenced `client` → `NameError` → caught by broad `except Exception` → logged as warning → Company Enrich never ran
+- Company Enrich was dead code from the day it shipped (session 44) — it never successfully executed in production
+- Fix: Create dedicated `co_client = get_zoominfo_client()` in the results block, guarded by `geo_company_enrich_done` / `intent_company_enrich_done` flags to avoid redundant API calls
+- Fixed in both Geography and Intent workflows
+- Headless pipeline script was not affected (client at function scope)
+
+**Silent-Failure Audit Prompt (AUDIT_PROMPT.md)**
+- Created comprehensive 8-section audit checklist targeting this class of bug
+- Covers: Streamlit rerun scoping, broad exception handlers, silent data loss, session state races, API response handling, test/prod divergence, field name mismatches, end-to-end column tracing
+- Designed to be run next session
+
+**Email Draft**
+- Drafted response to Mike explaining the recurrence (Streamlit rerun scoping + swallowed exception)
+
+### Key Files Modified
+```
+pages/2_Geography_Workflow.py  — Company Enrich fix + run-once guard + state resets
+pages/1_Intent_Workflow.py     — Same fix for Intent workflow
+AUDIT_PROMPT.md                — Silent-failure audit checklist (new, untracked → committed)
+```
+
+### Uncommitted Changes
+None — all changes committed and pushed to main.
+
+Untracked: `system-test/`, `HADES-geography-*.csv`, `HADES_CODEBASE_FLAT.md`, `REVIEW_PROMPT.md`
+
+### Branch State
+- `main` — fully up to date at a541513, all commits pushed
+
+### Known Issues
+- Michelle Joiner-Dubois needs to re-run her AZ geography search (old export had wrong data)
+- Existing staged exports in DB still have empty SIC/industry/employee columns — need backfill or re-export
+- SMTP email delivery not yet tested (GitHub Actions secret configured)
+- `directPhone` still commented out in Enrich output fields (may require ZoomInfo subscription upgrade)
+- Broad `except Exception` blocks throughout codebase may be hiding other silent failures (audit needed)
+
+### What Needs Doing Next Session
+1. **Run AUDIT_PROMPT.md** — Comprehensive silent-failure audit (Streamlit rerun scoping, broad exceptions, data loss)
+2. **Backfill staged exports** — Re-run Company Enrich on recently staged exports missing SIC/industry/employee data
+3. **HADES-iic** — Zoho CRM dedup at export time (highest business value P4)
+4. **HADES-dgr** — Show budget remaining in Run Now confirmation dialog
+5. **HADES-bdr** — Pipeline log panel (persistent timestamped build-log UI)
+
+
+
 
 ### What Was Done
 
