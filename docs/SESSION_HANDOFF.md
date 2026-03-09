@@ -1,7 +1,59 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-03-03
-**Status:** All 4 epics implemented (18 stories complete). 761 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44). Geography CSV export + P3 fixes + code review (session 45). P1 production bug fix — operator change reset + race condition fix (session 46).
+**Date:** 2026-03-09
+**Status:** All 4 epics implemented (18 stories complete). 761 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44). Geography CSV export + P3 fixes + code review (session 45). P1 production bug fix — operator change reset + race condition fix (session 46). External code review triage + operator deletion cascade fix (session 47).
+
+## Session Summary (2026-03-09, Session 47)
+
+### What Was Done
+
+Generated flattened codebase for external review, triaged review findings, fixed one actionable issue. 761 tests passing.
+
+**External Code Review**
+- Generated `HADES_CODEBASE_FLAT.md` (51 files, 18.7K lines) and `REVIEW_PROMPT.md` for external review
+- Received comprehensive review covering architecture, security, reliability, code quality
+- Triaged 7 findings: 1 fixed, 6 deferred with rationale
+
+**Fix: Operator Deletion Cascade (e09d5c3)**
+- `delete_operator()` now nullifies `staged_exports.operator_id` before deleting, preventing dangling references
+- Found during external code review
+
+**Deferred Findings (with rationale):**
+- Password rate-limit bypass — low risk behind Streamlit Cloud, IP tracking adds disproportionate complexity
+- God Object DB mixins — works fine at 5-user scale, 761 tests cover it
+- Timezone in scoring — day-granularity signals, midnight edge case negligible
+- CSS in Python — Streamlit's `st.markdown` model makes external CSS awkward
+- Task queue — background thread sufficient for 5 users
+- ORM integration — manual schema simpler than ORM migration tooling at this scale
+
+### Key Files Modified
+```
+db/_operators.py           — operator deletion cascade (nullify staged_exports refs)
+HADES_CODEBASE_FLAT.md     — generated flattened codebase (untracked)
+REVIEW_PROMPT.md           — generated review prompt (untracked)
+```
+
+### Uncommitted Changes
+None — all changes committed and pushed to main.
+
+Untracked: `system-test/`, `HADES-geography-*.csv`, `HADES_CODEBASE_FLAT.md`, `REVIEW_PROMPT.md`
+
+### Branch State
+- `main` — fully up to date at e09d5c3, all commits pushed
+- `p4-backlog-items` — exists locally, not rebased onto latest main
+
+### Known Issues
+- Michelle Joiner-Dubois needs to re-run her AZ geography search (old export had wrong data)
+- SMTP email delivery not yet tested (GitHub Actions secret configured)
+- `directPhone` still commented out in Enrich output fields (may require ZoomInfo subscription upgrade)
+- Older exports (1-4) still missing SIC/industry/employeeCount — can be backfilled with `--all` flag
+
+### What Needs Doing Next Session
+1. **HADES-iic** — Zoho CRM dedup at export time (highest business value P4)
+2. **HADES-dgr** — Show budget remaining in Run Now confirmation dialog
+3. **HADES-bdr** — Pipeline log panel (persistent timestamped build-log UI)
+4. **HADES-0qu** — WCAG contrast audit for muted text colors
+5. **Test SMTP email delivery** via automation pipeline run
 
 ## Session Summary (2026-03-03, Session 46)
 
