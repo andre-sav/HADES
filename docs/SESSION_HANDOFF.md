@@ -1,7 +1,59 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-03-09
-**Status:** All 4 epics implemented (18 stories complete). 761 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44). Geography CSV export + P3 fixes + code review (session 45). P1 production bug fix — operator change reset + race condition fix (session 46). External code review triage + operator deletion cascade fix (session 47). P1 Company Enrich silent failure fix + audit prompt (session 48). Silent-failure audit fix — 24 edits across 9 files (session 49).
+**Date:** 2026-03-10
+**Status:** All 4 epics implemented (18 stories complete). 764 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44). Geography CSV export + P3 fixes + code review (session 45). P1 production bug fix — operator change reset + race condition fix (session 46). External code review triage + operator deletion cascade fix (session 47). P1 Company Enrich silent failure fix + audit prompt (session 48). Silent-failure audit fix — 24 edits across 9 files (session 49). Company Enrich live verified + VanillaSoft project switch + code review fixes (session 50).
+
+## Session Summary (2026-03-10, Session 50)
+
+### What Was Done
+
+Live verified Company Enrich against real ZoomInfo API — parser works correctly. Ran code review (3 important fixes). Switched VanillaSoft to new project profile and verified push. 764 tests passing.
+
+**Company Enrich Live Verification**
+- Ran `scripts/verify_enrich.py` against real API with 3 company IDs from DB
+- Raw API response: `data` is a list (not dict), `primaryIndustry` is list of strings, `sicCodes` is list of `{id, name}` dicts
+- Parser correctly extracts: `sicCode` (str), `industry` (str), `employeeCount` (int)
+- `merge_company_data` fills all 3 fields on leads — verified end-to-end
+- Colleague can be told GO AHEAD
+
+**Code Review Fixes (7981702)**
+- Added 2 tests for Company Enrich list-format response (matches live API shape)
+- Added 1 test for `primaryIndustry` as dict format in `merge_company_data`
+- Added `exc_info=True` to headless pipeline Company Enrich failure log
+
+**VanillaSoft Project Switch**
+- New Incoming Web Lead profile "HADES" (id=166519) configured in VanillaSoft admin
+- Verified all 28 field mappings match code (caught 2 missing fields: Number of Employees, Primary Line of Business — user added them)
+- Updated `VANILLASOFT_WEB_LEAD_ID` in `.streamlit/secrets.toml`: 166065 → 166519
+- Test push successful: "TEST DELETE-ME" contact accepted by new profile
+
+### Key Files Modified
+```
+tests/test_zoominfo_client.py    — +50 (2 new Company Enrich parser tests)
+tests/test_export.py             — +7  (1 new industry dict-format test)
+scripts/run_intent_pipeline.py   — +1/-1 (exc_info=True)
+.streamlit/secrets.toml          — VANILLASOFT_WEB_LEAD_ID 166065 → 166519 (not committed, gitignored)
+```
+
+### Uncommitted Changes
+None — all code changes committed and pushed.
+
+### Branch State
+- `main` — clean, up to date with origin
+
+### Known Issues
+- Michelle Joiner-Dubois needs to re-run her AZ geography search (old export had wrong data)
+- Existing staged exports in DB still have empty SIC/industry/employee columns — need backfill or re-export
+- SMTP email delivery not yet tested (GitHub Actions secret configured)
+- `directPhone` still commented out in Enrich output fields (may require ZoomInfo subscription upgrade)
+- Streamlit Community Cloud secrets need manual update for new VanillaSoft profile ID
+
+### What Needs Doing Next Session
+1. **Backfill staged exports** — Re-run Company Enrich on recently staged exports missing SIC/industry/employee data
+2. **HADES-iic** — Zoho CRM dedup at export time (highest business value P4)
+3. **HADES-dgr** — Show budget remaining in Run Now confirmation dialog
+4. **HADES-bdr** — Pipeline log panel (persistent timestamped build-log UI)
+5. **HADES-0qu** — WCAG contrast audit for muted text colors
 
 ## Session Summary (2026-03-09, Session 49)
 
