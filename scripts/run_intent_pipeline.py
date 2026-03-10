@@ -359,7 +359,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
                 merge_company_data(enriched, company_data)
                 logger.info("Company Enrich: merged %d companies", len(company_data))
             except Exception as e:
-                logger.warning("Company Enrich failed (non-fatal): %s", e)
+                logger.warning("Company Enrich failed (non-fatal): %s", e, exc_info=True)
 
         # Log credit usage
         cost_tracker.log_usage(

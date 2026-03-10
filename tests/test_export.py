@@ -786,6 +786,13 @@ class TestMergeCompanyData:
         assert result[0]["industry"] == "Hospitals & Physicians Clinics"
         assert result[0]["employeeCount"] == 250
 
+    def test_industry_dict_format(self):
+        """primaryIndustry can be a list of dicts with 'name' key."""
+        leads = [{"companyId": "123"}]
+        companies = [{"id": 123, "primaryIndustry": [{"name": "Hotels", "id": "7011"}]}]
+        result = merge_company_data(leads, companies)
+        assert result[0]["industry"] == "Hotels"
+
     def test_no_company_match_preserves_lead(self):
         """Leads without a matching company in enrich results keep original data."""
         leads = [{"companyId": "999", "firstName": "Bob"}]

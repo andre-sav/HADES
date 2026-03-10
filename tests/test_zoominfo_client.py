@@ -1211,6 +1211,56 @@ class TestCompanyEnrich:
         assert company["sicCodes"][-1]["id"] == "8051"
         assert company["primaryIndustry"][0] == "Hospitals & Physicians Clinics"
 
+    def test_enrich_companies_list_response(self, client):
+        """Company Enrich response with data as a list (live API format)."""
+        mock_response = {
+            "success": True,
+            "data": [
+                {
+                    "input": {"companyid": "80710309"},
+                    "data": [
+                        {
+                            "id": 80710309,
+                            "name": "Diamond Line Delivery",
+                            "employeeCount": 217,
+                            "sicCodes": [
+                                {"id": "42", "name": "Motor Freight Transportation And Warehousing"},
+                                {"id": "421", "name": "Trucking And Courier Services, Except Air"},
+                                {"id": "4213", "name": "Trucking, Except Local"},
+                            ],
+                            "primaryIndustry": ["Transportation", "Freight & Logistics Services"],
+                        }
+                    ],
+                    "matchStatus": "FULL_MATCH",
+                }
+            ],
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            params = CompanyEnrichParams(company_ids=["80710309"])
+            result = client.enrich_companies(params)
+
+        assert len(result["data"]) == 1
+        company = result["data"][0]
+        assert company["id"] == 80710309
+        assert company["name"] == "Diamond Line Delivery"
+        assert company["employeeCount"] == 217
+        assert company["sicCodes"][-1]["id"] == "4213"
+
+    def test_enrich_companies_direct_company_in_list(self, client):
+        """Company Enrich response with data as a flat list of company dicts."""
+        mock_response = {
+            "success": True,
+            "data": [{"id": 456, "name": "DirectCo", "employeeCount": 50}],
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            params = CompanyEnrichParams(company_ids=["456"])
+            result = client.enrich_companies(params)
+
+        assert len(result["data"]) == 1
+        assert result["data"][0]["name"] == "DirectCo"
+
     def test_enrich_companies_no_match(self, client):
         """Companies that don't match should not appear in results."""
         mock_response = {
