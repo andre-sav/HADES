@@ -4,8 +4,11 @@ Shared credential loader for headless scripts.
 Priority: environment variables → .streamlit/secrets.toml → st.secrets fallback.
 """
 
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -36,8 +39,10 @@ def load_credentials() -> dict:
         import streamlit as st
         if hasattr(st, "secrets") and st.secrets:
             st_secrets = dict(st.secrets)
+    except ImportError:
+        pass  # Streamlit not installed — expected in headless scripts
     except Exception:
-        pass
+        logger.warning("Failed to read Streamlit secrets", exc_info=True)
 
     def _get(key: str, required: bool = False) -> str | None:
         val = os.environ.get(key) or secrets.get(key) or st_secrets.get(key)

@@ -4,7 +4,10 @@ CSV export functionality for VanillaSoft format with operator metadata.
 
 import csv
 import io
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT, format_phone
 
@@ -50,7 +53,8 @@ def merge_contact(search_contact: dict, enriched_contact: dict) -> dict:
             if val is not None and str(val).strip():
                 # street → companyStreet, name → companyName, id → companyId
                 flat_key = f"company{key[0].upper()}{key[1:]}"
-                merged[flat_key] = val
+                if flat_key not in merged or not str(merged.get(flat_key, "")).strip():
+                    merged[flat_key] = val
 
     # Enrich values overwrite when non-empty
     for key, val in enriched_contact.items():
@@ -89,6 +93,7 @@ def merge_company_data(leads: list[dict], companies: list[dict]) -> list[dict]:
         cid = str(lead.get("companyId") or "")
         co = company_by_id.get(cid)
         if not co:
+            logger.debug("merge_company_data: no company data for companyId=%s", cid)
             continue
 
         # SIC code: last entry in sicCodes array is the most specific
@@ -101,7 +106,8 @@ def merge_company_data(leads: list[dict], companies: list[dict]) -> list[dict]:
         if not lead.get("industry"):
             ind_list = co.get("primaryIndustry") or []
             if ind_list:
-                lead["industry"] = ind_list[0]
+                first = ind_list[0]
+                lead["industry"] = first.get("name", str(first)) if isinstance(first, dict) else str(first)
 
         # Employee count (use `is None` — 0 is a valid value, not "missing")
         if lead.get("employeeCount") is None:

@@ -238,3 +238,4 @@ class SchemaMixin:
                 logger.info(f"Migration: Added {column} to {table}")
             except Exception as e:
                 logger.error(f"Migration failed for {table}.{column}: {e}")
+                raise

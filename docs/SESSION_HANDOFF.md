@@ -1,7 +1,66 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-03-09
-**Status:** All 4 epics implemented (18 stories complete). 761 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44). Geography CSV export + P3 fixes + code review (session 45). P1 production bug fix — operator change reset + race condition fix (session 46). External code review triage + operator deletion cascade fix (session 47). P1 Company Enrich silent failure fix + audit prompt (session 48).
+**Status:** All 4 epics implemented (18 stories complete). 761 tests passing. Both pipelines E2E live tested and PASSED. VanillaSoft push live tested and WORKING (session 23). Score Transparency (session 23). Comprehensive UX review (session 24). Structural UX fixes (session 25). UX review fixes + design critique (session 27). Operators performance + design overhaul (session 28). Deployed app testing + 4 bug fixes (session 29). Comprehensive engineering + UX audit (session 30). Deep audit v2 with 45 findings (session 31). Audit beads created (session 32). P0 safety guards (session 33). Batch enrich + exclude_org_exported (session 33). JWT encryption at rest (session 34). Security hardening + CI + API resilience + config centralization (session 34 cont'd). Crash recovery + 9 beads closed (session 35). Intent pipeline investigation + dead-state UX fix (session 36). Comprehensive system test + 4 bug fixes (session 37). Stale intent guidance + ZIP normalization centralization (session 38). Title preference learning + automation pipeline fixes + re-export + workflow toggle (sessions 39-40). Production verification + tooltips + bug fixes (session 41). Comprehensive code review (19 fixes) + Executive Summary data fix + CSV export field fix (session 42). Address field fix + merge_contact refactor + backfill script (session 43). Company Enrich integration + full backfill (session 44). Geography CSV export + P3 fixes + code review (session 45). P1 production bug fix — operator change reset + race condition fix (session 46). External code review triage + operator deletion cascade fix (session 47). P1 Company Enrich silent failure fix + audit prompt (session 48). Silent-failure audit fix — 24 edits across 9 files (session 49).
+
+## Session Summary (2026-03-09, Session 49)
+
+### What Was Done
+
+Executed the silent-failure audit plan from session 48's AUDIT_PROMPT.md. Fixed 24 silent-failure points across 9 files. 761 tests passing. CodeRabbit review clean.
+
+**Silent-Failure Audit Fixes (9 files, ~24 edits)**
+- `export.py` — Added logger; flatten guard now gap-fill only (prevents enriched company data from overwriting search-phase values); debug log on missing company data; industry type safety (handles `primaryIndustry` as list of dicts)
+- `zoominfo_client.py` — `enrich_companies` parser handles both list and dict response formats; contact enrich no-match warning; dead field comment clarified; DB init warning with traceback
+- `expand_search.py` — Added `search_params` field to SearchJob; `logger.exception` for full tracebacks on failures; `log_progress` for person-only expansion failures
+- `pages/1_Intent_Workflow.py` — Company Enrich done-flag always set (fixes infinite retry loop); test mode skips Company Enrich; mock fields for managementLevel/contactAccuracyScore; PID warning; client init guard; title prefs `pass` → `logger.warning`; target_companies reads from session state
+- `pages/2_Geography_Workflow.py` — Same Company Enrich done-flag fix; test mode skip; mock fields; PID warning; search_params on job object; try/finally cleanup in fragment poller; title prefs logging
+- `db/_schema.py` — Re-raise migration failure (was silently swallowed)
+- `scripts/_credentials.py` — Narrowed `except Exception` to `except ImportError` for streamlit import; added logger for other exceptions
+- `pages/10_Automation.py` — Added `exc_info=True` to both `logger.error` calls
+- `pages/11_Pipeline_Health.py` — Added `logger.exception` before both `st.caption` fallbacks
+
+**Plan deviation:** Skipped Step 2c (`requiredFieldsOperator`) — the audit flagged it as missing but an existing test confirmed ZoomInfo API rejects this field. It's intentionally omitted.
+
+**CodeRabbit review:** 2 findings — fixed unused `ZoomInfoError` import (it subclasses `PipelineError`, already caught); skipped mislabeled phase in untracked system-test report.
+
+**Verification prompt:** Created `docs/VERIFY_COMPANY_ENRICH.md` — a 5-step prompt for live smoke-testing Company Enrich against the real API before telling the colleague to resume using the tool.
+
+### Key Files Modified
+```
+export.py                     — +10/-2  (logger, flatten guard, industry type check)
+zoominfo_client.py            — +30/-3  (list-format parser, no-match warning, DB warning)
+expand_search.py              — +11/-4  (search_params field, traceback logging)
+pages/1_Intent_Workflow.py    — +41/-13 (enrich done-flag, test mode, PID warning, logging)
+pages/2_Geography_Workflow.py — +55/-16 (enrich done-flag, test mode, fragment safety, logging)
+db/_schema.py                 — +1/-0   (re-raise migration failure)
+scripts/_credentials.py       — +7/-1   (narrowed exception, logger)
+pages/10_Automation.py        — +4/-2   (exc_info=True)
+pages/11_Pipeline_Health.py   — +2/-0   (logger.exception)
+docs/VERIFY_COMPANY_ENRICH.md — new     (live smoke test prompt)
+```
+
+### Uncommitted Changes
+All 9 modified files + 1 new file are uncommitted. Ready to commit and push.
+
+Untracked (pre-existing): `system-test/`, `HADES-geography-*.csv`, `HADES_CODEBASE_FLAT.md`, `REVIEW_PROMPT.md`
+
+### Branch State
+- `main` — 9 modified files, 1 new file, not yet committed
+
+### Known Issues
+- Company Enrich response parser handles list+dict but hasn't been verified against live API (see `docs/VERIFY_COMPANY_ENRICH.md`)
+- Michelle Joiner-Dubois needs to re-run her AZ geography search (old export had wrong data)
+- Existing staged exports in DB still have empty SIC/industry/employee columns — need backfill or re-export
+- SMTP email delivery not yet tested (GitHub Actions secret configured)
+- `directPhone` still commented out in Enrich output fields (may require ZoomInfo subscription upgrade)
+
+### What Needs Doing Next Session
+1. **Execute `docs/VERIFY_COMPANY_ENRICH.md`** — Live smoke test of Company Enrich against real API, then greenlight colleague
+2. **Backfill staged exports** — Re-run Company Enrich on recently staged exports missing SIC/industry/employee data
+3. **HADES-iic** — Zoho CRM dedup at export time (highest business value P4)
+4. **HADES-dgr** — Show budget remaining in Run Now confirmation dialog
+5. **HADES-bdr** — Pipeline log panel (persistent timestamped build-log UI)
 
 ## Session Summary (2026-03-09, Session 48)
 

@@ -115,7 +115,7 @@ DEFAULT_ENRICH_OUTPUT_FIELDS = [
     "lastName",
     # Contact info
     "email",
-    "phone",  # fallback for Business phone in export.py
+    "phone",  # fallback for Business phone in export.py (NOT returned by Enrich API — comes from search)
     # "directPhone",  # Requires additional subscription
     "mobilePhone",
     # Job info
@@ -861,6 +861,8 @@ class ZoomInfoClient:
             request_body["companyPastOrPresent"] = params.company_past_or_present
         if params.required_fields:
             request_body["requiredFields"] = ",".join(params.required_fields)
+        # NOTE: requiredFieldsOperator is intentionally NOT sent — ZoomInfo API rejects it.
+        # The operator value is retained in the dataclass for cache keying only.
 
         # Management level filter (comma-separated string)
         if params.management_levels:
@@ -1203,6 +1205,12 @@ class ZoomInfoClient:
             "noMatch": response.get("noMatch", []),
         }
         logger.info(f"Contact Enrich complete: {len(contacts)} contacts extracted, {len(result['noMatch'])} no match")
+        if len(contacts) < len(params.person_ids):
+            logger.warning(
+                "Contact Enrich: %d/%d had no match",
+                len(params.person_ids) - len(contacts),
+                len(params.person_ids),
+            )
         return result
 
     def enrich_contacts_batch(
@@ -1273,12 +1281,27 @@ class ZoomInfoClient:
         response = self._request("POST", "/enrich/company", json=request_body)
 
         # Parse response: data.result[i].data[0] → company dict
+        # Response format varies: data can be a dict with "result" key, or a list directly
         companies = []
         raw_data = response.get("data", {})
-        if isinstance(raw_data, dict):
+        if isinstance(raw_data, list):
+            for item in raw_data:
+                if isinstance(item, dict):
+                    inner = item.get("data")
+                    if isinstance(inner, list) and inner:
+                        companies.append(inner[0])
+                    elif isinstance(inner, dict):
+                        companies.append(inner)
+                    elif "id" in item:
+                        companies.append(item)
+        elif isinstance(raw_data, dict):
             for item in raw_data.get("result", []):
                 if isinstance(item, dict) and item.get("data"):
-                    companies.append(item["data"][0])
+                    inner = item["data"]
+                    if isinstance(inner, list) and inner:
+                        companies.append(inner[0])
+                    elif isinstance(inner, dict):
+                        companies.append(inner)
 
         logger.info(f"Company Enrich complete: {len(companies)} companies returned")
         return {"data": companies, "success": response.get("success")}
@@ -1399,6 +1422,7 @@ def get_zoominfo_client() -> ZoomInfoClient:
     try:
         token_store = get_database()
     except Exception:
+        logger.warning("Failed to get database for token store — tokens will not persist", exc_info=True)
         token_store = None
     return ZoomInfoClient(
         client_id=st.secrets["ZOOMINFO_CLIENT_ID"],

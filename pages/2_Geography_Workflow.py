@@ -1070,6 +1070,8 @@ if has_operator:
                 job.error = "Search failed unexpectedly. Check application logs."
             job.done.set()
 
+        job.search_params = sp  # Attach params to job for fragment result storage
+
         job.thread = threading.Thread(target=_run_geo_search, daemon=True)
         job.thread.start()
 
@@ -1121,7 +1123,7 @@ if has_operator:
             try:
                 _title_prefs = db.get_title_preferences()
             except Exception:
-                pass
+                logger.warning("Failed to load title preferences", exc_info=True)
             auto_selected = {}
             for company_id, data in contacts_by_company.items():
                 if data["contacts"]:
@@ -1179,14 +1181,16 @@ if has_operator:
 
             if job.done.is_set():
                 # Thread finished — store results and trigger full page rerun
-                sp = st.session_state.get("geo_pending_search_params") or {}
-                if job.error:
-                    st.error(f"Search failed: {job.error}")
-                elif job.result:
-                    _store_geo_results(job.result, sp)
-                # Clean up job state
-                st.session_state.geo_search_job = None
-                st.session_state._geo_progress_log = None
+                sp = getattr(job, "search_params", None) or st.session_state.get("geo_pending_search_params") or {}
+                try:
+                    if job.error:
+                        st.error(f"Search failed: {job.error}")
+                    elif job.result:
+                        _store_geo_results(job.result, sp)
+                finally:
+                    # Clean up job state even if _store_geo_results fails
+                    st.session_state.geo_search_job = None
+                    st.session_state._geo_progress_log = None
                 st.rerun()
                 return
 
@@ -1222,7 +1226,7 @@ if (
     try:
         _pref_count = len(db.get_title_preferences())
     except Exception:
-        pass
+        logger.warning("Failed to load title preferences for display", exc_info=True)
     if _pref_count > 0:
         st.caption(
             f"Preference learning active — tracking {_pref_count} title pattern{'s' if _pref_count != 1 else ''}. "
@@ -1556,7 +1560,7 @@ def _record_geo_title_preferences():
         try:
             db.record_title_selections(_sel_titles, _skip_titles)
         except Exception:
-            logger.debug("Title preference recording failed", exc_info=True)
+            logger.warning("Title preference recording failed", exc_info=True)
 
 
 # =============================================================================
@@ -1589,6 +1593,8 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                 enriched_contact.setdefault("mobilePhone", contact.get("mobilePhone", ""))
                 enriched_contact.setdefault("city", contact.get("city", contact.get("personCity", "")))
                 enriched_contact.setdefault("state", contact.get("state", contact.get("personState", "")))
+                enriched_contact.setdefault("managementLevel", contact.get("managementLevel", ""))
+                enriched_contact.setdefault("contactAccuracyScore", contact.get("contactAccuracyScore", 0))
                 enriched_contact["_test_mode"] = True  # Flag for test data
                 mock_enriched.append(enriched_contact)
 
@@ -1668,6 +1674,8 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
 
     for i, contact in enumerate(enriched_contacts):
         pid = str(contact.get("id") or contact.get("personId") or "")
+        if not pid:
+            logger.warning("Enriched contact at index %d has no personId or id", i)
         search_data = search_by_pid.get(pid, {})
         enriched_contacts[i] = merge_contact(search_data, contact)
         contact = enriched_contacts[i]
@@ -1685,18 +1693,21 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
     # Company Enrich — fills sicCode, industry, employeeCount (free if contact already enriched)
     # Only run once per search (avoid re-calling API on every Streamlit rerun)
     if not st.session_state.get("geo_company_enrich_done"):
-        company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
-        if company_ids:
-            try:
-                co_client = get_zoominfo_client()
-                company_data = co_client.enrich_companies_batch(company_ids)
-                merge_company_data(enriched_contacts, company_data)
-                logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
-                st.session_state.geo_company_enrich_done = True
-            except Exception as e:
-                logger.warning("Company Enrich failed (non-fatal): %s", e)
-        else:
+        if st.session_state.get("geo_test_mode"):
             st.session_state.geo_company_enrich_done = True
+        else:
+            company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
+            if company_ids:
+                try:
+                    co_client = get_zoominfo_client()
+                    company_data = co_client.enrich_companies_batch(company_ids)
+                    merge_company_data(enriched_contacts, company_data)
+                    logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
+                except Exception as e:
+                    logger.warning("Company Enrich failed (non-fatal): %s", e, exc_info=True)
+                st.session_state.geo_company_enrich_done = True
+            else:
+                st.session_state.geo_company_enrich_done = True
 
     # Score the enriched contacts
     scored = score_geography_leads(

@@ -313,7 +313,7 @@ if dry_run:
             else:
                 st.error(f"Preview failed: {result.get('error', 'Unknown error')}")
     except Exception as e:
-        logger.error(f"Dry run error: {e}")
+        logger.error(f"Dry run error: {e}", exc_info=True)
         st.error("Preview failed. Please try again or check the logs.")
 
 # Render dry-run preview
@@ -439,7 +439,7 @@ if st.session_state.pop("auto_run_confirmed", False) and not st.session_state.ge
             else:
                 st.error(f"Pipeline failed: {result.get('error', 'Unknown error')}")
     except Exception as e:
-        logger.error(f"Pipeline error: {e}")
+        logger.error(f"Pipeline error: {e}", exc_info=True)
         st.error("Pipeline error. Please try again or check the logs.")
     finally:
         st.session_state["auto_run_triggered"] = False

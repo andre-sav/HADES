@@ -300,6 +300,7 @@ try:
             hint="Pipeline runs are logged by the automated intent poller and manual searches.",
         )
 except Exception:
+    logger.exception("Failed to load pipeline runs")
     st.caption("Pipeline runs table not available")
 
 
@@ -354,4 +355,5 @@ try:
     else:
         st.caption("No errors logged")
 except Exception:
+    logger.exception("Failed to load error log")
     st.caption("Error log not available")

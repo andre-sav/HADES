@@ -58,6 +58,7 @@ class SearchJob:
     thread: threading.Thread | None = None
     result: dict | None = None
     error: str | None = None
+    search_params: dict | None = None
 
 
 # =============================================================================
@@ -389,6 +390,7 @@ def expand_search(
                 logger.warning(f"Person-only combined search failed: {e}")
 
     except Exception as e:
+        logger.exception("expand_search top-level failure")
         log_progress(f"Search failed: {e}")
         return {
             "target": target,
@@ -548,13 +550,14 @@ def expand_search(
                     if person_new_companies > 0:
                         log_progress(f"Person-only expansion: +{person_new_companies} new companies")
                 except Exception as e:
-                    logger.warning(f"Person-only expansion search failed: {e}")
+                    log_progress(f"Person-only expansion search failed: {e}")
+                    logger.warning("Person-only expansion search failed: %s", e, exc_info=True)
 
         except Exception as e:
             log_progress(f"Search failed: {e}")
-            logger.warning(
-                f"Expansion step {steps_applied} failed: {e}. "
-                f"Returning {len(all_contacts)} contacts found so far."
+            logger.exception(
+                "Expansion step %d failed. Returning %d contacts found so far.",
+                steps_applied, len(all_contacts),
             )
             break
 

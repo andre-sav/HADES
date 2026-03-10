@@ -540,6 +540,7 @@ if st.session_state.intent_search_pending:
         # Cache miss — call API
         logger.info("Cache MISS: querying ZoomInfo Intent API")
         st.session_state["_intent_from_cache"] = False
+        client = None
         with st.status("Searching for intent companies...", expanded=True) as status:
             try:
                 client = get_zoominfo_client()
@@ -939,10 +940,11 @@ if (
 
         # Bulk actions
         bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns([1, 1, 1, 1])
+        _bulk_target = st.session_state.get("_intent_pending_params", {}).get("target_companies", target_companies)
         with bulk_col1:
-            if st.button(f"Select Top {target_companies}", key="intent_select_top_btn"):
+            if st.button(f"Select Top {_bulk_target}", key="intent_select_top_btn"):
                 auto = {}
-                for lead in companies[:target_companies]:
+                for lead in companies[:_bulk_target]:
                     cid = str(lead.get("companyId", ""))
                     if cid:
                         auto[cid] = lead
@@ -1100,7 +1102,7 @@ if (
                         try:
                             _title_prefs = db.get_title_preferences()
                         except Exception:
-                            pass  # No prefs yet — use default ranking
+                            logger.warning("Failed to load title preferences", exc_info=True)
                         auto_selected = {}
                         for cid, data in contacts_by_company.items():
                             if data["contacts"]:
@@ -1172,7 +1174,7 @@ if (
         try:
             _pref_count = len(db.get_title_preferences())
         except Exception:
-            pass
+            logger.warning("Failed to load title preferences for display", exc_info=True)
         if _pref_count > 0:
             st.caption(
                 f"Preference learning active — tracking {_pref_count} title pattern{'s' if _pref_count != 1 else ''}. "
@@ -1349,7 +1351,7 @@ if (
             try:
                 db.record_title_selections(_sel_titles, _skip_titles)
             except Exception:
-                logger.debug("Title preference recording failed", exc_info=True)
+                logger.warning("Title preference recording failed", exc_info=True)
 
     # --- ENRICHMENT (both modes) ---
     should_enrich = (
@@ -1383,6 +1385,8 @@ if (
                         enriched.setdefault("mobilePhone", contact.get("mobilePhone", ""))
                         enriched.setdefault("city", contact.get("city", contact.get("personCity", "")))
                         enriched.setdefault("state", contact.get("state", contact.get("personState", "")))
+                        enriched.setdefault("managementLevel", contact.get("managementLevel", ""))
+                        enriched.setdefault("contactAccuracyScore", contact.get("contactAccuracyScore", 0))
                         enriched["_test_mode"] = True
                         mock_enriched.append(enriched)
                     st.session_state.intent_enriched_contacts = mock_enriched
@@ -1459,24 +1463,29 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
 
     for i, contact in enumerate(enriched_contacts):
         pid = str(contact.get("id") or contact.get("personId") or "")
+        if not pid:
+            logger.warning("Enriched contact at index %d has no personId or id", i)
         search_data = search_by_pid.get(pid, {})
         enriched_contacts[i] = merge_contact(search_data, contact)
 
     # Company Enrich — fills sicCode, industry, employeeCount (free if contact already enriched)
     # Only run once per search (avoid re-calling API on every Streamlit rerun)
     if not st.session_state.get("intent_company_enrich_done"):
-        company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
-        if company_ids:
-            try:
-                co_client = get_zoominfo_client()
-                company_data = co_client.enrich_companies_batch(company_ids)
-                merge_company_data(enriched_contacts, company_data)
-                logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
-                st.session_state.intent_company_enrich_done = True
-            except Exception as e:
-                logger.warning("Company Enrich failed (non-fatal): %s", e)
-        else:
+        if st.session_state.get("intent_test_mode"):
             st.session_state.intent_company_enrich_done = True
+        else:
+            company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
+            if company_ids:
+                try:
+                    co_client = get_zoominfo_client()
+                    company_data = co_client.enrich_companies_batch(company_ids)
+                    merge_company_data(enriched_contacts, company_data)
+                    logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
+                except Exception as e:
+                    logger.warning("Company Enrich failed (non-fatal): %s", e, exc_info=True)
+                st.session_state.intent_company_enrich_done = True
+            else:
+                st.session_state.intent_company_enrich_done = True
 
     # Build company_scores dict for scoring
     company_scores = {}
