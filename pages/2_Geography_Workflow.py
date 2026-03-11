@@ -26,6 +26,7 @@ def compute_params_hash(params: dict) -> str:
 
 from turso_db import get_database
 from errors import PipelineError
+from db._pipeline import RunLogger
 from zoominfo_client import (
     get_zoominfo_client,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
@@ -171,6 +172,9 @@ defaults = {
     "geo_leads_staged": False,
     # Operator change detection
     "_geo_last_operator_id": None,
+    # Pipeline run tracking
+    "geo_run_logger": None,
+    "geo_run_id": None,
 }
 for key, default in defaults.items():
     if key not in st.session_state:
@@ -206,6 +210,8 @@ def _reset_geo_search_state():
     st.session_state.geo_dedup_result = None
     st.session_state.geo_last_search_params = {}
     st.session_state.pop("geo_export_leads", None)
+    st.session_state.geo_run_logger = None
+    st.session_state.geo_run_id = None
 
 
 # =============================================================================
@@ -1035,6 +1041,23 @@ if has_operator:
             "center_zip": search_center_zip,
         }
 
+        # Pipeline run tracking (skip in test mode)
+        if not st.session_state.geo_test_mode:
+            st.session_state.geo_run_logger = RunLogger()
+            st.session_state.geo_run_id = db.start_pipeline_run(
+                "geography", "manual", {
+                    "zip_codes": search_zip_codes[:10],
+                    "zip_count": len(search_zip_codes),
+                    "radius": search_radius,
+                    "center_zip": search_center_zip,
+                    "target_contacts": target,
+                    "mode": st.session_state.geo_mode,
+                },
+            )
+            _rl = st.session_state.geo_run_logger
+            if _rl:
+                _rl.info(f"Search: {len(search_zip_codes)} ZIPs, radius={search_radius}mi")
+
         # Launch search in background thread
         job = SearchJob()
         progress_log = []  # Shared list — thread appends, fragment reads
@@ -1086,21 +1109,36 @@ if has_operator:
     def _store_geo_results(result: dict, sp: dict):
         """Process expand_search result and populate session state."""
         st.session_state.geo_expansion_result = result
+        _rl = st.session_state.get("geo_run_logger")
 
         if result.get("error"):
             st.error(f"Search failed: {result['error']}")
             st.session_state.geo_preview_contacts = None
             st.session_state.geo_search_executed = True
+            if _rl:
+                _rl.error(f"Search failed: {result['error']}")
         elif not result["contacts"]:
             st.warning("No contacts found matching your criteria. Try adjusting filters.")
             st.session_state.geo_preview_contacts = None
             st.session_state.geo_search_executed = True
+            if _rl:
+                _rl.warn("No contacts found matching criteria")
         else:
             if result.get("stopped"):
                 st.warning(f"Search stopped — showing {result['found']} companies ({result.get('found_contacts', 0)} contacts) found so far.")
+                if _rl:
+                    _rl.warn(f"Search stopped early: {result['found']} companies")
 
             st.session_state.geo_preview_contacts = result["contacts"]
             st.session_state.geo_search_executed = True
+
+            if _rl:
+                _rl.info(f"Found {len(result['contacts'])} contacts across {result['found']} companies")
+                _rl.set_metric("contacts_found", len(result["contacts"]))
+                _rl.set_metric("companies_found", result["found"])
+                # Log expansion steps if any
+                for step in result.get("expansion_steps", []):
+                    _rl.info(f"Expansion: {step.get('description', step.get('step', 'unknown'))}")
 
             # Cross-session export dedup: filter previously exported companies
             include_exported = st.session_state.get("geo_include_exported", False)
@@ -1185,6 +1223,19 @@ if has_operator:
                 try:
                     if job.error:
                         st.error(f"Search failed: {job.error}")
+                        # Log search failure to pipeline run
+                        _rl = st.session_state.get("geo_run_logger")
+                        _run_id = st.session_state.get("geo_run_id")
+                        if _rl:
+                            _rl.error(f"Search failed: {job.error}")
+                        if _rl and _run_id:
+                            db.complete_pipeline_run(
+                                _run_id, "failed", _rl.to_summary(),
+                                batch_id=None, credits_used=0,
+                                leads_exported=0, error=job.error,
+                            )
+                            st.session_state.geo_run_logger = None
+                            st.session_state.geo_run_id = None
                     elif job.result:
                         _store_geo_results(job.result, sp)
                 finally:
@@ -1613,10 +1664,17 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                     )
                     st.session_state.geo_enriched_contacts = enriched
                     st.session_state.geo_enrichment_done = True
+                    _rl = st.session_state.get("geo_run_logger")
+                    if _rl:
+                        _rl.info(f"Contact Enrich: {len(enriched)} contacts")
+                        _rl.set_metric("contacts_enriched", len(enriched))
                     _record_geo_title_preferences()
                     st.rerun()
                 except PipelineError as e:
                     st.error(f"Enrichment failed: {e.user_message}")
+                    _rl = st.session_state.get("geo_run_logger")
+                    if _rl:
+                        _rl.error(f"Contact Enrich failed: {e.user_message}")
                     try:
                         db.log_error(
                             workflow_type="geography",
@@ -1630,6 +1688,9 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                 except Exception:
                     logger.exception("Geography enrichment failed")
                     st.error("Enrichment failed unexpectedly. Check application logs.")
+                    _rl = st.session_state.get("geo_run_logger")
+                    if _rl:
+                        _rl.error("Contact Enrich failed unexpectedly")
     else:
         st.error("No valid person IDs found in selected contacts")
 
@@ -1698,13 +1759,19 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         else:
             company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
             if company_ids:
+                _rl = st.session_state.get("geo_run_logger")
                 try:
                     co_client = get_zoominfo_client()
                     company_data = co_client.enrich_companies_batch(company_ids)
                     merge_company_data(enriched_contacts, company_data)
                     logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
+                    if _rl:
+                        _rl.info(f"Company Enrich: {len(company_data)} merged")
+                        _rl.set_metric("companies_enriched", len(company_data))
                 except Exception as e:
                     logger.warning("Company Enrich failed (non-fatal): %s", e, exc_info=True)
+                    if _rl:
+                        _rl.warn(f"Company Enrich failed: {e}")
                 st.session_state.geo_company_enrich_done = True
             else:
                 st.session_state.geo_company_enrich_done = True
@@ -1893,6 +1960,22 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                     operator_id=op.get("id") if op else None,
                 )
                 st.session_state.geo_leads_staged = True
+
+                # Complete pipeline run
+                _rl = st.session_state.get("geo_run_logger")
+                _run_id = st.session_state.get("geo_run_id")
+                if _rl and _run_id:
+                    _rl.info(f"Staged {len(scored_leads)} leads")
+                    _rl.set_metric("leads_staged", len(scored_leads))
+                    db.complete_pipeline_run(
+                        _run_id, "completed", _rl.to_summary(),
+                        batch_id=None,
+                        credits_used=len(st.session_state.get("geo_enriched_contacts") or []),
+                        leads_exported=len(scored_leads),
+                        error=None,
+                    )
+                    st.session_state.geo_run_logger = None
+                    st.session_state.geo_run_id = None
 
     geo_results_table(scored)
 
