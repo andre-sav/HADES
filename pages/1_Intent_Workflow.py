@@ -36,6 +36,7 @@ from datetime import datetime
 
 from turso_db import get_database
 from errors import PipelineError
+from db._pipeline import RunLogger
 from zoominfo_client import (
     get_zoominfo_client,
     IntentQueryParams,
@@ -141,6 +142,9 @@ defaults = {
     "intent_export_leads": None,
     # Export tracking
     "intent_exported": False,
+    # Pipeline run tracking
+    "intent_run_logger": None,
+    "intent_run_id": None,
     # Filters
     "intent_state_filter": [],
 }
@@ -471,6 +475,21 @@ if st.session_state.intent_search_pending:
 
     logger.info("Intent search starting: topics=%s, signals=%s, target=%d", _p_topics, _p_signals, _p_target)
 
+    # Pipeline run tracking (skip in test mode)
+    if not st.session_state.intent_test_mode:
+        st.session_state.intent_run_logger = RunLogger()
+        st.session_state.intent_run_id = db.start_pipeline_run(
+            "intent", "manual", {
+                "topics": _p_topics,
+                "signal_strengths": _p_signals,
+                "target_companies": _p_target,
+                "mode": st.session_state.intent_mode,
+            },
+        )
+        _rl = st.session_state.intent_run_logger
+        if _rl:
+            _rl.info(f"Intent Search: topics={_p_topics}")
+
     # Cache-first lookup
     _cache_key = _intent_cache_key(_p_topics, _p_signals)
     _force_refresh = st.session_state.get("_intent_force_refresh", False)
@@ -481,6 +500,9 @@ if st.session_state.intent_search_pending:
     if cached_leads is not None:
         # Cache hit — use cached results directly
         logger.info("Cache HIT: %d raw leads from cache", len(cached_leads))
+        _rl = st.session_state.get("intent_run_logger")
+        if _rl:
+            _rl.info(f"Cache HIT: {len(cached_leads)} raw leads")
         st.session_state["_intent_from_cache"] = True
         st.session_state["_intent_api_response_summary"] = {"total_results": len(cached_leads)}
         st.session_state.pop("_intent_stale_summary", None)
@@ -496,6 +518,11 @@ if st.session_state.intent_search_pending:
             lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
             lead["_priority"] = get_priority_label(score)
             lead["_priority_action"] = get_priority_action(score)
+
+        _rl = st.session_state.get("intent_run_logger")
+        if _rl:
+            _rl.info(f"Intent Search (cached): {len(deduped)} companies")
+            _rl.set_metric("intent_results", len(deduped))
 
         st.session_state.intent_companies = deduped
         st.session_state.intent_search_executed = True
@@ -530,6 +557,9 @@ if st.session_state.intent_search_pending:
                     auto_selected[cid] = lead
             st.session_state.intent_selected_companies = auto_selected
             logger.info("Autopilot auto-selected %d/%d companies", len(auto_selected), len(deduped))
+            _rl = st.session_state.get("intent_run_logger")
+            if _rl:
+                _rl.info(f"Selected {len(auto_selected)} companies (top scored)")
             if auto_selected:
                 st.session_state.intent_companies_confirmed = True
 
@@ -594,6 +624,9 @@ if st.session_state.intent_search_pending:
 
                 if not leads:
                     logger.info("Intent search returned 0 results")
+                    _rl = st.session_state.get("intent_run_logger")
+                    if _rl:
+                        _rl.warn("Intent Search: 0 results")
                     st.write("No companies found matching criteria.")
                     st.session_state.intent_companies = None
                     st.session_state.intent_search_executed = True
@@ -624,6 +657,11 @@ if st.session_state.intent_search_pending:
                         lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
                         lead["_priority"] = get_priority_label(score)
                         lead["_priority_action"] = get_priority_action(score)
+
+                    _rl = st.session_state.get("intent_run_logger")
+                    if _rl:
+                        _rl.info(f"Intent Search: {len(deduped)} companies")
+                        _rl.set_metric("intent_results", len(deduped))
 
                     st.session_state.intent_companies = deduped
                     st.session_state.intent_search_executed = True
@@ -664,6 +702,9 @@ if st.session_state.intent_search_pending:
                                 auto_selected[cid] = lead
                         st.session_state.intent_selected_companies = auto_selected
                         logger.info("Autopilot auto-selected %d/%d companies", len(auto_selected), len(deduped))
+                        _rl = st.session_state.get("intent_run_logger")
+                        if _rl:
+                            _rl.info(f"Selected {len(auto_selected)} companies (top scored)")
                         if auto_selected:
                             st.session_state.intent_companies_confirmed = True
 
@@ -677,6 +718,9 @@ if st.session_state.intent_search_pending:
 
             except PipelineError as e:
                 logger.error("Intent search failed: %s", e.user_message)
+                _rl = st.session_state.get("intent_run_logger")
+                if _rl:
+                    _rl.error(f"Intent Search failed: {e.user_message}")
                 st.session_state.intent_search_pending = False
                 st.session_state["_intent_api_error"] = str(e.user_message)
                 st.session_state["_intent_api_exchange"] = getattr(client, "last_exchange", None)
@@ -692,6 +736,16 @@ if st.session_state.intent_search_pending:
                     )
                 except Exception:
                     pass  # Never let error logging cause secondary failures
+                # Complete pipeline run as failed
+                _run_id = st.session_state.get("intent_run_id")
+                if _rl and _run_id:
+                    db.complete_pipeline_run(
+                        _run_id, "failed", _rl.to_summary(),
+                        batch_id=None, credits_used=0,
+                        leads_exported=0, error=e.user_message,
+                    )
+                    st.session_state.intent_run_logger = None
+                    st.session_state.intent_run_id = None
             except Exception:
                 st.session_state.intent_search_pending = False
                 st.session_state["_intent_api_error"] = "An unexpected error occurred"
@@ -700,6 +754,18 @@ if st.session_state.intent_search_pending:
                 except Exception:
                     pass
                 logger.exception("Intent search failed")
+                _rl = st.session_state.get("intent_run_logger")
+                if _rl:
+                    _rl.error("Intent Search failed unexpectedly")
+                _run_id = st.session_state.get("intent_run_id")
+                if _rl and _run_id:
+                    db.complete_pipeline_run(
+                        _run_id, "failed", _rl.to_summary(),
+                        batch_id=None, credits_used=0,
+                        leads_exported=0, error="Unexpected error",
+                    )
+                    st.session_state.intent_run_logger = None
+                    st.session_state.intent_run_id = None
                 status.update(label="Search failed", state="error")
                 st.error("An unexpected error occurred. Check application logs for details.")
 
@@ -1088,10 +1154,17 @@ if (
 
                     if not contacts:
                         logger.info("Contact search returned 0 results")
+                        _rl = st.session_state.get("intent_run_logger")
+                        if _rl:
+                            _rl.warn("Contact Search: 0 contacts")
                         search_status.update(label="No ICP contacts found", state="complete")
                         st.warning("No contacts matched ICP filters. Try adjusting filters or selecting more companies.")
                     else:
                         logger.info("Contact search returned %d contacts", len(contacts))
+                        _rl = st.session_state.get("intent_run_logger")
+                        if _rl:
+                            _rl.info(f"Contact Search: {len(contacts)} contacts")
+                            _rl.set_metric("contacts_found", len(contacts))
                         st.write(f"Found {len(contacts)} contacts. Grouping by company...")
                         contacts_by_company = build_contacts_by_company(contacts)
                         st.session_state.intent_contacts_by_company = contacts_by_company
@@ -1140,6 +1213,9 @@ if (
 
             except PipelineError as e:
                 search_status.update(label="❌ API Error", state="error")
+                _rl = st.session_state.get("intent_run_logger")
+                if _rl:
+                    _rl.error(f"Contact Search failed: {e.user_message}")
                 st.error(e.user_message)
                 try:
                     db.log_error(
@@ -1154,6 +1230,9 @@ if (
             except Exception:
                 search_status.update(label="❌ Contact search failed", state="error")
                 logger.exception("Contact search failed")
+                _rl = st.session_state.get("intent_run_logger")
+                if _rl:
+                    _rl.error("Contact Search failed unexpectedly")
                 st.error("Contact search failed unexpectedly. Check application logs.")
 
     # Show contacts for manual selection
@@ -1416,11 +1495,18 @@ if (
                             enrich_status.update(label=f"Enriched {len(enriched)} contacts", state="complete")
                             st.session_state.intent_enriched_contacts = enriched
                             st.session_state.intent_enrichment_done = True
+                            _rl = st.session_state.get("intent_run_logger")
+                            if _rl:
+                                _rl.info(f"Contact Enrich: {len(enriched)} contacts")
+                                _rl.set_metric("contacts_enriched", len(enriched))
                             _record_title_preferences()
                             st.rerun()
                         except PipelineError as e:
                             logger.error("Enrichment failed: %s", e.user_message)
                             enrich_status.update(label="Enrichment failed", state="error")
+                            _rl = st.session_state.get("intent_run_logger")
+                            if _rl:
+                                _rl.error(f"Contact Enrich failed: {e.user_message}")
                             st.error(f"Enrichment failed: {e.user_message}")
                             try:
                                 db.log_error(
@@ -1435,6 +1521,9 @@ if (
                         except Exception:
                             logger.exception("Enrichment failed")
                             enrich_status.update(label="Enrichment failed", state="error")
+                            _rl = st.session_state.get("intent_run_logger")
+                            if _rl:
+                                _rl.error("Contact Enrich failed unexpectedly")
                             st.error("Enrichment failed unexpectedly. Check application logs.")
 
 
@@ -1476,13 +1565,19 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         else:
             company_ids = list({str(c.get("companyId") or "") for c in enriched_contacts} - {""})
             if company_ids:
+                _rl = st.session_state.get("intent_run_logger")
                 try:
                     co_client = get_zoominfo_client()
                     company_data = co_client.enrich_companies_batch(company_ids)
                     merge_company_data(enriched_contacts, company_data)
                     logger.info("Company Enrich: merged %d companies onto %d contacts", len(company_data), len(enriched_contacts))
+                    if _rl:
+                        _rl.info(f"Company Enrich: {len(company_data)} companies merged")
+                        _rl.set_metric("companies_enriched", len(company_data))
                 except Exception as e:
                     logger.warning("Company Enrich failed (non-fatal): %s", e, exc_info=True)
+                    if _rl:
+                        _rl.warn(f"Company Enrich failed: {e}")
                 st.session_state.intent_company_enrich_done = True
             else:
                 st.session_state.intent_company_enrich_done = True
@@ -1688,5 +1783,21 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
                     query_params=st.session_state.get("intent_query_params"),
                 )
                 st.session_state.intent_leads_staged = True
+
+                # Complete pipeline run
+                _rl = st.session_state.get("intent_run_logger")
+                _run_id = st.session_state.get("intent_run_id")
+                if _rl and _run_id:
+                    _rl.info(f"Staged {len(scored_leads)} leads")
+                    _rl.set_metric("leads_staged", len(scored_leads))
+                    db.complete_pipeline_run(
+                        _run_id, "completed", _rl.to_summary(),
+                        batch_id=None,
+                        credits_used=len(st.session_state.get("intent_enriched_contacts") or []),
+                        leads_exported=len(scored_leads),
+                        error=None,
+                    )
+                    st.session_state.intent_run_logger = None
+                    st.session_state.intent_run_id = None
 
     intent_results_table(scored)
