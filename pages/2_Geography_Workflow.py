@@ -1700,6 +1700,15 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                     _rl = st.session_state.get("geo_run_logger")
                     if _rl:
                         _rl.error("Contact Enrich failed unexpectedly")
+                    _run_id = st.session_state.get("geo_run_id")
+                    if _rl and _run_id:
+                        db.complete_pipeline_run(
+                            _run_id, "failed", _rl.to_summary(),
+                            batch_id=None, credits_used=0,
+                            leads_exported=0, error="Unexpected error in enrichment",
+                        )
+                        st.session_state.geo_run_logger = None
+                        st.session_state.geo_run_id = None
     else:
         st.error("No valid person IDs found in selected contacts")
 
@@ -1977,7 +1986,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                     _rl.info(f"Staged {len(scored_leads)} leads")
                     _rl.set_metric("leads_staged", len(scored_leads))
                     db.complete_pipeline_run(
-                        _run_id, "completed", _rl.to_summary(),
+                        _run_id, "success", _rl.to_summary(),
                         batch_id=None,
                         credits_used=len(st.session_state.get("geo_enriched_contacts") or []),
                         leads_exported=len(scored_leads),

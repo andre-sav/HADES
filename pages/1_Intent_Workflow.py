@@ -1242,6 +1242,15 @@ if (
                 _rl = st.session_state.get("intent_run_logger")
                 if _rl:
                     _rl.error("Contact Search failed unexpectedly")
+                _run_id = st.session_state.get("intent_run_id")
+                if _rl and _run_id:
+                    db.complete_pipeline_run(
+                        _run_id, "failed", _rl.to_summary(),
+                        batch_id=None, credits_used=0,
+                        leads_exported=0, error="Unexpected error in contact search",
+                    )
+                    st.session_state.intent_run_logger = None
+                    st.session_state.intent_run_id = None
                 st.error("Contact search failed unexpectedly. Check application logs.")
 
     # Show contacts for manual selection
@@ -1533,6 +1542,15 @@ if (
                             _rl = st.session_state.get("intent_run_logger")
                             if _rl:
                                 _rl.error("Contact Enrich failed unexpectedly")
+                            _run_id = st.session_state.get("intent_run_id")
+                            if _rl and _run_id:
+                                db.complete_pipeline_run(
+                                    _run_id, "failed", _rl.to_summary(),
+                                    batch_id=None, credits_used=0,
+                                    leads_exported=0, error="Unexpected error in enrichment",
+                                )
+                                st.session_state.intent_run_logger = None
+                                st.session_state.intent_run_id = None
                             st.error("Enrichment failed unexpectedly. Check application logs.")
 
 
@@ -1800,7 +1818,7 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
                     _rl.info(f"Staged {len(scored_leads)} leads")
                     _rl.set_metric("leads_staged", len(scored_leads))
                     db.complete_pipeline_run(
-                        _run_id, "completed", _rl.to_summary(),
+                        _run_id, "success", _rl.to_summary(),
                         batch_id=None,
                         credits_used=len(st.session_state.get("intent_enriched_contacts") or []),
                         leads_exported=len(scored_leads),
