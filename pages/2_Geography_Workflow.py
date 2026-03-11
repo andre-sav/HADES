@@ -210,6 +210,15 @@ def _reset_geo_search_state():
     st.session_state.geo_dedup_result = None
     st.session_state.geo_last_search_params = {}
     st.session_state.pop("geo_export_leads", None)
+    # Complete any in-flight pipeline run as cancelled
+    _reset_run_id = st.session_state.get("geo_run_id")
+    _reset_rl = st.session_state.get("geo_run_logger")
+    if _reset_run_id:
+        _summary = _reset_rl.to_summary() if _reset_rl else {}
+        try:
+            db.complete_pipeline_run(_reset_run_id, "cancelled", _summary, None, 0, 0, "User reset search")
+        except Exception:
+            pass  # Best-effort — don't block reset on DB error
     st.session_state.geo_run_logger = None
     st.session_state.geo_run_id = None
 

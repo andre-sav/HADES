@@ -441,6 +441,15 @@ else:
     if st.session_state.intent_search_executed:
         with target_col3:
             if destructive_button("Reset", key="intent_reset_btn"):
+                # Complete any in-flight pipeline run as cancelled
+                _reset_run_id = st.session_state.get("intent_run_id")
+                _reset_rl = st.session_state.get("intent_run_logger")
+                if _reset_run_id:
+                    _summary = _reset_rl.to_summary() if _reset_rl else {}
+                    try:
+                        db.complete_pipeline_run(_reset_run_id, "cancelled", _summary, None, 0, 0, "User reset search")
+                    except Exception:
+                        pass
                 for key in defaults:
                     st.session_state[key] = defaults[key]
                 st.rerun()

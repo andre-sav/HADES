@@ -260,7 +260,7 @@ try:
             _error = run.get("error_message")
 
             # Status icon
-            if _status == "completed":
+            if _status in ("completed", "success"):
                 _icon = "✅"
             elif _status == "failed":
                 _icon = "❌"
@@ -268,6 +268,8 @@ try:
                 _icon = "🔄"
             elif _status == "skipped":
                 _icon = "⏭️"
+            elif _status == "cancelled":
+                _icon = "🚫"
             else:
                 _icon = "•"
 
