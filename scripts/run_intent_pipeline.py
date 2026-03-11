@@ -22,6 +22,7 @@ import logging
 import os
 import smtplib
 import sys
+import traceback
 from datetime import datetime, timezone
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -36,6 +37,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Prevent Streamlit from auto-launching
 os.environ.setdefault("STREAMLIT_SERVER_HEADLESS", "true")
 
+from db._pipeline import RunLogger
 from errors import PipelineError
 from turso_db import TursoDatabase
 from zoominfo_client import (
@@ -88,6 +90,8 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         "top_leads": [],
         "top_companies": [],
     }
+
+    run_logger = RunLogger()
 
     if dry_run:
         logger.info("Dry run — running intent search + scoring (no credits consumed)")
@@ -179,6 +183,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             msg = f"Budget exceeded: {budget.alert_message}"
             logger.warning(msg)
             summary["budget_exceeded"] = True
+            summary.update(run_logger.to_summary())
             db.complete_pipeline_run(run_id, "skipped", summary, None, 0, 0, msg)
             return {"success": True, "csv_content": None, "csv_filename": None,
                     "batch_id": None, "summary": summary, "error": msg}
@@ -196,8 +201,11 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         intent_results = client.search_intent_all_pages(intent_params, max_pages=10)
         summary["intent_results"] = len(intent_results)
         logger.info("Intent search returned %d results", len(intent_results))
+        run_logger.info(f"Intent Search: {len(intent_results)} results")
+        run_logger.set_metric("intent_results", len(intent_results))
 
         if not intent_results:
+            summary.update(run_logger.to_summary())
             db.complete_pipeline_run(run_id, "success", summary, None, 0, 0, None)
             return {"success": True, "csv_content": None, "csv_filename": None,
                     "batch_id": None, "summary": summary, "error": None}
@@ -219,6 +227,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         summary["dedup_filtered"] = len(filtered_leads)
         logger.info("Cross-session dedup: %d new, %d previously exported",
                     len(new_leads), len(filtered_leads))
+        run_logger.info(f"Dedup: {len(new_leads)} new, {len(filtered_leads)} previously exported")
 
         # Take top N by score
         target = config["target_companies"]
@@ -227,6 +236,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
 
         if not selected:
             logger.info("No new companies after dedup filtering")
+            summary.update(run_logger.to_summary())
             db.complete_pipeline_run(run_id, "success", summary, None, 0, 0, None)
             return {"success": True, "csv_content": None, "csv_filename": None,
                     "batch_id": None, "summary": summary, "error": None}
@@ -288,6 +298,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
 
         if not numeric_map:
             logger.warning("Could not resolve any company IDs")
+            summary.update(run_logger.to_summary())
             db.complete_pipeline_run(run_id, "success", summary, None, 0, 0, None)
             return {"success": True, "csv_content": None, "csv_filename": None,
                     "batch_id": None, "summary": summary, "error": "No company IDs resolved"}
@@ -307,8 +318,11 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         contacts = client.search_contacts_all_pages(contact_params, max_pages=5)
         summary["contacts_found"] = len(contacts)
         logger.info("Contact search returned %d contacts", len(contacts))
+        run_logger.info(f"Contact Search: {len(contacts)} contacts")
+        run_logger.set_metric("contacts_found", len(contacts))
 
         if not contacts:
+            summary.update(run_logger.to_summary())
             db.complete_pipeline_run(run_id, "success", summary, None, 0, 0, None)
             return {"success": True, "csv_content": None, "csv_filename": None,
                     "batch_id": None, "summary": summary, "error": None}
@@ -344,6 +358,8 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         )
         summary["contacts_enriched"] = len(enriched)
         summary["credits_used"] = len(enriched)
+        run_logger.info(f"Contact Enrich: {len(enriched)} contacts")
+        run_logger.set_metric("contacts_enriched", len(enriched))
 
         # Merge search-phase data with enriched contacts (preserves all fields)
         for i, contact in enumerate(enriched):
@@ -358,8 +374,11 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
                 company_data = client.enrich_companies_batch(company_ids)
                 merge_company_data(enriched, company_data)
                 logger.info("Company Enrich: merged %d companies", len(company_data))
+                run_logger.info(f"Company Enrich: {len(company_data)} companies merged")
+                run_logger.set_metric("companies_enriched", len(company_data))
             except Exception as e:
                 logger.warning("Company Enrich failed (non-fatal): %s", e, exc_info=True)
+                run_logger.warn(f"Company Enrich failed (non-fatal): {e}")
 
         # Log credit usage
         cost_tracker.log_usage(
@@ -393,6 +412,8 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             agents=agents,
         )
         summary["contacts_exported"] = len(scored_contacts)
+        run_logger.info(f"Exported {len(scored_contacts)} contacts")
+        run_logger.set_metric("contacts_exported", len(scored_contacts))
         summary["batch_id"] = batch_id
 
         # Persist leads for CSV Export page (survives st.rerun / session loss)
@@ -427,6 +448,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         logger.info("Pipeline complete: %d leads exported (batch %s)",
                     len(scored_contacts), batch_id)
 
+        summary.update(run_logger.to_summary())
         db.complete_pipeline_run(
             run_id, "success", summary, batch_id,
             summary.get("credits_used", 0), len(scored_contacts), None,
@@ -453,9 +475,13 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
 
         return result
     except PipelineError as e:
+        run_logger.error(f"Pipeline failed: {e}", detail=traceback.format_exc())
+        summary.update(run_logger.to_summary())
         db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, e.user_message)
         raise
     except Exception as e:
+        run_logger.error(f"Pipeline failed: {e}", detail=traceback.format_exc())
+        summary.update(run_logger.to_summary())
         db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, f"Unexpected error: {type(e).__name__}: {e}")
         raise
 
