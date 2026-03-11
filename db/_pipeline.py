@@ -1,6 +1,48 @@
 """Pipeline automation run operations."""
 
 import json
+import time
+from datetime import datetime, timezone
+
+
+class RunLogger:
+    """Collects structured log events during a pipeline run."""
+
+    def __init__(self):
+        self.events: list[dict] = []
+        self.metrics: dict = {}
+        self._start = time.monotonic()
+
+    def info(self, msg: str) -> None:
+        self.events.append({"ts": self._now(), "level": "info", "msg": msg})
+
+    def warn(self, msg: str) -> None:
+        self.events.append({"ts": self._now(), "level": "warn", "msg": msg})
+
+    def error(self, msg: str, detail: str | None = None) -> None:
+        event = {"ts": self._now(), "level": "error", "msg": msg}
+        if detail:
+            event["detail"] = detail
+        self.events.append(event)
+
+    def set_metric(self, key: str, value) -> None:
+        self.metrics[key] = value
+
+    @property
+    def has_errors(self) -> bool:
+        return any(e["level"] == "error" for e in self.events)
+
+    def to_summary(self) -> dict:
+        duration = round(time.monotonic() - self._start, 1)
+        return {
+            "log_events": self.events,
+            "duration_seconds": duration,
+            **self.metrics,
+        }
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 class PipelineRunsMixin:
