@@ -230,78 +230,85 @@ with _h_col2:
 
 
 # =============================================================================
-# RECENT ERRORS
+# RUN HISTORY
 # =============================================================================
-labeled_divider("Recent Pipeline Runs")
+labeled_divider("Run History")
 
-# Check pipeline_runs for errors
+_wf_filter = st.radio(
+    "Workflow", ["All", "Intent", "Geography"],
+    horizontal=True, label_visibility="collapsed",
+)
+
 try:
-    intent_runs = db.get_pipeline_runs("intent", limit=10)
-    geo_runs = db.get_pipeline_runs("geography", limit=10)
-    all_runs = sorted(
-        intent_runs + geo_runs,
-        key=lambda r: r.get("created_at", ""),
-        reverse=True,
-    )[:10]
+    if _wf_filter == "All":
+        _runs = db.get_all_pipeline_runs(limit=20)
+    else:
+        _runs = db.get_pipeline_runs(_wf_filter.lower(), limit=20)
 
-    if all_runs:
-        run_rows = []
-        for run in all_runs:
-            status = run.get("status", "unknown")
-            error_msg = run.get("error_message")
-            ts = run.get("created_at", "")[:16].replace("T", " ") if run.get("created_at") else "—"
+    if _runs:
+        for run in _runs:
+            _status = run.get("status", "unknown")
+            _summary = run.get("summary", {})
+            _log_events = _summary.get("log_events", [])
+            _duration = _summary.get("duration_seconds")
+            _ts = run.get("started_at", "")
+            _ago = time_ago(_ts) if _ts else "—"
+            _wf = run.get("workflow_type", "—").title()
+            _trigger = (run.get("trigger") or "manual").title()
+            _leads = run.get("leads_exported", 0) or 0
+            _credits = run.get("credits_used", 0) or 0
+            _error = run.get("error_message")
 
-            if status == "completed":
-                pill_status = "success"
-            elif status == "failed":
-                pill_status = "error"
+            # Status icon
+            if _status == "completed":
+                _icon = "✅"
+            elif _status == "failed":
+                _icon = "❌"
+            elif _status == "running":
+                _icon = "🔄"
+            elif _status == "skipped":
+                _icon = "⏭️"
             else:
-                pill_status = "muted"
+                _icon = "•"
 
-            detail = ""
-            if error_msg:
-                detail = error_msg[:60]
-            elif run.get("leads_exported"):
-                detail = f"{run['leads_exported']} leads exported"
-            elif run.get("credits_used"):
-                detail = f"{run['credits_used']} credits"
+            # Summary line
+            _parts = [f"**{_wf}** · {_trigger}"]
+            if _leads:
+                _parts.append(f"{_leads} leads")
+            if _credits:
+                _parts.append(f"{_credits} credits")
+            if _duration:
+                _parts.append(f"{_duration}s")
+            if _error:
+                _parts.append(f"⚠️ {_error[:60]}")
+            _summary_line = " · ".join(_parts)
 
-            run_rows.append({
-                "time": ts,
-                "workflow": run.get("workflow_type", "—").title(),
-                "trigger": (run.get("trigger") or "manual").title(),
-                "status": status.title(),
-                "detail": detail or "—",
-            })
+            with st.expander(f"{_icon} {_ago} — {_summary_line}"):
+                # Detail tier: log events timeline
+                if _log_events:
+                    for evt in _log_events:
+                        _lvl = evt.get("level", "info")
+                        _badge = {"info": "ℹ️", "warn": "⚠️", "error": "🔴"}.get(_lvl, "•")
+                        _evt_ts = evt.get("ts", "")[:19].replace("T", " ")
+                        st.markdown(f"`{_evt_ts}` {_badge} {html.escape(evt.get('msg', ''))}")
+                        if evt.get("detail"):
+                            st.code(evt["detail"], language="text")
+                else:
+                    st.caption("No detailed log events recorded for this run.")
 
-        styled_table(
-            rows=run_rows,
-            columns=[
-                {"key": "time", "label": "Time", "mono": True},
-                {"key": "workflow", "label": "Workflow"},
-                {"key": "trigger", "label": "Trigger"},
-                {"key": "status", "label": "Status", "pill": {
-                    "Completed": "success",
-                    "Failed": "error",
-                    "Running": "warning",
-                    "Pending": "muted",
-                }},
-                {"key": "detail", "label": "Detail"},
-            ],
-        )
-
-        # Count errors
-        error_count = sum(1 for r in all_runs if r.get("status") == "failed")
-        if error_count > 0:
-            st.caption(f"{error_count} failed run(s) in recent history")
+                # Run config
+                _config = run.get("config")
+                if _config:
+                    with st.popover("Run Config"):
+                        st.json(_config)
     else:
         empty_state(
             "No pipeline runs recorded",
-            hint="Pipeline runs are logged by the automated intent poller and manual searches.",
+            hint="Runs are logged by automated pipelines and manual workflow searches.",
         )
 except Exception:
-    logger.exception("Failed to load pipeline runs")
-    st.caption("Pipeline runs table not available")
+    logger.exception("Failed to load run history")
+    st.caption("Run history not available")
 
 
 # =============================================================================
