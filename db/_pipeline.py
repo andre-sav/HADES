@@ -103,6 +103,35 @@ class PipelineRunsMixin:
             for r in rows
         ]
 
+    def get_all_pipeline_runs(self, limit: int = 20) -> list[dict]:
+        """Get recent pipeline runs across all workflow types (newest first)."""
+        rows = self.execute(
+            "SELECT id, workflow_type, trigger, status, config_json, summary_json, "
+            "batch_id, credits_used, leads_exported, error_message, "
+            "started_at, completed_at, created_at "
+            "FROM pipeline_runs "
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        return [
+            {
+                "id": r[0],
+                "workflow_type": r[1],
+                "trigger": r[2],
+                "status": r[3],
+                "config": json.loads(r[4]) if r[4] else {},
+                "summary": json.loads(r[5]) if r[5] else {},
+                "batch_id": r[6],
+                "credits_used": r[7],
+                "leads_exported": r[8],
+                "error_message": r[9],
+                "started_at": r[10],
+                "completed_at": r[11],
+                "created_at": r[12],
+            }
+            for r in rows
+        ]
+
     def has_running_pipeline(self, workflow_type: str, max_age_minutes: int = 30) -> bool:
         """Check if any pipeline run is currently in 'running' status.
 
