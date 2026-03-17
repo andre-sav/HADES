@@ -12,6 +12,7 @@ from turso_db import get_database
 from export import export_leads_to_csv, get_export_summary, build_vanillasoft_row
 from vanillasoft_client import push_leads
 from dedup import find_duplicates, flag_duplicates_in_list
+from export_dedup import apply_export_dedup
 from utils import get_call_center_agents
 from ui_components import (
     inject_base_styles,
@@ -262,6 +263,39 @@ if intent_leads and geo_leads:
                 if removed > 0:
                     st.caption(f"{removed} duplicate(s) excluded from export")
                     leads_to_export = filtered
+
+
+# =============================================================================
+# CROSS-SESSION EXPORT DEDUP (previously exported companies)
+# =============================================================================
+include_exported = st.checkbox(
+    "Include previously exported companies",
+    value=False,
+    key="export_include_prev_exported",
+    help="When unchecked, leads from companies already exported in the last 180 days are removed.",
+)
+
+dedup_result = apply_export_dedup(
+    leads_to_export, db, days_back=180, include_exported=include_exported,
+)
+
+if dedup_result["filtered_count"] > 0:
+    if include_exported:
+        st.caption(
+            f"{dedup_result['filtered_count']} of {dedup_result['total_before_filter']} leads are from "
+            f"previously exported companies (included because checkbox is checked)"
+        )
+    else:
+        st.info(
+            f"Removed {dedup_result['filtered_count']} lead(s) from companies already exported "
+            f"in the last {dedup_result['days_back']} days. "
+            f"{len(dedup_result['contacts'])} of {dedup_result['total_before_filter']} remain."
+        )
+        leads_to_export = dedup_result["contacts"]
+
+        if not leads_to_export:
+            st.warning("All leads have been previously exported. Check the box above to re-export anyway.")
+            st.stop()
 
 
 # =============================================================================
