@@ -63,7 +63,7 @@ HADES/
 ├── config/
 │   └── icp.yaml          # ICP filters, scoring weights, SIC codes
 ├── data/
-│   └── zip_centroids.csv # US ZIP codes with lat/lng/state (~42k rows)
+│   └── zip_centroids.csv # US ZIP codes with lat/lng/state (~33.6k rows, Census ZCTA)
 ├── pages/
 │   ├── 1_Intent_Workflow.py      # Intent signal queries
 │   ├── 2_Geography_Workflow.py   # Contact search with manual/autopilot modes
@@ -249,15 +249,19 @@ zips = get_zips_in_radius("75201", 15.0)
 states = get_states_from_zips(zips)
 # Returns: ["TX"]
 
-# Border example: Texarkana TX near AR border
-zips = get_zips_in_radius("75501", 15.0)
+# Border example: Texarkana TX near AR border (20mi reliably crosses)
+zips = get_zips_in_radius("75501", 20.0)
 states = get_states_from_zips(zips)
 # Returns: ["TX", "AR"] - automatically includes neighboring state
 ```
 
 **Data Source:**
-- `data/zip_centroids.csv` - ~42k US ZIP codes with lat/lng/state
-- Source: GitHub US ZIP codes dataset (MIT license)
+- `data/zip_centroids.csv` - ~33.6k US ZIP centroids with lat/lng/state
+- Source: US Census Bureau 2024 ZCTA Gazetteer (public domain). Internal points
+  are guaranteed to fall inside the ZCTA polygon.
+- Rebuild: `python scripts/rebuild_zip_centroids.py` (validates uniqueness +
+  state coverage + key spot checks). State derived from ZIP-3 prefix via
+  `utils.ZIP_PREFIX_TO_STATE`.
 - Pure Python implementation using haversine formula (no geo dependencies)
 
 ## Patterns & Conventions

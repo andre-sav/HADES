@@ -215,7 +215,7 @@ def build():
         "When a search doesn't hit the target, the system expands in priority order: management "
         "levels, employee range, accuracy threshold, then radius. Each runs a new API search and deduplicates.")
     bold_bullet(pdf, "ZIP radius math - ",
-        "Haversine calculation against 42,000 US ZIP codes. Handles cross-state borders "
+        "Haversine calculation against ~33,600 US ZIP centroids (US Census ZCTA). Handles cross-state borders "
         "(e.g., Texarkana TX automatically includes Arkansas ZIPs).")
     bold_bullet(pdf, "Budget controls - ",
         "Weekly credit caps with alerts at 50%, 80%, 95%. Tracks credits across both workflows.")
@@ -298,7 +298,7 @@ def build():
     bullet(pdf, "7 API integrations with auth, retry, and error handling")
     bullet(pdf, "Scoring engine with configurable weights")
     bullet(pdf, "Auto-expansion algorithm with 4 fallback tiers")
-    bullet(pdf, "ZIP radius math against 42,000 centroids")
+    bullet(pdf, "ZIP radius math against ~33,600 centroids")
     bullet(pdf, "Budget tracking with weekly caps and alerts")
     bullet(pdf, "Deduplication across multiple search expansions")
     bullet(pdf, "551 automated tests")

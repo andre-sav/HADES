@@ -554,17 +554,20 @@ ZOOMINFO_TO_VANILLASOFT = {
     "city": "City",
     "state": "State",
     "zipCode": "ZIP code",
-    # Company HQ phone → Home (per VSDP mapping)
-    "companyHQPhone": "Home",
+    # Company switchboard → Business as fallback. directPhone is preferred via
+    # dict insertion order + don't-overwrite-if-set in export.py. Home is left
+    # empty — ZoomInfo doesn't return residential phones for these contacts.
+    "companyHQPhone": "Business",
     # Fallback mappings (some APIs use different names)
-    # NOTE: "phone" -> "Business" removed — it silently overwrote directPhone.
-    # Fallback handled in export.py build_vanillasoft_row() instead.
+    # NOTE: "phone" -> "Business" removed from this dict — it silently overwrote
+    # directPhone due to iteration order. Fallback handled imperatively in
+    # export.py build_vanillasoft_row() instead.
     "employees": "Number of Employees",  # Fallback for employeeCount
     "zip": "ZIP code",             # Fallback for zipCode
     "address": "Address",          # Fallback for street
     # Enrich API uses different field names than Search API
     "companyWebsite": "Web site",       # Enrich returns companyWebsite, not website
-    "companyPhone": "Home",             # Enrich returns companyPhone, not companyHQPhone
+    "companyPhone": "Business",         # Enrich returns companyPhone (same role as companyHQPhone)
     "companyCity": "City",              # Enrich returns companyCity
     "companyState": "State",            # Enrich returns companyState
     "companyZipCode": "ZIP code",       # Enrich returns companyZipCode

@@ -43,9 +43,23 @@ class TestLoadZipCentroids:
     """Tests for load_zip_centroids function."""
 
     def test_loads_data(self):
-        """Should load ZIP centroid data."""
+        """Should load ZIP centroid data (US Census 2024 ZCTA Gazetteer ~33.6k)."""
         centroids = load_zip_centroids()
-        assert len(centroids) > 40000  # ~42k US ZIPs
+        assert len(centroids) > 30000
+
+    def test_no_centroid_collapse(self):
+        """No more than 3 ZIPs may share the same (lat, lng).
+
+        Catches the data corruption pattern where a low-quality source
+        collapses many ZIPs onto a single shared coordinate, producing
+        geographically meaningless radius searches.
+        """
+        centroids = load_zip_centroids()
+        coord_counts: dict[tuple[float, float], int] = {}
+        for lat, lng, _ in centroids.values():
+            coord_counts[(lat, lng)] = coord_counts.get((lat, lng), 0) + 1
+        worst = max(coord_counts.values())
+        assert worst <= 3, f"Centroid collapse detected: max {worst} ZIPs share one coordinate"
 
     def test_contains_known_zips(self):
         """Should contain well-known ZIP codes."""
@@ -121,8 +135,13 @@ class TestBorderZipDetection:
     """Tests for state border detection."""
 
     def test_texarkana_includes_arkansas(self):
-        """Texarkana TX (75501) near AR border should find AR ZIPs."""
-        zips = get_zips_in_radius("75501", 15)
+        """Texarkana TX (75501) near AR border should find AR ZIPs.
+
+        ZCTA 75501 covers a large rural area; its Census internal point sits
+        ~6mi SW of downtown Texarkana, putting the nearest AR ZIP (71854) at
+        exactly 15mi. A 20mi radius reliably captures both states.
+        """
+        zips = get_zips_in_radius("75501", 20)
         states = get_states_from_zips(zips)
         assert "TX" in states
         assert "AR" in states
@@ -202,7 +221,7 @@ class TestGetStateCountsFromZips:
 
     def test_real_data(self):
         """Should work with real ZIP data."""
-        zips = get_zips_in_radius("75501", 15)  # Texarkana
+        zips = get_zips_in_radius("75501", 20)  # Texarkana (20mi to cross AR border reliably)
         counts = get_state_counts_from_zips(zips)
         assert counts["TX"] > 0
         assert counts["AR"] > 0

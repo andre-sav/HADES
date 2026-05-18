@@ -76,7 +76,7 @@ This isn't a simple "fetch data and display it" app. The business logic includes
 
 - **Auto-expansion algorithm** - When a Geography search doesn't hit the target contact count, the system automatically expands in a specific priority order: management levels first, then employee range, then accuracy threshold, then radius. Each expansion runs a new API search and deduplicates against previous results.
 
-- **ZIP radius calculation** - Pure Python haversine math against 42,000 US ZIP codes to find all ZIPs within a radius. Handles cross-state borders (e.g., Texarkana TX includes Arkansas ZIPs).
+- **ZIP radius calculation** - Pure Python haversine math against ~33,600 US ZIP centroids (US Census Bureau 2024 ZCTA Gazetteer) to find all ZIPs within a radius. Handles cross-state borders (e.g., Texarkana TX includes Arkansas ZIPs).
 
 - **Budget controls** - Weekly credit caps with alerts at 50%, 80%, and 95%. The system has to track credits across both workflows, prevent overspending, and still allow Geography searches (which are unlimited).
 
@@ -157,7 +157,7 @@ What's underneath:
 - 7 API integrations with auth, retry, and error handling
 - Scoring engine with configurable weights
 - Auto-expansion algorithm with 4 fallback tiers
-- ZIP radius math against 42,000 centroids
+- ZIP radius math against ~33,600 centroids
 - Budget tracking with weekly caps and alerts
 - Deduplication across search expansions
 - 551 automated tests

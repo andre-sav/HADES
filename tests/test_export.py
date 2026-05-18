@@ -211,11 +211,30 @@ class TestBuildVanillasoftRow:
         assert row["Contact Owner"] == "agent@hlmii.com"
         assert row["Operator Name"] == "John Smith"
 
-    def test_home_phone_mapping(self):
-        """Test that companyHQPhone maps to Home column."""
+    def test_company_hq_phone_falls_back_to_business(self):
+        """companyHQPhone fills Business when directPhone is missing; Home stays empty.
+
+        Reverses the prior behavior where switchboards were dumped into the Home
+        column, forcing reps to manually swap cells on every import.
+        """
         lead = {"companyName": "Test Co", "companyHQPhone": "2125551234"}
         row = build_vanillasoft_row(lead)
-        assert row["Home"] == "(212) 555-1234"
+        assert row["Business"] == "(212) 555-1234"
+        assert row["Home"] == ""
+
+    def test_direct_phone_wins_over_company_hq_phone(self):
+        """When both directPhone and companyHQPhone are present, directPhone wins.
+
+        Direct lines reach the contact; switchboards land in a gatekeeper.
+        """
+        lead = {
+            "companyName": "Test Co",
+            "directPhone": "2125550001",
+            "companyHQPhone": "2125559999",
+        }
+        row = build_vanillasoft_row(lead)
+        assert row["Business"] == "(212) 555-0001"
+        assert row["Home"] == ""
 
     def test_operator_with_none_fields(self):
         """Test operator with None fields."""
@@ -249,11 +268,12 @@ class TestEnrichmentFieldMapping:
         row = build_vanillasoft_row(lead)
         assert row["ZIP code"] == "17036"
 
-    def test_enrich_company_phone_maps_to_home(self):
-        """Enrich API returns companyPhone, not companyHQPhone."""
+    def test_enrich_company_phone_falls_back_to_business(self):
+        """Enrich's companyPhone fills Business when directPhone is missing."""
         lead = {"companyName": "Test", "companyPhone": "7175551234"}
         row = build_vanillasoft_row(lead)
-        assert row["Home"] == "(717) 555-1234"
+        assert row["Business"] == "(717) 555-1234"
+        assert row["Home"] == ""
 
     def test_nested_company_object_maps_to_company(self):
         """Enrich API may nest company info under 'company' object."""
