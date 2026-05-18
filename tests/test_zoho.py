@@ -339,6 +339,40 @@ class TestZohoSyncHelpers:
         assert result["operator_phone"] is None
 
 
+class TestBatchIdValidator:
+    """Tests for _is_safe_batch_id — guards COQL string-literal interpolation."""
+
+    def test_accepts_typical_hades_batch_ids(self):
+        from zoho_sync import _is_safe_batch_id
+        # Examples reflecting current HADES batch_id shapes
+        assert _is_safe_batch_id("intent-20260317-001")
+        assert _is_safe_batch_id("geo_20260317_001")
+        assert _is_safe_batch_id("abc123")
+        assert _is_safe_batch_id("A" * 64)  # boundary length
+
+    def test_rejects_coql_injection_payloads(self):
+        from zoho_sync import _is_safe_batch_id
+        # Single-quote breakout would close the literal and append clauses
+        assert not _is_safe_batch_id("abc' or '1'='1")
+        assert not _is_safe_batch_id("abc'; drop table operators; --")
+        # Spaces, semicolons, parens — none allowed
+        assert not _is_safe_batch_id("abc def")
+        assert not _is_safe_batch_id("abc;def")
+        assert not _is_safe_batch_id("abc(def)")
+
+    def test_rejects_empty_and_overlong(self):
+        from zoho_sync import _is_safe_batch_id
+        assert not _is_safe_batch_id("")
+        assert not _is_safe_batch_id("A" * 65)  # one over boundary
+
+    def test_rejects_none_and_non_strings(self):
+        from zoho_sync import _is_safe_batch_id
+        # Defensive — re.fullmatch raises on None, so the bool(value) guard short-circuits
+        assert not _is_safe_batch_id(None)
+        # Whitespace-only — strip would be valid but we reject it
+        assert not _is_safe_batch_id("   ")
+
+
 class TestZohoSyncMetadata:
     """Tests for sync metadata functions."""
 

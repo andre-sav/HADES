@@ -9,6 +9,16 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
+# Allowed shape for HADES batch IDs flowing into a COQL string-literal context.
+# batch_ids are produced by HADES itself today, but any value interpolated into
+# a COQL query must be validated to prevent injection if the source ever changes.
+_BATCH_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _is_safe_batch_id(value: str) -> bool:
+    """Return True if `value` is safe to interpolate into a COQL string literal."""
+    return bool(value) and bool(_BATCH_ID_PATTERN.fullmatch(value))
+
 from zoho_auth import ZohoAuth
 from zoho_client import ZohoClient
 
@@ -368,6 +378,13 @@ async def sync_outcomes(
         matched = updated = unmatched = 0
 
         for batch_id in batch_ids:
+            if not _is_safe_batch_id(batch_id):
+                logger.warning(
+                    f"  Skipping batch with unsafe id (rejected by validator): {batch_id!r}"
+                )
+                unmatched += 1
+                continue
+
             # COQL query for Deals with this batch ID in custom field
             # Field name TBD by team — using "HADES_Batch_ID" as placeholder
             query = (

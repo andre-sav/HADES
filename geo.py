@@ -58,13 +58,14 @@ def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
     return R * c
 
 
-@lru_cache(maxsize=64)
 def get_zips_in_radius(center_zip: str, radius_miles: float) -> tuple[dict, ...]:
     """
     Get all ZIP codes within radius of a center ZIP.
 
-    Uses bounding-box pre-filter to skip ~95% of ZIPs before haversine,
-    and LRU cache to avoid recomputation on Streamlit reruns.
+    Uses bounding-box pre-filter to skip ~95% of ZIPs before haversine.
+    Not cached — the bounded-box + haversine math runs in ~10ms against
+    the cached centroid dict, and caching the result tuple would re-introduce
+    the stale-results-after-CSV-replacement class of bug.
 
     Args:
         center_zip: 5-digit ZIP code (center point)
