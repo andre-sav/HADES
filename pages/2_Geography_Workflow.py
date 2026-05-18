@@ -395,19 +395,27 @@ if operator_mode == "Select existing":
         st.info("No operators saved yet. Use manual entry or add operators in the Operators page.")
         st.session_state.geo_operator = None
     else:
-        st.caption(f"Select the vending company operator for this territory search · {len(operators):,} available")
-
         # Build options with recently used operators at top
         recent_ids = set(db.get_recent_operator_ids(limit=5))
         recent_ops = [op for op in operators if op.get("id") in recent_ids]
         other_ops = [op for op in operators if op.get("id") not in recent_ids]
+
+        if recent_ops:
+            st.caption(
+                f"★ = recently used ({len(recent_ops)}). "
+                f"Type any name to search all {len(operators):,} operators — synced from Zoho CRM."
+            )
+        else:
+            st.caption(
+                f"Type any name to search all {len(operators):,} operators — synced from Zoho CRM."
+            )
 
         operator_options = {}
         if recent_ops:
             for op in recent_ops:
                 key = f"★  {op['operator_name']}  ·  {op.get('vending_business_name') or 'N/A'}"
                 operator_options[key] = op
-            operator_options["─── All operators ───"] = None  # separator
+            operator_options[f"─── Type to search all {len(operators):,} operators ───"] = None  # separator
         for op in other_ops:
             key = f"{op['operator_name']}  ·  {op.get('vending_business_name') or 'N/A'}"
             operator_options[key] = op

@@ -1,0 +1,40 @@
+name: Zoho Operator Sync
+
+on:
+  schedule:
+    # 06:00 UTC = 1:00 AM ET — runs daily before business hours
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Force full resync (default is incremental)'
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements-lock.txt
+
+      - name: Run Zoho operator sync
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
+          ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
+          ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
+        run: |
+          python scripts/run_zoho_operator_sync.py \
+            --verbose \
+            ${{ github.event.inputs.full == 'true' && '--full' || '' }}
