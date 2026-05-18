@@ -124,6 +124,25 @@ python -m pytest tests/ -v
 python -m pytest tests/test_scoring.py -v
 ```
 
+## Deployment
+
+Streamlit Community Cloud watches `main` and auto-deploys on push (typically 1–2 min).
+
+After a push, sanity-check:
+
+- [ ] App loads at the Streamlit Cloud URL and the auth gate accepts `APP_PASSWORD`
+- [ ] **If data files changed** (e.g. `data/zip_centroids.csv`, `config/icp.yaml`):
+      smoke-test the dependent feature once. `load_zip_centroids` and `get_zips_in_radius`
+      use `@lru_cache` — a normal redeploy resets the process and the cache, but if results
+      look stale, manually reboot the app from the Streamlit Cloud dashboard
+      (Manage app → Reboot).
+- [ ] **If secrets changed** (`.streamlit/secrets.toml`): update them in
+      Streamlit Cloud → Settings → Secrets. Cloud does not pick them up from git.
+- [ ] **If `requirements.txt` changed**: Cloud rebuilds from scratch; watch the
+      build log for install failures.
+
+Force restart (any reason): Streamlit Cloud dashboard → app → Manage → **Reboot app**.
+
 ## ZoomInfo Contact Search API
 
 **Implemented in `zoominfo_client.py`:**
