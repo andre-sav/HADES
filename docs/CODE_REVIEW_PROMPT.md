@@ -154,6 +154,25 @@ Pay extra attention to:
   handle a stale refresh token gracefully? Does it run once per day
   without overlap if the prior run is still going?
 
+### 10b. Dependency hygiene
+A failure mode that bit us in 2026-05 (Executive Summary page DOA in
+production because `plotly` was in `requirements-lock.txt` but missing
+from `requirements.txt`). Tests passed, CI passed, local dev passed —
+only Streamlit Cloud installs from the un-pinned file, and nothing
+exercised that path.
+
+Verify:
+- Every top-level third-party import in production code (`*.py`, `db/`,
+  `pages/`, `scripts/`) is declared in `requirements.txt`, not just in
+  the lock file. The regression test
+  `tests/test_requirements_coverage.py` enforces this — if it's not
+  running green, that's finding #1.
+- No declared dependency exists with no consumer (the inverse: bloat).
+- Version pins in `requirements.txt` are loose (`>=`) and consistent
+  with what `requirements-lock.txt` actually resolves to.
+- `requirements-lock.txt` is fresh — generated within the last quarter.
+  Stale lock files mask supply-chain issues.
+
 ### 10. UX / operator trust (Streamlit pages)
 Not a code-quality dimension strictly, but bugs in operator trust
 land in your inbox the same way:

@@ -217,3 +217,44 @@ for cid, meta in exported.items():
 - Test suite verified passing both at start and as the implicit invariant throughout — every claim above is consistent with the green test state.
 - No `gh` calls, no network probes, no parallel subagents — single reviewer voice per the prompt's constraints.
 - Recent-change focus (dimension 9) covered RunLogger lifecycle, export_dedup edges, phone-mapping integration through `build_vanillasoft_row` in both Streamlit pages AND `scripts/run_intent_pipeline.py`, and Zoho operator sync.
+
+---
+
+## Postmortem addendum (2026-05-19)
+
+This review missed a P0 production bug that surfaced the day after: the
+Executive Summary page on Streamlit Cloud crashed with `ModuleNotFoundError`
+on `import plotly.graph_objects`. `plotly` was in `requirements-lock.txt`
+(used by CI and present in local dev environments) but missing from
+`requirements.txt` — the only file Streamlit Cloud reads.
+
+**Why the review didn't catch it:** the review prompt had ten dimensions
+but no "dependency hygiene" dimension. Dimension 8 looked for *unused*
+imports via `pyflakes`; the symmetric case — *undeclared* imports — wasn't
+on the checklist. The test suite also gave a false-confidence signal
+because pytest doesn't import Streamlit pages (Streamlit pages are entry
+points, not library modules), so the broken import was invisible to
+`pytest`.
+
+**Closing the gap (2026-05-19, commits `5150325` and the follow-up):**
+1. Added `plotly>=6.0` to `requirements.txt` — immediate fix.
+2. Added `tests/test_requirements_coverage.py` — a static regression
+   test that walks the AST of every file in production code dirs, extracts
+   top-level third-party imports, and verifies each is satisfied by a
+   declared package in `requirements.txt`. Discovers package metadata
+   live via `importlib.metadata` so new deps don't require updating a
+   hand-maintained mapping. Verified by negative-test that it catches
+   the original bug with a precise diagnostic ("`'plotly' (package
+   'plotly'): not declared in requirements.txt (used by:
+   ['pages/6_Executive_Summary.py'])`").
+3. Added dimension 10b "Dependency hygiene" to
+   `docs/CODE_REVIEW_PROMPT.md` so the next review covers this surface.
+
+**Generalizable lesson:** the test suite was the false signal here.
+"Pytest green" was treated as evidence the code worked everywhere it
+runs; in fact pytest only exercises the modules pytest itself can import,
+and Streamlit pages live outside that scope. The deeper guard isn't a
+specific test but the habit of asking *"which environments does my test
+suite NOT cover?"* and adding cheap static checks for those — like the
+new requirements-coverage test, which runs in <1s and would have failed
+the original commit.
