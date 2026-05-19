@@ -12,6 +12,13 @@ on:
         type: boolean
         default: false
 
+# Serialize same-name runs so a manually-triggered job doesn't overlap with
+# the next scheduled fire. Queue instead of cancel — mid-pipeline cancellation
+# can leave staged_exports/lead_outcomes in an inconsistent state.
+concurrency:
+  group: intent-poll
+  cancel-in-progress: false
+
 jobs:
   poll-intent:
     runs-on: ubuntu-latest
@@ -42,3 +49,13 @@ jobs:
             --trigger scheduled \
             --verbose \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: |
+          python scripts/notify_failure.py --workflow "Intent Lead Poll"

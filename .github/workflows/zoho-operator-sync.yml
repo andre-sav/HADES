@@ -11,6 +11,13 @@ on:
         type: boolean
         default: false
 
+# Serialize same-name runs so a daily fire doesn't overlap with a still-running
+# previous one (e.g., a full resync that ran long). Queue instead of cancel —
+# mid-sync cancellation could leave the operators table partially updated.
+concurrency:
+  group: zoho-operator-sync
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -38,3 +45,13 @@ jobs:
           python scripts/run_zoho_operator_sync.py \
             --verbose \
             ${{ github.event.inputs.full == 'true' && '--full' || '' }}
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: |
+          python scripts/notify_failure.py --workflow "Zoho Operator Sync"
