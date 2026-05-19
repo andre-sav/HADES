@@ -47,3 +47,8 @@ _bmad-output/
 
 # Playwright MCP
 .playwright-mcp/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
