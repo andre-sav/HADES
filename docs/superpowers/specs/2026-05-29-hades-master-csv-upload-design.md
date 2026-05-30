@@ -34,7 +34,8 @@ user explicitly asked for.
 - No updating/overwriting of existing operators from the upload.
 - No fuzzy/near-duplicate matching ("Acme Co" vs "Acme Company"). Exact normalized
   name only. This is an explicit, documented limitation.
-- No Excel (`.xlsx`) upload — CSV only.
+- No legacy `.xls` (BIFF) support — `.xlsx` and `.csv` only (`.xlsx` added after
+  validation showed the real Master file is Excel; `xlrd` intentionally not added).
 
 ## Data model (existing, unchanged)
 
@@ -49,23 +50,27 @@ layout). Canonical mapping (single source of truth, defined as constants):
 
 | Field                  | Row index |
 |------------------------|-----------|
-| vending_business_name  | 2         |
-| operator_name          | 3         |
-| operator_phone         | 4         |
-| operator_email         | 5         |
-| operator_zip           | 6         |
-| operator_website       | 7         |
-| team                   | 10        |
+| vending_business_name  | 3         |
+| operator_name          | 4         |
+| operator_phone         | 5         |
+| operator_email         | 6         |
+| operator_zip           | 7         |
+| operator_website       | 8         |
+| team                   | 11        |
 
-Rows 8–9 are an intentional gap (empty for most columns) — handled by positional
-indexing + null-safe cell reads.
+Rows 0–2 and 9–10 are non-field rows — handled by positional indexing + null-safe
+cell reads. **Column 0 is a field-label column** ("Operator Name", "TEAM", …),
+not an operator; it is skipped by content (its name cell == "Operator Name"), not
+by index, so a file without a label column never silently drops a real operator.
+Real operators start at column 1.
 
-> **Implementation validation note:** VSDP used `pd.read_excel` with a default
-> header row (header=0), which offsets `iloc` indices. HADES will read with
-> `header=None` so file rows map 1:1 to these indices. The exact offset MUST be
-> confirmed against one real Master CSV during implementation and locked by a
-> fixture test. If a real file shows a different offset, adjust the constants —
-> they live in one place for exactly this reason.
+> **VALIDATED (2026-05) against the real `Master_Data_VTI.xlsx`** (1320 columns,
+> 1316 operators). The indices above are confirmed. VSDP's old reader used
+> `pd.read_excel` with header=0 (consuming row 0), which is why its constants were
+> all −1 relative to these; HADES reads with `header=None` so file rows map 1:1.
+> Constants live in one place (`MASTER_ROW_*` in `operator_import.py`) for easy
+> correction against future Master vintages. Accepts **.xlsx and .csv** (routed
+> by extension); `.xls` is not supported (no `xlrd`).
 
 ## Architecture
 
