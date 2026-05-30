@@ -34,7 +34,7 @@ class MasterCsvParse:
     empty_columns: int = 0
 
 
-def normalize_operator_name(raw) -> str:
+def normalize_operator_name(raw: str | None) -> str:
     """Lowercase, trim, collapse internal whitespace. Match key."""
     if raw is None:
         return ""
@@ -66,6 +66,15 @@ def parse_master_csv(file) -> MasterCsvParse:
     """
     try:
         df = pd.read_csv(file, header=None, dtype=str, encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        # Windows Excel often saves CP-1252/latin-1; retry once.
+        try:
+            if hasattr(file, "seek"):
+                file.seek(0)
+            df = pd.read_csv(file, header=None, dtype=str, encoding="latin-1")
+        except Exception as e:
+            logger.warning("Master CSV unparseable (encoding fallback failed): %s", e)
+            return MasterCsvParse()
     except (pd.errors.EmptyDataError, pd.errors.ParserError) as e:
         logger.warning("Master CSV unparseable: %s", e)
         return MasterCsvParse()

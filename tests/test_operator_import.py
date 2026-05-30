@@ -79,3 +79,23 @@ def test_parse_empty_file_returns_empty_parse():
     result = _parse("\n\n")
     assert result.operators == []
     assert isinstance(result, MasterCsvParse)
+
+
+def test_normalize_operator_name_handles_none():
+    assert normalize_operator_name(None) == ""
+
+
+def test_parse_short_file_missing_rows_does_not_crash():
+    short = "title,col\nsubtitle,\nAcme,Bobs\nJohn,Jane\n5551234567,\n"
+    result = parse_master_csv(io.StringIO(short))
+    assert result.operators[0]["team"] is None  # row 10 missing, no crash
+
+
+def test_parse_latin1_encoded_file():
+    # Windows CP-1252 smart quote (\x92) in a business name must not crash.
+    raw = (
+        "title,\nsubtitle,\nAcme\x92s Vending,\nJohn Smith,\n"
+        "5551234567,\njohn@a.com,\n75201,\nacme.com,\n,\n,\nNorth Texas,\n"
+    ).encode("latin-1")
+    result = parse_master_csv(io.BytesIO(raw))
+    assert result.operators[0]["operator_name"] == "John Smith"
