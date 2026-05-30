@@ -109,3 +109,56 @@ def parse_master_csv(file) -> MasterCsvParse:
         })
 
     return result
+
+
+# Append to operator_import.py
+
+# Fields compared for drift on matched operators (display only).
+_DRIFT_FIELDS = (
+    "vending_business_name", "operator_phone", "operator_email",
+    "operator_zip", "operator_website", "team",
+)
+
+
+def reconcile_operators(parsed: list[dict], existing: list[dict]) -> dict:
+    """Split parsed operators into matched (already in DB) vs new.
+
+    Matched entries carry the DB row and a `drift` map of fields whose
+    uploaded value differs from the stored value (display only, never
+    written). Names appearing 2+ times in the upload are reported in
+    `dupes_in_upload`; only the first occurrence is offered as new/matched.
+    """
+    by_name: dict[str, dict] = {}
+    for row in existing:
+        key = normalize_operator_name(row.get("operator_name"))
+        if key and key not in by_name:
+            by_name[key] = row
+        elif key:
+            logger.warning("Duplicate normalized operator name in DB: %r", key)
+
+    matched: list[dict] = []
+    new: list[dict] = []
+    seen: set[str] = set()
+    dupes: list[str] = []
+
+    for op in parsed:
+        key = normalize_operator_name(op.get("operator_name"))
+        if key in seen:
+            if key not in dupes:
+                dupes.append(key)
+            continue
+        seen.add(key)
+
+        db_row = by_name.get(key)
+        if db_row is not None:
+            drift = {}
+            for f in _DRIFT_FIELDS:
+                up = op.get(f) or ""
+                cur = db_row.get(f) or ""
+                if str(up) != str(cur):
+                    drift[f] = (op.get(f), db_row.get(f))
+            matched.append({"uploaded": op, "db": db_row, "drift": drift})
+        else:
+            new.append(op)
+
+    return {"matched": matched, "new": new, "dupes_in_upload": dupes}
