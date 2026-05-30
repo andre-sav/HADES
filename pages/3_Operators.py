@@ -191,11 +191,11 @@ st.markdown("")
 with st.expander("⬆ Upload Master file", expanded=False):
     st.caption(
         "Column-per-operator Master file (each operator is a column) — "
-        ".xlsx, .xls, or .csv. Every column is read. Operators already in the "
+        ".xlsx or .csv. Every column is read. Operators already in the "
         "database are shown for confirmation; only new ones are imported."
     )
     master_file = st.file_uploader(
-        "Master file", type=["xlsx", "xls", "csv"], key="op_master_csv"
+        "Master file", type=["xlsx", "csv"], key="op_master_csv"
     )
 
     if master_file is not None:
