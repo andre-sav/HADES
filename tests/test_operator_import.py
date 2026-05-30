@@ -1,35 +1,38 @@
 # tests/test_operator_import.py
 import io
 import pytest
+import pandas as pd
 
 from operator_import import (
     MasterCsvParse,
     normalize_operator_name,
-    parse_master_csv,
+    parse_master_file,
 )
 
-# Column-per-operator fixture. Rows are POSITIONAL (header=None):
-#   row2=business, row3=name, row4=phone, row5=email, row6=zip,
-#   row7=website, row10=team. Rows 0,1,8,9 are non-field rows.
-# Columns: A=valid, B=valid w/ messy data + leading-zero zip,
-#          C=wholly empty spacer, D=data but BLANK name (skip-no-name).
+# Column-per-operator fixture. Rows are POSITIONAL (header=None), matching the
+# real VTI Master layout: row3=business, row4=name, row5=phone, row6=email,
+# row7=zip, row8=website, row11=team. Rows 0-2, 9-10 are non-field rows.
+# Columns: 0=LABEL column ("Operator Name" etc., must be skipped),
+#          1=valid (John), 2=valid w/ messy data + leading-zero zip (Bob),
+#          3=wholly empty spacer, 4=data but BLANK name (skip-no-name).
 FIXTURE = (
-    "title,,,\n"                                            # row0
-    "subtitle,,,\n"                                         # row1
-    "Acme Vending,Bob's Snacks,,Ghost Co\n"                 # row2 business
-    "John Smith, Bob   Jones ,,\n"                          # row3 name (D blank)
-    "5551234567,N/A,,5559999999\n"                          # row4 phone
-    "john@a.com,bob@b.com,,ghost@x.com\n"                   # row5 email
-    "75201,07030,,30301\n"                                  # row6 zip
-    "acme.com,bobs.com,,ghost.com\n"                        # row7 website
-    ",,,\n"                                                 # row8 gap
-    ",,,\n"                                                 # row9 gap
-    "North Texas,New Jersey\xa0,,Georgia\n"                 # row10 team
+    "x,,,,\n"                                                          # row0
+    "x,,,,\n"                                                          # row1
+    "x,,,,\n"                                                          # row2
+    "Vending Business Name,Acme Vending,Bob's Snacks,,Ghost Co\n"      # row3 business
+    "Operator Name,John Smith, Bob   Jones ,,\n"                       # row4 name (col4 blank)
+    "Operator Phone #,5551234567,N/A,,5559999999\n"                    # row5 phone
+    "Operator Email Address,john@a.com,bob@b.com,,ghost@x.com\n"       # row6 email
+    "Operator Zip Code,75201,07030,,30301\n"                           # row7 zip
+    "Operator Website Address,acme.com,bobs.com,,ghost.com\n"          # row8 website
+    ",,,,\n"                                                           # row9 gap
+    ",,,,\n"                                                           # row10 gap
+    "TEAM,North Texas,New Jersey\xa0,,Georgia\n"                       # row11 team
 )
 
 
 def _parse(text):
-    return parse_master_csv(io.StringIO(text))
+    return parse_master_file(io.StringIO(text))
 
 
 def test_normalize_collapses_case_and_whitespace():
@@ -43,17 +46,31 @@ def test_parse_returns_master_csv_parse():
 
 
 def test_parse_scans_all_columns_not_just_last_five():
-    # 4 columns total; A and B are operators, C empty, D has no name.
+    # 5 columns total; cols 1 & 2 are operators (col 0 is the label column).
     result = _parse(FIXTURE)
-    assert result.total_columns == 4
+    assert result.total_columns == 5
     names = [op["operator_name"] for op in result.operators]
-    assert names == ["John Smith", "Bob Jones"]  # A and B, in column order
+    assert names == ["John Smith", "Bob Jones"]  # in column order, label skipped
+
+
+def test_parse_skips_label_column():
+    result = _parse(FIXTURE)
+    assert result.label_columns == 1  # column 0
+    names = [op["operator_name"] for op in result.operators]
+    assert "Operator Name" not in names  # label never imported as an operator
 
 
 def test_parse_skips_empty_spacer_and_records_blank_name_column():
     result = _parse(FIXTURE)
-    assert result.empty_columns == 1            # column C
-    assert result.skipped_no_name == [3]        # column D index (data, no name)
+    assert result.empty_columns == 1            # column 3
+    assert result.skipped_no_name == [4]        # column 4 index (data, no name)
+
+
+def test_parse_accounting_identity_closes():
+    # Every column lands in exactly one bucket — the no-silent-loss guarantee.
+    r = _parse(FIXTURE)
+    assert (len(r.operators) + len(r.skipped_no_name)
+            + r.empty_columns + r.label_columns) == r.total_columns
 
 
 def test_parse_cleans_messy_cells():
@@ -81,23 +98,37 @@ def test_parse_empty_file_returns_empty_parse():
     assert isinstance(result, MasterCsvParse)
 
 
+def test_parse_xlsx_file_matches_csv():
+    # Same data via .xlsx routes through read_excel and yields the same result.
+    df = pd.read_csv(io.StringIO(FIXTURE), header=None, dtype=str)
+    buf = io.BytesIO()
+    df.to_excel(buf, header=False, index=False)
+    buf.seek(0)
+    result = parse_master_file(buf, filename="Master_Data.xlsx")
+    names = [op["operator_name"] for op in result.operators]
+    assert names == ["John Smith", "Bob Jones"]
+    assert result.label_columns == 1
+    assert result.skipped_no_name == [4]
+
+
 def test_normalize_operator_name_handles_none():
     assert normalize_operator_name(None) == ""
 
 
 def test_parse_short_file_missing_rows_does_not_crash():
-    short = "title,col\nsubtitle,\nAcme,Bobs\nJohn,Jane\n5551234567,\n"
-    result = parse_master_csv(io.StringIO(short))
-    assert result.operators[0]["team"] is None  # row 10 missing, no crash
+    # Fewer rows than MASTER_ROW_TEAM (11): must not crash; team -> None.
+    short = "a,b\na,b\na,b\na,Bobs\na,John\na,5551234567\n"
+    result = parse_master_file(io.StringIO(short))
+    assert all(op["team"] is None for op in result.operators)
 
 
 def test_parse_latin1_encoded_file():
     # Windows CP-1252 smart quote (\x92) in a business name must not crash.
     raw = (
-        "title,\nsubtitle,\nAcme\x92s Vending,\nJohn Smith,\n"
+        "filler,\ntitle,\nsubtitle,\nAcme\x92s Vending,\nJohn Smith,\n"
         "5551234567,\njohn@a.com,\n75201,\nacme.com,\n,\n,\nNorth Texas,\n"
     ).encode("latin-1")
-    result = parse_master_csv(io.BytesIO(raw))
+    result = parse_master_file(io.BytesIO(raw))
     assert result.operators[0]["operator_name"] == "John Smith"
 
 

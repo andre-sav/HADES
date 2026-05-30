@@ -1,6 +1,6 @@
 # operator_import.py
-"""Parse a column-per-operator Master CSV and reconcile it against the
-operators table. Pure logic — no Streamlit. See
+"""Parse a column-per-operator Master file (.xlsx/.xls/.csv) and reconcile it
+against the operators table. Pure logic — no Streamlit. See
 docs/superpowers/specs/2026-05-29-hades-master-csv-upload-design.md.
 """
 from __future__ import annotations
@@ -17,13 +17,21 @@ logger = logging.getLogger(__name__)
 
 # Fixed row positions (0-indexed; file read with header=None).
 # SINGLE SOURCE OF TRUTH — correct here if a real Master file is offset.
-MASTER_ROW_BUSINESS_NAME = 2
-MASTER_ROW_OPERATOR_NAME = 3
-MASTER_ROW_PHONE = 4
-MASTER_ROW_EMAIL = 5
-MASTER_ROW_ZIP = 6
-MASTER_ROW_WEBSITE = 7
-MASTER_ROW_TEAM = 10
+# Verified against a real VTI Master Data export (2026-05): the first
+# operator column is column 1 (column 0 holds the field labels below).
+MASTER_ROW_BUSINESS_NAME = 3
+MASTER_ROW_OPERATOR_NAME = 4
+MASTER_ROW_PHONE = 5
+MASTER_ROW_EMAIL = 6
+MASTER_ROW_ZIP = 7
+MASTER_ROW_WEBSITE = 8
+MASTER_ROW_TEAM = 11
+
+# The Master sheet's first column holds the field labels ("Operator Name",
+# etc.), not an operator. We detect it by the label in the name row rather
+# than by a fixed column index, so a file without a label column never has a
+# real operator silently dropped.
+MASTER_LABEL_NAME = "Operator Name"
 
 
 @dataclass
@@ -32,6 +40,7 @@ class MasterCsvParse:
     total_columns: int = 0
     skipped_no_name: list[int] = field(default_factory=list)
     empty_columns: int = 0
+    label_columns: int = 0
 
 
 def normalize_operator_name(raw: str | None) -> str:
@@ -58,31 +67,54 @@ def _clean_cell(df: pd.DataFrame, row: int, col: int) -> str:
     return cleaned
 
 
-def parse_master_csv(file) -> MasterCsvParse:
-    """Parse a column-per-operator Master CSV into operator dicts.
+def _read_master_dataframe(file, filename: str | None) -> pd.DataFrame:
+    """Read a Master file into a positional (header=None) string DataFrame.
 
-    `file` may be a path or a file-like object. dtype=str prevents
-    ZIP/phone float coercion; utf-8-sig strips a BOM if present.
+    Routes by extension: .xlsx/.xls via read_excel, otherwise CSV with a
+    utf-8-sig → latin-1 fallback (Windows Excel often saves CP-1252).
+    dtype=str everywhere prevents ZIP/phone float coercion and leading-zero
+    loss. Raises on an unreadable file; the caller turns that into an empty
+    parse + a user-facing warning.
+    """
+    name = (filename or "").lower()
+    if name.endswith((".xlsx", ".xls")):
+        return pd.read_excel(file, header=None, dtype=str)
+    try:
+        return pd.read_csv(file, header=None, dtype=str, encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        if hasattr(file, "seek"):
+            file.seek(0)
+        return pd.read_csv(file, header=None, dtype=str, encoding="latin-1")
+
+
+def parse_master_file(file, filename: str | None = None) -> MasterCsvParse:
+    """Parse a column-per-operator Master file (.xlsx/.xls/.csv) into operators.
+
+    `file` may be a path or a file-like object; `filename` (when given) routes
+    .xlsx/.xls through read_excel, else CSV. Each operator is a COLUMN with
+    fields at fixed row positions. Column 0 (the field-label column) is skipped
+    by content, not index. Returns an empty parse (never raises) on an
+    unreadable/empty file so the UI can show a friendly warning.
     """
     try:
-        df = pd.read_csv(file, header=None, dtype=str, encoding="utf-8-sig")
-    except UnicodeDecodeError:
-        # Windows Excel often saves CP-1252/latin-1; retry once.
-        try:
-            if hasattr(file, "seek"):
-                file.seek(0)
-            df = pd.read_csv(file, header=None, dtype=str, encoding="latin-1")
-        except Exception as e:
-            logger.warning("Master CSV unparseable (encoding fallback failed): %s", e)
-            return MasterCsvParse()
-    except (pd.errors.EmptyDataError, pd.errors.ParserError) as e:
-        logger.warning("Master CSV unparseable: %s", e)
+        df = _read_master_dataframe(file, filename)
+    except Exception as e:
+        # Untrusted upload boundary: a malformed file must surface as a clear
+        # "no data" warning, never crash the page.
+        logger.warning("Master file unparseable: %s", e)
         return MasterCsvParse()
 
     result = MasterCsvParse(total_columns=int(df.shape[1]))
+    label_key = normalize_operator_name(MASTER_LABEL_NAME)
 
     for col in range(df.shape[1]):
         name = _clean_cell(df, MASTER_ROW_OPERATOR_NAME, col)
+
+        # Skip the field-label column (detected by content, not index).
+        if normalize_operator_name(name) == label_key:
+            result.label_columns += 1
+            continue
+
         business = _clean_cell(df, MASTER_ROW_BUSINESS_NAME, col)
         phone = _clean_cell(df, MASTER_ROW_PHONE, col)
         email = _clean_cell(df, MASTER_ROW_EMAIL, col)
@@ -147,7 +179,7 @@ def reconcile_operators(parsed: list[dict], existing: list[dict]) -> dict:
     for op in parsed:
         key = normalize_operator_name(op.get("operator_name"))
         if not key:
-            continue  # blank-name rows are filtered by parse_master_csv; guard anyway
+            continue  # blank-name rows are filtered by parse_master_file; guard anyway
         if key in seen:
             dupe_columns += 1
             original = seen_display[key]

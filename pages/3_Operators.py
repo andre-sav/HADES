@@ -18,7 +18,7 @@ st.set_page_config(page_title="Operators", page_icon="👤", layout="wide")
 inject_base_styles()
 
 from utils import require_auth, format_phone
-from operator_import import parse_master_csv, reconcile_operators
+from operator_import import parse_master_file, reconcile_operators
 require_auth()
 
 
@@ -186,23 +186,25 @@ st.markdown("")
 
 
 # =============================================================================
-# UPLOAD MASTER CSV
+# UPLOAD MASTER FILE
 # =============================================================================
-with st.expander("⬆ Upload Master CSV", expanded=False):
+with st.expander("⬆ Upload Master file", expanded=False):
     st.caption(
-        "Column-per-operator Master file (each operator is a column). "
-        "Every column is read. Operators already in the database are shown "
-        "for confirmation; only new ones are imported."
+        "Column-per-operator Master file (each operator is a column) — "
+        ".xlsx, .xls, or .csv. Every column is read. Operators already in the "
+        "database are shown for confirmation; only new ones are imported."
     )
-    master_file = st.file_uploader("Master CSV", type=["csv"], key="op_master_csv")
+    master_file = st.file_uploader(
+        "Master file", type=["xlsx", "xls", "csv"], key="op_master_csv"
+    )
 
     if master_file is not None:
-        parse = parse_master_csv(master_file)
+        parse = parse_master_file(master_file, master_file.name)
 
         if not parse.operators and not parse.skipped_no_name:
             st.warning(
                 "No operator data found in the uploaded file. "
-                "Check that it is a column-per-operator Master CSV."
+                "Check that it is a column-per-operator Master file."
             )
         else:
             existing = db.get_operators()
@@ -210,14 +212,15 @@ with st.expander("⬆ Upload Master CSV", expanded=False):
             n_new, n_matched = len(rec["new"]), len(rec["matched"])
             n_skip = len(parse.skipped_no_name)
             n_dupe = rec["skipped_dupe_columns"]
+            n_label = parse.label_columns
 
             # Reconciliation summary — every column accounted for:
-            # new + matched + dupe + skipped + empty == total_columns.
+            # new + matched + dupe + skipped + empty + label == total_columns.
             st.info(
                 f"File has {parse.total_columns} columns → "
                 f"{n_new} new, {n_matched} already in DB, "
                 f"{n_dupe} duplicate, {n_skip} skipped (no name), "
-                f"{parse.empty_columns} empty."
+                f"{parse.empty_columns} empty, {n_label} label."
             )
 
             if parse.skipped_no_name:
