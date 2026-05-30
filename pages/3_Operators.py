@@ -18,6 +18,7 @@ st.set_page_config(page_title="Operators", page_icon="👤", layout="wide")
 inject_base_styles()
 
 from utils import require_auth, format_phone
+from operator_import import parse_master_csv, reconcile_operators
 require_auth()
 
 
@@ -182,6 +183,113 @@ if search_query:
     st.caption(f"Showing {len(filtered_operators)} of {filtered_total:,} matches")
 
 st.markdown("")
+
+
+# =============================================================================
+# UPLOAD MASTER CSV
+# =============================================================================
+with st.expander("⬆ Upload Master CSV", expanded=False):
+    st.caption(
+        "Column-per-operator Master file (each operator is a column). "
+        "Every column is read. Operators already in the database are shown "
+        "for confirmation; only new ones are imported."
+    )
+    master_file = st.file_uploader("Master CSV", type=["csv"], key="op_master_csv")
+
+    if master_file is not None:
+        parse = parse_master_csv(master_file)
+
+        if not parse.operators and not parse.skipped_no_name:
+            st.warning(
+                "No operator data found in the uploaded file. "
+                "Check that it is a column-per-operator Master CSV."
+            )
+        else:
+            existing = db.get_operators()
+            rec = reconcile_operators(parse.operators, existing)
+            n_new, n_matched = len(rec["new"]), len(rec["matched"])
+            n_skip = len(parse.skipped_no_name)
+
+            # Reconciliation summary — every column accounted for.
+            st.info(
+                f"File has {parse.total_columns} columns → "
+                f"{n_new} new, {n_matched} already in DB, "
+                f"{n_skip} skipped (no name), {parse.empty_columns} empty."
+            )
+
+            if parse.skipped_no_name:
+                cols = ", ".join(str(c + 1) for c in parse.skipped_no_name)
+                st.warning(
+                    f"⚠ {n_skip} column(s) had data but no operator name and were "
+                    f"NOT imported (file column #: {cols}). Fix the name cell and "
+                    f"re-upload if these should be operators."
+                )
+
+            if rec["dupes_in_upload"]:
+                dups = ", ".join(rec["dupes_in_upload"])
+                st.warning(
+                    f"⚠ Duplicate operator name(s) within the file: {dups}. "
+                    f"Only the first occurrence of each will be imported."
+                )
+
+            if rec["matched"]:
+                st.markdown(f"**Already in database ({n_matched})**")
+                st.caption(
+                    "Differences are shown for reference only and are NOT imported "
+                    "— edit the operator to change stored values."
+                )
+                for m in rec["matched"]:
+                    up, dbrow, drift = m["uploaded"], m["db"], m["drift"]
+                    label = up["operator_name"]
+                    flag = " ⚠ differs" if drift else ""
+                    with st.expander(f"{label}{flag}", expanded=bool(drift)):
+                        for f in ("vending_business_name", "operator_phone",
+                                  "operator_email", "operator_zip",
+                                  "operator_website", "team"):
+                            u, d = up.get(f) or "—", dbrow.get(f) or "—"
+                            mark = "⚠" if f in drift else "✓"
+                            st.write(f"{mark} **{f}** — uploaded `{u}` | DB `{d}`")
+
+            if rec["new"]:
+                st.markdown(f"**New operators ({n_new})**")
+                st.dataframe(
+                    [
+                        {
+                            "Name": n["operator_name"],
+                            "Business": n.get("vending_business_name") or "",
+                            "Phone": n.get("operator_phone") or "",
+                            "Email": n.get("operator_email") or "",
+                            "ZIP": n.get("operator_zip") or "",
+                            "Team": n.get("team") or "",
+                        }
+                        for n in rec["new"]
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                if st.button(f"Import {n_new} new operators", type="primary",
+                             key="op_import_master"):
+                    imported, skipped = 0, 0
+                    try:
+                        with db.transaction():
+                            for n in rec["new"]:
+                                try:
+                                    db.create_operator(**n)
+                                    imported += 1
+                                except Exception as e:  # UNIQUE race / missed dupe
+                                    if "UNIQUE" in str(e):
+                                        skipped += 1
+                                    else:
+                                        raise
+                        st.toast(
+                            f"Imported {imported}, skipped {skipped} already present"
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        logger.error("Master CSV import failed: %s", e, exc_info=True)
+                        st.error("Import failed and was rolled back. Please try again.")
+            elif not rec["matched"] and not parse.skipped_no_name:
+                st.info("Nothing new to import.")
 
 
 # =============================================================================
