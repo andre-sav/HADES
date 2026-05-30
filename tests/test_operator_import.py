@@ -101,7 +101,6 @@ def test_parse_latin1_encoded_file():
     assert result.operators[0]["operator_name"] == "John Smith"
 
 
-# Append to tests/test_operator_import.py
 from operator_import import reconcile_operators
 
 
@@ -164,5 +163,47 @@ def test_reconcile_flags_duplicate_names_in_upload():
          "operator_email": None, "operator_zip": None, "operator_website": None, "team": None},
     ]
     out = reconcile_operators(parsed, [])
-    assert out["dupes_in_upload"] == ["dup co"]
+    assert out["dupes_in_upload"] == ["Dup Co"]  # original name of first occurrence
     assert [n["operator_name"] for n in out["new"]] == ["Dup Co"]  # only first
+
+
+def test_reconcile_no_drift_when_upload_none_and_db_empty():
+    # None (upload) and "" (DB) are equivalent -> no drift flagged.
+    parsed = [{"operator_name": "John Smith", "operator_phone": None,
+               "vending_business_name": "Acme Vending", "operator_email": "john@a.com",
+               "operator_zip": "75201", "operator_website": "acme.com", "team": "North Texas"}]
+    existing = [_db_row("John Smith")]
+    existing[0]["operator_phone"] = ""
+    out = reconcile_operators(parsed, existing)
+    assert "operator_phone" not in out["matched"][0]["drift"]
+
+
+def test_reconcile_drift_when_upload_has_value_db_has_none():
+    # Upload provides a value the DB lacks (None) -> drift flagged.
+    parsed = [{"operator_name": "John Smith", "operator_phone": "(555) 123-4567",
+               "vending_business_name": "Acme Vending", "operator_email": "john@a.com",
+               "operator_zip": "75201", "operator_website": "acme.com", "team": "New Team"}]
+    existing = [_db_row("John Smith")]
+    existing[0]["team"] = None
+    out = reconcile_operators(parsed, existing)
+    drift = out["matched"][0]["drift"]
+    assert "team" in drift
+    assert drift["team"] == ("New Team", None)
+
+
+def test_reconcile_db_match_plus_intra_upload_duplicate():
+    # An operator both in the DB and duplicated in the upload: first occurrence
+    # -> matched; second -> dupes; nothing leaks into new.
+    parsed = [
+        {"operator_name": "John Smith", "operator_phone": "(555) 123-4567",
+         "vending_business_name": "Acme Vending", "operator_email": "john@a.com",
+         "operator_zip": "75201", "operator_website": "acme.com", "team": "North Texas"},
+        {"operator_name": "john smith", "operator_phone": "(555) 123-4567",
+         "vending_business_name": "Acme Vending", "operator_email": "john@a.com",
+         "operator_zip": "75201", "operator_website": "acme.com", "team": "North Texas"},
+    ]
+    existing = [_db_row("John Smith")]
+    out = reconcile_operators(parsed, existing)
+    assert len(out["matched"]) == 1
+    assert out["new"] == []
+    assert out["dupes_in_upload"] == ["John Smith"]

@@ -111,8 +111,6 @@ def parse_master_csv(file) -> MasterCsvParse:
     return result
 
 
-# Append to operator_import.py
-
 # Fields compared for drift on matched operators (display only).
 _DRIFT_FIELDS = (
     "vending_business_name", "operator_phone", "operator_email",
@@ -126,7 +124,8 @@ def reconcile_operators(parsed: list[dict], existing: list[dict]) -> dict:
     Matched entries carry the DB row and a `drift` map of fields whose
     uploaded value differs from the stored value (display only, never
     written). Names appearing 2+ times in the upload are reported in
-    `dupes_in_upload`; only the first occurrence is offered as new/matched.
+    ``dupes_in_upload`` (original name of the first occurrence);
+    only that first occurrence is offered as new/matched.
     """
     by_name: dict[str, dict] = {}
     for row in existing:
@@ -139,23 +138,28 @@ def reconcile_operators(parsed: list[dict], existing: list[dict]) -> dict:
     matched: list[dict] = []
     new: list[dict] = []
     seen: set[str] = set()
+    seen_display: dict[str, str] = {}  # normalized key -> first original name
     dupes: list[str] = []
 
     for op in parsed:
         key = normalize_operator_name(op.get("operator_name"))
+        if not key:
+            continue  # blank-name rows are filtered by parse_master_csv; guard anyway
         if key in seen:
-            if key not in dupes:
-                dupes.append(key)
+            original = seen_display[key]
+            if original not in dupes:
+                dupes.append(original)
             continue
         seen.add(key)
+        seen_display[key] = op.get("operator_name") or ""
 
         db_row = by_name.get(key)
         if db_row is not None:
             drift = {}
             for f in _DRIFT_FIELDS:
-                up = op.get(f) or ""
-                cur = db_row.get(f) or ""
-                if str(up) != str(cur):
+                up = str(op.get(f) or "")
+                cur = str(db_row.get(f) or "")
+                if up != cur:
                     drift[f] = (op.get(f), db_row.get(f))
             matched.append({"uploaded": op, "db": db_row, "drift": drift})
         else:
