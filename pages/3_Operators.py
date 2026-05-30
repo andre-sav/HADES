@@ -209,12 +209,15 @@ with st.expander("⬆ Upload Master CSV", expanded=False):
             rec = reconcile_operators(parse.operators, existing)
             n_new, n_matched = len(rec["new"]), len(rec["matched"])
             n_skip = len(parse.skipped_no_name)
+            n_dupe = rec["skipped_dupe_columns"]
 
-            # Reconciliation summary — every column accounted for.
+            # Reconciliation summary — every column accounted for:
+            # new + matched + dupe + skipped + empty == total_columns.
             st.info(
                 f"File has {parse.total_columns} columns → "
                 f"{n_new} new, {n_matched} already in DB, "
-                f"{n_skip} skipped (no name), {parse.empty_columns} empty."
+                f"{n_dupe} duplicate, {n_skip} skipped (no name), "
+                f"{parse.empty_columns} empty."
             )
 
             if parse.skipped_no_name:
@@ -255,14 +258,14 @@ with st.expander("⬆ Upload Master CSV", expanded=False):
                 st.dataframe(
                     [
                         {
-                            "Name": n["operator_name"],
-                            "Business": n.get("vending_business_name") or "",
-                            "Phone": n.get("operator_phone") or "",
-                            "Email": n.get("operator_email") or "",
-                            "ZIP": n.get("operator_zip") or "",
-                            "Team": n.get("team") or "",
+                            "Name": op["operator_name"],
+                            "Business": op.get("vending_business_name") or "",
+                            "Phone": op.get("operator_phone") or "",
+                            "Email": op.get("operator_email") or "",
+                            "ZIP": op.get("operator_zip") or "",
+                            "Team": op.get("team") or "",
                         }
-                        for n in rec["new"]
+                        for op in rec["new"]
                     ],
                     use_container_width=True,
                     hide_index=True,
@@ -272,9 +275,9 @@ with st.expander("⬆ Upload Master CSV", expanded=False):
                     imported, skipped = 0, 0
                     try:
                         with db.transaction():
-                            for n in rec["new"]:
+                            for op in rec["new"]:
                                 try:
-                                    db.create_operator(**n)
+                                    db.create_operator(**op)
                                     imported += 1
                                 except Exception as e:  # UNIQUE race / missed dupe
                                     if "UNIQUE" in str(e):
@@ -288,7 +291,7 @@ with st.expander("⬆ Upload Master CSV", expanded=False):
                     except Exception as e:
                         logger.error("Master CSV import failed: %s", e, exc_info=True)
                         st.error("Import failed and was rolled back. Please try again.")
-            elif not rec["matched"] and not parse.skipped_no_name:
+            else:
                 st.info("Nothing new to import.")
 
 

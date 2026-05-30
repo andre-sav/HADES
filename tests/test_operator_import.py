@@ -207,3 +207,16 @@ def test_reconcile_db_match_plus_intra_upload_duplicate():
     assert len(out["matched"]) == 1
     assert out["new"] == []
     assert out["dupes_in_upload"] == ["John Smith"]
+
+
+def test_reconcile_counts_skipped_duplicate_columns():
+    # [Alice, Alice, Bob] with none in DB: new=[Alice, Bob], one Alice discarded.
+    def _op(name):
+        return {"operator_name": name, "operator_phone": None,
+                "vending_business_name": None, "operator_email": None,
+                "operator_zip": None, "operator_website": None, "team": None}
+    parsed = [_op("Alice"), _op("Alice"), _op("Bob")]
+    out = reconcile_operators(parsed, [])
+    assert out["skipped_dupe_columns"] == 1
+    assert out["dupes_in_upload"] == ["Alice"]
+    assert [n["operator_name"] for n in out["new"]] == ["Alice", "Bob"]

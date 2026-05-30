@@ -126,6 +126,8 @@ def reconcile_operators(parsed: list[dict], existing: list[dict]) -> dict:
     written). Names appearing 2+ times in the upload are reported in
     ``dupes_in_upload`` (original name of the first occurrence);
     only that first occurrence is offered as new/matched.
+    The number of discarded duplicate occurrences is returned as
+    ``skipped_dupe_columns`` so callers can account for every column.
     """
     by_name: dict[str, dict] = {}
     for row in existing:
@@ -140,12 +142,14 @@ def reconcile_operators(parsed: list[dict], existing: list[dict]) -> dict:
     seen: set[str] = set()
     seen_display: dict[str, str] = {}  # normalized key -> first original name
     dupes: list[str] = []
+    dupe_columns = 0
 
     for op in parsed:
         key = normalize_operator_name(op.get("operator_name"))
         if not key:
             continue  # blank-name rows are filtered by parse_master_csv; guard anyway
         if key in seen:
+            dupe_columns += 1
             original = seen_display[key]
             if original not in dupes:
                 dupes.append(original)
@@ -165,4 +169,9 @@ def reconcile_operators(parsed: list[dict], existing: list[dict]) -> dict:
         else:
             new.append(op)
 
-    return {"matched": matched, "new": new, "dupes_in_upload": dupes}
+    return {
+        "matched": matched,
+        "new": new,
+        "dupes_in_upload": dupes,
+        "skipped_dupe_columns": dupe_columns,
+    }
