@@ -54,6 +54,8 @@ cycler==0.12.1
     # via matplotlib
 entrypoints==0.4
     # via streamlit-extras
+et-xmlfile==1.1.0
+    # via openpyxl
 faker==40.4.0
     # via streamlit-faker
 favicon==0.7.0
@@ -126,6 +128,8 @@ numpy==2.4.2
     #   pandas
     #   pydeck
     #   streamlit
+openpyxl==3.1.5
+    # via -r requirements.txt
 packaging==26.0
     # via
     #   altair
