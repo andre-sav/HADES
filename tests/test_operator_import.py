@@ -111,6 +111,18 @@ def test_parse_xlsx_file_matches_csv():
     assert result.skipped_no_name == [4]
 
 
+def test_parse_same_file_object_twice_survives_streamlit_rerun():
+    # Streamlit's UploadedFile is reused across reruns with a retained read
+    # position. parse_master_file must seek(0) so a re-parse (e.g. when the
+    # Import button triggers a rerun) still returns the operators instead of
+    # silently reading an empty file and showing "No operator data found".
+    buf = io.BytesIO(FIXTURE.encode("utf-8"))
+    first = parse_master_file(buf)
+    second = parse_master_file(buf)  # same object, pointer was left at EOF
+    assert [o["operator_name"] for o in first.operators] == ["John Smith", "Bob Jones"]
+    assert [o["operator_name"] for o in second.operators] == ["John Smith", "Bob Jones"]
+
+
 def test_normalize_operator_name_handles_none():
     assert normalize_operator_name(None) == ""
 
