@@ -1,5 +1,5 @@
 # operator_import.py
-"""Parse a column-per-operator Master file (.xlsx/.xls/.csv) and reconcile it
+"""Parse a column-per-operator Master file (.xlsx/.csv) and reconcile it
 against the operators table. Pure logic — no Streamlit. See
 docs/superpowers/specs/2026-05-29-hades-master-csv-upload-design.md.
 """
@@ -70,14 +70,18 @@ def _clean_cell(df: pd.DataFrame, row: int, col: int) -> str:
 def _read_master_dataframe(file, filename: str | None) -> pd.DataFrame:
     """Read a Master file into a positional (header=None) string DataFrame.
 
-    Routes by extension: .xlsx/.xls via read_excel, otherwise CSV with a
+    Routes by extension: .xlsx via read_excel, otherwise CSV with a
     utf-8-sig → latin-1 fallback (Windows Excel often saves CP-1252).
     dtype=str everywhere prevents ZIP/phone float coercion and leading-zero
     loss. Raises on an unreadable file; the caller turns that into an empty
     parse + a user-facing warning.
     """
     name = (filename or "").lower()
-    if name.endswith((".xlsx", ".xls")):
+    # Streamlit's UploadedFile is reused across reruns with a retained read
+    # position; rewind so a re-parse on rerun doesn't read an empty stream.
+    if hasattr(file, "seek"):
+        file.seek(0)
+    if name.endswith(".xlsx"):
         return pd.read_excel(file, header=None, dtype=str)
     try:
         return pd.read_csv(file, header=None, dtype=str, encoding="utf-8-sig")
@@ -88,10 +92,10 @@ def _read_master_dataframe(file, filename: str | None) -> pd.DataFrame:
 
 
 def parse_master_file(file, filename: str | None = None) -> MasterCsvParse:
-    """Parse a column-per-operator Master file (.xlsx/.xls/.csv) into operators.
+    """Parse a column-per-operator Master file (.xlsx/.csv) into operators.
 
     `file` may be a path or a file-like object; `filename` (when given) routes
-    .xlsx/.xls through read_excel, else CSV. Each operator is a COLUMN with
+    .xlsx through read_excel, else CSV. Each operator is a COLUMN with
     fields at fixed row positions. Column 0 (the field-label column) is skipped
     by content, not index. Returns an empty parse (never raises) on an
     unreadable/empty file so the UI can show a friendly warning.
