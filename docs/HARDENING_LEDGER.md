@@ -54,6 +54,18 @@ Status key: ⬜ not started · 🔶 in progress · ✅ done · 🚫 n/a
 
 ---
 
+## Monitoring / alerting (HADES-1d3 — the #1 blind spot, now addressed)
+
+- `monitoring.py` — pure evaluators: `evaluate_usage()` (credit/entitlement
+  thresholds; an unreadable signal is "unknown", never "ok") and
+  `evaluate_enrichment_batch()` (fieldless-record fraction). Tested, 11 cases.
+- `notify_failure.send_alert(subject, body)` extracted as a reusable alert
+  channel (CLI `main()` now uses it too).
+- `scripts/check_zoominfo_health.py` + `.github/workflows/zoominfo-health-check.yml`
+  (daily 12:00 UTC) — the SYSTEM now alerts on credit/entitlement exhaustion
+  before the operator sees blanks. Follow-up: wire `evaluate_enrichment_batch`
+  into headless `run_intent_pipeline`.
+
 ## Newly discovered surfaces (append as found)
 
 - **Adversarial code review of the hardening branch** (bmad-code-review, 3 layers)
