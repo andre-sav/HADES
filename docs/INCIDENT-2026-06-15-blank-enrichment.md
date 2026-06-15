@@ -99,6 +99,18 @@ basic fields. This matches the observed split exactly.
    response body will show whether `data` arrays are empty and what
    `matchStatus` / error each result carries (e.g. credit/entitlement message).
 
+3. **Differential confirmation (rules out the dismissed causes — no live logs needed).**
+   - **Entitlement/credits:** call `client.get_usage()` (`GET /lookup/usage`) and
+     read the credit/entitlement fields directly.
+   - **Silently-rejected `outputFields`:** re-run enrich with a *minimal* field
+     set (`["id","firstName","lastName"]`); if data comes back, a field in
+     `DEFAULT_ENRICH_OUTPUT_FIELDS` is now disallowed. Cross-check with
+     `client.get_lookup_fields("enrich")`.
+   - **Response-schema change:** inspect `client.last_exchange["response"]["body"]`
+     for one failing enrich — confirm `result[i].data[0]` is still the contact path.
+   - **Caching:** grep the enrich path for `@st.cache_data` / custom cache serving
+     stale-empty results (low probability, fast to rule out).
+
 ---
 
 ## 4. Proposed fixes (defense-in-depth — fail loud, degrade gracefully)

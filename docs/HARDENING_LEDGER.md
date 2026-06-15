@@ -75,6 +75,21 @@ Status key: ⬜ not started · 🔶 in progress · ✅ done · 🚫 n/a
 
 ---
 
+## Second-opinion review (Gemini, 2026-06-15)
+
+Independent model review of the incident response. Endorsed the root-cause
+diagnosis, the P0/P1 fixes (incl. "backfill+warn is correct, not dangerous —
+the failure is in enrichment, not the search data"), thread-local, and
+`contact_has_core_data`. Two course-corrections, both now logged as P1:
+- **HADES-1d3** — proactive monitoring + alerting is the #1 blind spot (operator
+  was the detector). Wire credit-check + degraded-response detection into
+  `notify_failure.py`.
+- **HADES-fxr** — highest-leverage hardening = recorded-response integration
+  tests for P0 boundaries, NOT an open-ended LLM sweep.
+- **Sweep guidance:** if continued, narrow to **Auth/Usage (#5)** and **Intent
+  pipeline (#4)** next (Search #2 already done); cut the per-iteration
+  5-Whys/convention ceremony — consolidate conventions after patterns emerge.
+
 ## Escalated to humans (operational / account — not code)
 
 - **ZoomInfo enrichment credit / entitlement** — root *trigger* of the 2026-06-15
