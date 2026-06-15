@@ -116,8 +116,9 @@ credit/entitlement issue. Check the Usage Dashboard."* Do not render the
 blank table as if it were a finished lead list.
 
 **P1 — Preserve search backfill even when enrichment is empty.**
-In `enrich_contacts`, carry `item["input"]["personId"]` (and `matchStatus`)
-onto each extracted contact. In the geo page, key the `search_by_pid` backfill
+In `enrich_contacts`, carry `item["input"]["personId"]`
+onto each extracted contact. (As built: personId only — `matchStatus` has no
+downstream consumer, so it was not carried.) In the geo page, key the `search_by_pid` backfill
 on that **requested** personId rather than the id returned in the (possibly
 empty) payload. Result: operator always sees search-quality
 Name/Title/Company/City/State; only the enrich-only fields (verified

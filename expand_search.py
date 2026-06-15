@@ -412,6 +412,7 @@ def expand_search(
             "error": str(e),
             "expansion_log": expansion_log,
             "expansion_steps": expansion_steps,
+            "truncated": _truncation_seen,
         }
 
     # Check if target already met before expansion (target = unique companies, not contacts)

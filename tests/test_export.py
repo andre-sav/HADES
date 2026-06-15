@@ -875,6 +875,16 @@ class TestContactHasCoreData:
     def test_true_with_email_only(self):
         assert contact_has_core_data({"email": "nancy@banecare.com"}) is True
 
+    def test_true_with_phone_only(self):
+        # HADES is a phone-dialing tool (VanillaSoft). A matched record with a
+        # working number but a suppressed name is still a deliverable lead and
+        # must NOT be dropped or counted as a credit-exhaustion empty.
+        assert contact_has_core_data({"phone": "(781) 474-2263"}) is True
+
+    def test_true_with_mobile_or_direct_phone(self):
+        assert contact_has_core_data({"mobilePhone": "(339) 613-7236"}) is True
+        assert contact_has_core_data({"directPhone": "(781) 803-7571"}) is True
+
     def test_false_when_empty(self):
         assert contact_has_core_data({}) is False
 

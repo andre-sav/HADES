@@ -553,6 +553,56 @@ class TestCombinedSearchIntegration:
         assert len(result["contacts"]) == 1
         assert result["contacts"][0]["_location_type"] == "PersonAndHQ"
 
+    @patch("expand_search.time.sleep")
+    def test_truncation_signal_propagates_to_result(self, mock_sleep):
+        """A page-cap truncation reported by the client must surface in the
+        expand_search result so the geo page can warn the operator."""
+        from expand_search import expand_search
+
+        mock_client = Mock()
+        mock_client.search_contacts_all_pages.return_value = [
+            {"personId": "p1", "companyId": "c1", "companyName": "HQ Corp",
+             "contactAccuracyScore": 95, "firstName": "Alice", "lastName": "A"},
+        ]
+        trunc = {"pages_fetched": 5, "total_pages": 40, "max_pages": 5, "fetched": 1}
+        mock_client.last_search_truncated = trunc
+
+        result = expand_search(
+            client=mock_client,
+            base_params={
+                "radius": 10.0, "accuracy_min": 95, "management_levels": ["Manager"],
+                "employee_max": 5000, "location_type": "PersonAndHQ",
+                "include_person_only": False, "sic_codes": ["7011"],
+            },
+            zip_codes=["75201"], states=["TX"], target=1, stop_early=True,
+        )
+
+        assert result["truncated"] == trunc
+
+    @patch("expand_search.time.sleep")
+    def test_no_truncation_signal_is_none(self, mock_sleep):
+        """When the client reports no truncation, result['truncated'] is None."""
+        from expand_search import expand_search
+
+        mock_client = Mock()
+        mock_client.search_contacts_all_pages.return_value = [
+            {"personId": "p1", "companyId": "c1", "companyName": "HQ Corp",
+             "contactAccuracyScore": 95, "firstName": "Alice", "lastName": "A"},
+        ]
+        mock_client.last_search_truncated = None
+
+        result = expand_search(
+            client=mock_client,
+            base_params={
+                "radius": 10.0, "accuracy_min": 95, "management_levels": ["Manager"],
+                "employee_max": 5000, "location_type": "PersonAndHQ",
+                "include_person_only": False, "sic_codes": ["7011"],
+            },
+            zip_codes=["75201"], states=["TX"], target=1, stop_early=True,
+        )
+
+        assert result.get("truncated") is None
+
 
 class TestMessyIdEdgeCases:
     """Edge cases for mixed int/string IDs from ZoomInfo API."""

@@ -21,7 +21,10 @@ def contact_has_core_data(contact: dict) -> bool:
     requested key carried through for backfill) is NOT real data and must not
     count as an enriched lead.
 
-    Core data = at least one of: a name, a company name, or an email.
+    Core data = at least one of: a name, a company name, an email, or a phone
+    number. Phone counts because HADES feeds a phone-dialing workflow
+    (VanillaSoft) — a matched record with a working number but a name suppressed
+    by the entitlement tier is still a deliverable lead, not an empty match.
     """
     if not isinstance(contact, dict):
         return False
@@ -31,8 +34,14 @@ def contact_has_core_data(contact: dict) -> bool:
     if isinstance(contact.get("company"), dict) and not company:
         company = contact["company"].get("name", "") or ""
     email = contact.get("email") or ""
+    phone = (
+        contact.get("directPhone")
+        or contact.get("phone")
+        or contact.get("mobilePhone")
+        or ""
+    )
 
-    return bool(name or str(company).strip() or str(email).strip())
+    return bool(name or str(company).strip() or str(email).strip() or str(phone).strip())
 
 
 def generate_batch_id(db) -> str:

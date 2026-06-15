@@ -23,6 +23,13 @@ Status key: ⬜ not started · 🔶 in progress · ✅ done · 🚫 n/a
   ship empty/degenerate output downstream.
 - **C4 — Force-fail tests only.** A test proving "doesn't crash on good input"
   does not count. Feed the bad case; assert it is caught/surfaced.
+- **C5 — No unsynchronized shared mutable state on the cached client.** The
+  ZoomInfo client is an `@st.cache_resource` singleton shared across sessions and
+  background threads. Per-request/per-sweep signals must be thread-local (or
+  lock-guarded), never plain instance attributes.
+- **C6 — A guard that halts (`st.stop()`/early return) must close out side state
+  first.** Before stopping, complete any open pipeline run and clear run-logger
+  state, or the run is orphaned in a non-terminal status and re-fires on rerun.
 
 ---
 
@@ -49,7 +56,22 @@ Status key: ⬜ not started · 🔶 in progress · ✅ done · 🚫 n/a
 
 ## Newly discovered surfaces (append as found)
 
-_(none yet)_
+- **Adversarial code review of the hardening branch** (bmad-code-review, 3 layers)
+  hardened the fixes themselves — patched in-branch:
+  - `contact_has_core_data` now counts **phone** (not just name/company/email) —
+    a phone-dialing tool must not drop phone-only leads or raise a false
+    credit-exhaustion P0 for them. *(reinforces C1: "usable" is workflow-specific.)*
+  - `last_search_truncated` made **thread-local** — the client is an
+    `@st.cache_resource` singleton shared across sessions/threads; a plain
+    attribute raced. *(new C5 below.)*
+  - All-empty `st.stop()` now **completes the pipeline run** first (was orphaning
+    it in a non-terminal state). *(new C6 below.)*
+  - Usage logging split: `credits_used` = full batch (what ZoomInfo charged),
+    `leads_returned` = deliverables (post-filter) — kept consistent with the UI.
+  - `expand_search` error-return path now carries `truncated`; added propagation
+    tests (4 return sites were untested).
+  - Deferred: content-side early-stop truncation + multi-sweep number accuracy →
+    **HADES-w2t** (needs ZoomInfo empty-page behavior evidence first).
 
 ---
 

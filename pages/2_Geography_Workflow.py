@@ -1848,16 +1848,20 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         if st.session_state.geo_test_mode:
             st.caption("🧪 Test mode: Usage not logged")
         else:
+            # credits_used = what ZoomInfo charged (every enrich call, including
+            # fieldless matches). leads_returned = deliverable leads the operator
+            # actually gets (post-filter) — keep these distinct so the Usage
+            # Dashboard matches what's shown/exported.
             cost_tracker.log_usage(
                 workflow_type="geography",
                 query_params=st.session_state.geo_query_params,
                 credits_used=len(enriched_contacts),
-                leads_returned=len(enriched_contacts),
+                leads_returned=len(scored),
             )
             db.log_query(
                 workflow_type="geography",
                 query_params=st.session_state.geo_query_params,
-                leads_returned=len(enriched_contacts),
+                leads_returned=len(scored),
             )
         st.session_state.geo_usage_logged = True
 
@@ -1871,6 +1875,20 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             "does not. Check the **Usage Dashboard** / ZoomInfo admin console before "
             "retrying. No leads to display or export."
         )
+        # Close out the pipeline run before halting — otherwise st.stop() leaves it
+        # in a non-terminal "running" state forever (the success completion lives
+        # in the export block below, which never renders).
+        _rl = st.session_state.get("geo_run_logger")
+        _run_id = st.session_state.get("geo_run_id")
+        if _rl and _run_id:
+            _rl.error(f"Enrichment returned no contact data for all {_total_enriched} records")
+            db.complete_pipeline_run(
+                _run_id, "failed", _rl.to_summary(),
+                batch_id=None, credits_used=len(enriched_contacts),
+                leads_exported=0, error="Enrichment returned no contact data (credit/entitlement?)",
+            )
+            st.session_state.geo_run_logger = None
+            st.session_state.geo_run_id = None
         st.stop()
     elif _empty_count:
         st.warning(

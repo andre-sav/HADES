@@ -218,10 +218,22 @@ class ZoomInfoClient:
         self._last_auth_response: dict | None = None  # Captures auth error details for debugging
         # Surfaces silent page-cap truncation from the last search sweep so callers
         # (expand_search / the UI) can tell the operator the result set is incomplete.
-        self.last_search_truncated: dict | None = None
+        # Thread-local: the client is an @st.cache_resource singleton shared across
+        # sessions, and searches run in background threads — a plain attribute would
+        # let concurrent searches clobber or leak each other's truncation signal.
+        self._tls = threading.local()
         self._lock = threading.Lock()  # Guards token, last_exchange, and rate-limit state
         self._consecutive_failures = 0
         self._circuit_open_until: float = 0.0
+
+    @property
+    def last_search_truncated(self) -> dict | None:
+        """Per-thread page-cap truncation signal from the most recent search sweep."""
+        return getattr(self._tls, "search_truncated", None)
+
+    @last_search_truncated.setter
+    def last_search_truncated(self, value: dict | None) -> None:
+        self._tls.search_truncated = value
 
     def _get_token(self) -> str:
         """Get valid access token, refreshing if needed. Thread-safe."""
