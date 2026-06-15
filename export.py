@@ -12,6 +12,29 @@ logger = logging.getLogger(__name__)
 from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT, format_phone
 
 
+def contact_has_core_data(contact: dict) -> bool:
+    """Return True if a contact carries real, usable field data.
+
+    Guards the 2026-06-15 incident: ZoomInfo enrichment returned matched-but-
+    fieldless records, which the pipeline scored at the empty-lead baseline and
+    rendered as blank "leads". A record stamped with only an id/personId (the
+    requested key carried through for backfill) is NOT real data and must not
+    count as an enriched lead.
+
+    Core data = at least one of: a name, a company name, or an email.
+    """
+    if not isinstance(contact, dict):
+        return False
+
+    name = f"{contact.get('firstName', '') or ''} {contact.get('lastName', '') or ''}".strip()
+    company = (contact.get("companyName") or "")
+    if isinstance(contact.get("company"), dict) and not company:
+        company = contact["company"].get("name", "") or ""
+    email = contact.get("email") or ""
+
+    return bool(name or str(company).strip() or str(email).strip())
+
+
 def generate_batch_id(db) -> str:
     """Generate a sequential batch ID for this export: HADES-YYYYMMDD-NNN.
 

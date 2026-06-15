@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
-from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary, generate_batch_id, merge_contact, merge_company_data
+from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary, generate_batch_id, merge_contact, merge_company_data, contact_has_core_data
 from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT
 
 
@@ -856,3 +856,58 @@ class TestMergeCompanyData:
         assert result[0]["sicCode"] == "9999"
         assert result[0]["industry"] == "Custom"
         assert result[0]["employeeCount"] == 500
+
+
+class TestContactHasCoreData:
+    """Tests for contact_has_core_data — detects fieldless enrichment payloads.
+
+    Regression guard for the 2026-06-15 incident: ZoomInfo enrichment returned
+    matched-but-fieldless records (empty data[0]); the pipeline scored them all
+    at the empty-lead baseline (64) and rendered blank rows as valid results.
+    """
+
+    def test_true_with_name(self):
+        assert contact_has_core_data({"firstName": "Nancy", "lastName": "Zappolo"}) is True
+
+    def test_true_with_company_only(self):
+        assert contact_has_core_data({"companyName": "BaneCare"}) is True
+
+    def test_true_with_email_only(self):
+        assert contact_has_core_data({"email": "nancy@banecare.com"}) is True
+
+    def test_false_when_empty(self):
+        assert contact_has_core_data({}) is False
+
+    def test_false_when_only_ids(self):
+        # An empty enrichment payload stamped with just the requested personId
+        # is NOT real contact data — must not count as an enriched lead.
+        assert contact_has_core_data({"personId": "123", "id": "123"}) is False
+
+    def test_false_when_fields_blank_strings(self):
+        assert contact_has_core_data({"firstName": "", "lastName": "  ", "companyName": "", "email": ""}) is False
+
+
+class TestFieldlessEnrichmentBackfill:
+    """Once enrich stamps the requested personId onto a fieldless payload,
+    the search-phase data must backfill so the operator still sees the lead."""
+
+    def test_search_data_restored_via_stamped_pid(self):
+        # Enrichment came back empty but was stamped with the requested personId.
+        enriched = {"personId": "111", "id": "111"}
+        search = {
+            "personId": "111",
+            "firstName": "Nancy",
+            "lastName": "Zappolo",
+            "jobTitle": "VP",
+            "companyName": "BaneCare",
+            "personCity": "Scituate",
+            "personState": "MA",
+        }
+        search_by_pid = {"111": search}
+
+        pid = str(enriched.get("id") or enriched.get("personId") or "")
+        merged = merge_contact(search_by_pid.get(pid, {}), enriched)
+
+        assert merged["firstName"] == "Nancy"
+        assert merged["companyName"] == "BaneCare"
+        assert contact_has_core_data(merged) is True

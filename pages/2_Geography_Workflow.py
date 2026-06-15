@@ -34,7 +34,7 @@ from zoominfo_client import (
 from scoring import score_geography_leads, get_priority_label, get_priority_action
 from db._title_prefs import normalize_title
 from export_dedup import apply_export_dedup
-from export import merge_contact, merge_company_data
+from export import merge_contact, merge_company_data, contact_has_core_data
 from cost_tracker import CostTracker
 from utils import (
     get_sic_codes,
@@ -1816,6 +1816,15 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         lead["_priority"] = get_priority_label(lead.get("_score", 0))
         lead["_priority_action"] = get_priority_action(lead.get("_score", 0))
 
+    # P0 fail-loud guard (incident 2026-06-15): ZoomInfo enrichment can return
+    # matched-but-fieldless records when credits/entitlement lapse. Those score at
+    # the empty-lead baseline (uniform 64) and would render as blank "leads".
+    # Detect records that carry no real contact data and surface the problem
+    # instead of presenting an authoritative-looking table of blanks.
+    _empty_count = sum(1 for lead in scored if not contact_has_core_data(lead))
+    # Keep only deliverable leads in the result set consumed by the table,
+    # the export, and the CSV Export page.
+    scored = [lead for lead in scored if contact_has_core_data(lead)]
     st.session_state.geo_results = scored
 
     # Log usage (credits used for enrichment) - skip in test mode
@@ -1836,6 +1845,25 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             )
         st.session_state.geo_usage_logged = True
 
+    # P0 banner: stop on a fully-empty enrichment, warn on a partial one.
+    _total_enriched = len(enriched_contacts)
+    if _empty_count and not scored:
+        st.error(
+            f"🛑 Enrichment returned no contact data for all {_total_enriched} "
+            "records. This usually means ZoomInfo enrichment credits are exhausted or "
+            "the enrichment entitlement has lapsed — search still works, enrichment "
+            "does not. Check the **Usage Dashboard** / ZoomInfo admin console before "
+            "retrying. No leads to display or export."
+        )
+        st.stop()
+    elif _empty_count:
+        st.warning(
+            f"⚠️ {_empty_count} of {_total_enriched} enriched records came back "
+            f"with no contact data (likely a ZoomInfo credit/entitlement issue). Showing "
+            f"the {len(scored)} records that returned data — check the "
+            "**Usage Dashboard** if you expected more."
+        )
+
     # Results summary
     preview_count = len(st.session_state.geo_preview_contacts or [])
     companies = len(st.session_state.geo_contacts_by_company or {})
@@ -1843,7 +1871,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        metric_card("Contacts Enriched", len(enriched_contacts), help_text="Verified contacts with updated phone and email")
+        metric_card("Contacts Enriched", len(scored), help_text="Verified contacts with real field data (empty matches excluded)")
 
     with col2:
         metric_card("Preview Found", preview_count, help_text="Total from initial search before enrichment")

@@ -142,6 +142,26 @@ DEFAULT_ENRICH_OUTPUT_FIELDS = [
 ]
 
 
+def _stamp_requested_pid(contact: dict, item: dict) -> dict:
+    """Ensure an extracted enrich contact carries the requested personId.
+
+    ZoomInfo echoes each request key back as item["input"]. When enrichment
+    matches but returns a fieldless data[0] payload (credit/entitlement
+    exhaustion), the contact has no id of its own — so the downstream
+    search-phase backfill (keyed on id/personId) misses and the row renders
+    blank. Stamping the requested personId lets the backfill restore the lead.
+
+    Only fills a missing id; a real id returned by the API always wins.
+    """
+    requested = ""
+    inp = item.get("input")
+    if isinstance(inp, dict):
+        requested = str(inp.get("personId") or "")
+    if requested and not (contact.get("id") or contact.get("personId")):
+        return {**contact, "id": requested, "personId": requested}
+    return contact
+
+
 @dataclass
 class CompanyEnrichParams:
     """Parameters for Company Enrich API query."""
@@ -1160,7 +1180,7 @@ class ZoomInfoClient:
                 if isinstance(item, dict):
                     # Extract contact from item["data"][0] structure
                     if "data" in item and isinstance(item["data"], list) and item["data"]:
-                        contact = item["data"][0]
+                        contact = _stamp_requested_pid(item["data"][0], item)
                         contacts.append(contact)
                         logger.debug(f"Extracted contact: personId={contact.get('personId', 'N/A')}")
                     elif "firstName" in item or "lastName" in item:
@@ -1181,7 +1201,7 @@ class ZoomInfoClient:
                             # Each result item has {input, data, matchStatus}
                             # The actual contact is in item["data"][0]
                             if "data" in item and isinstance(item["data"], list) and item["data"]:
-                                contact = item["data"][0]
+                                contact = _stamp_requested_pid(item["data"][0], item)
                                 contacts.append(contact)
                                 logger.debug(f"Extracted contact from result: personId={contact.get('personId', 'N/A')}")
                             elif "firstName" in item or "lastName" in item:

@@ -1161,6 +1161,58 @@ class TestContactEnrich:
         assert len(result["data"]) == 1
         assert result["data"][0]["firstName"] == "TopLevel"
 
+    def test_enrich_stamps_requested_person_id_on_fieldless_payload(self, client):
+        """Incident 2026-06-15: when enrichment matches but returns a fieldless
+        data[0] (credit/entitlement exhaustion), the requested personId must be
+        stamped onto the extracted contact so search-phase backfill can match it.
+
+        Without this, the empty payload has no id, the geo-page backfill lookup
+        misses, and the row renders fully blank at the baseline score.
+        """
+        mock_response = {
+            "success": [{"personId": "123"}],
+            "data": {
+                "outputFields": ["firstName", "lastName"],
+                "result": [
+                    {
+                        "input": {"personId": "123"},
+                        "data": [{}],  # matched but no field data
+                        "matchStatus": "FULL_MATCH",
+                    }
+                ],
+                "requiredFields": [],
+            },
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            params = ContactEnrichParams(person_ids=["123"])
+            result = client.enrich_contacts(params)
+
+        assert len(result["data"]) == 1
+        contact = result["data"][0]
+        assert str(contact.get("id") or contact.get("personId")) == "123"
+
+    def test_enrich_does_not_overwrite_real_id_with_input(self, client):
+        """When enrichment returns a real contact, its own id must win over input."""
+        mock_response = {
+            "success": [{"personId": "123"}],
+            "data": {
+                "result": [
+                    {
+                        "input": {"personId": "123"},
+                        "data": [{"id": 999, "firstName": "Real", "lastName": "Person"}],
+                        "matchStatus": "FULL_MATCH",
+                    }
+                ],
+            },
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            result = client.enrich_contacts(ContactEnrichParams(person_ids=["123"]))
+
+        assert result["data"][0]["id"] == 999
+        assert result["data"][0]["firstName"] == "Real"
+
 
 class TestCompanyEnrich:
     """Tests for Company Enrich API response parsing."""
