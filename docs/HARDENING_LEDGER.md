@@ -4,6 +4,11 @@ Durable state for the silent-failure hardening campaign (epic **HADES-zz6**,
 driver `docs/HARDENING_PROTOCOL.md`). One row per audited surface. Each pass
 updates this file so recursion never redoes settled work.
 
+> **▶ RESUME HERE:** bead **HADES-6ic** is the handoff anchor — branch
+> `fix/hades-silent-failure-hardening` (5 commits, 830 tests pass, not yet
+> pushed). Next: HADES-fxr (focused enrich+search integration tests) → supervised
+> sweep of Auth/Usage (#5) + Intent (#4). A fresh work instance starts there.
+
 Status key: ⬜ not started · 🔶 in progress · ✅ done · 🚫 n/a
 
 ---
