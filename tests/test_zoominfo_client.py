@@ -1986,3 +1986,36 @@ class TestPaginationFix:
 
         # Should stop at max_pages=5 even though totalPages=100
         assert len(results) == 5
+
+    def test_truncation_at_max_pages_is_surfaced(self, client):
+        """Incident-class (silent coverage cap): when a page cap stops the sweep
+        before the real last page, that truncation must be surfaced — not
+        silently dropped — so the operator knows the result set is incomplete."""
+        pages = [
+            {"data": [{"personId": str(i)}], "pagination": {"totalResults": 100, "pageSize": 1, "currentPage": i + 1, "totalPages": 100}}
+            for i in range(3)
+        ]
+        with patch.object(client, "search_contacts", side_effect=pages):
+            results = client._search_contacts_single_batch(
+                ContactQueryParams(zip_codes=["75201"], radius_miles=25, states=["TX"]),
+                max_pages=3,
+            )
+
+        assert len(results) == 3
+        assert client.last_search_truncated is not None
+        assert client.last_search_truncated["pages_fetched"] == 3
+        assert client.last_search_truncated["total_pages"] == 100
+
+    def test_no_truncation_flag_when_all_pages_fetched(self, client):
+        """Reaching the real last page must NOT report truncation."""
+        with patch.object(client, "search_contacts", side_effect=[
+            {"data": [{"personId": "1"}], "pagination": {"totalResults": 2, "pageSize": 1, "currentPage": 1, "totalPages": 2}},
+            {"data": [{"personId": "2"}], "pagination": {"totalResults": 2, "pageSize": 1, "currentPage": 2, "totalPages": 2}},
+        ]):
+            results = client._search_contacts_single_batch(
+                ContactQueryParams(zip_codes=["75201"], radius_miles=25, states=["TX"]),
+                max_pages=5,
+            )
+
+        assert len(results) == 2
+        assert client.last_search_truncated is None

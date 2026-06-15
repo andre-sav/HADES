@@ -1146,6 +1146,22 @@ if has_operator:
                 if _rl:
                     _rl.warn(f"Search stopped early: {result['found']} companies")
 
+            # Fail loud on a silent coverage cap: ZoomInfo had more results than
+            # the page limit fetched, so this preview is only a partial slice.
+            _trunc = result.get("truncated")
+            if _trunc:
+                st.warning(
+                    f"⚠️ Showing a **partial** result set — ZoomInfo had more than the "
+                    f"{_trunc.get('fetched', 'shown')} contacts fetched (reached the "
+                    f"{_trunc.get('max_pages')}-page limit of ~{_trunc.get('total_pages')} pages). "
+                    "Narrow the radius/filters to see all matches, or treat this as a sample."
+                )
+                if _rl:
+                    _rl.warn(
+                        f"Search truncated at page cap: fetched {_trunc.get('fetched')} of "
+                        f"~{_trunc.get('total_pages')} pages"
+                    )
+
             st.session_state.geo_preview_contacts = result["contacts"]
             st.session_state.geo_search_executed = True
 

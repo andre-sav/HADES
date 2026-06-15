@@ -269,6 +269,10 @@ def expand_search(
     include_person_only = base_params.get("include_person_only", False)
     center_zip = base_params.get("center_zip")
 
+    # Preserve a page-cap truncation from ANY sweep so the operator is told the
+    # result set is partial (the client resets its flag on every sweep).
+    _truncation_seen = None
+
     def do_search(radius_miles, accuracy_min, management_levels, employee_max, location_type_override=None):
         """Execute a single search with given parameters."""
         # Recalculate ZIPs if radius changed and we have a center ZIP
@@ -299,7 +303,11 @@ def expand_search(
             management_levels=management_levels if management_levels else None,
         )
 
-        return client.search_contacts_all_pages(params, max_pages=5)
+        contacts = client.search_contacts_all_pages(params, max_pages=5)
+        nonlocal _truncation_seen
+        if client.last_search_truncated:
+            _truncation_seen = client.last_search_truncated
+        return contacts
 
     def process_contacts(contacts: list, location_type_tag: str = None) -> tuple[int, int]:
         """Add contacts to tracking dicts, return (new_contacts, new_companies).
@@ -362,7 +370,7 @@ def expand_search(
                     "searches_performed": searches_performed, "contacts": contacts_list,
                     "contacts_by_company": build_contacts_by_company(contacts_list),
                     "expansion_log": expansion_log, "expansion_steps": expansion_steps,
-                    "stopped": True,
+                    "stopped": True, "truncated": _truncation_seen,
                 }
             time.sleep(0.5)  # Rate limit
             log_progress("**Combined search:** Adding Person-only results for maximum coverage...", is_step=True)
@@ -423,6 +431,7 @@ def expand_search(
             "contacts_by_company": contacts_by_company,
             "expansion_log": expansion_log,
             "expansion_steps": expansion_steps,
+            "truncated": _truncation_seen,
         }
 
     if len(unique_companies) < target:
@@ -597,6 +606,7 @@ def expand_search(
         "contacts_by_company": contacts_by_company,
         "expansion_log": expansion_log,
         "expansion_steps": expansion_steps,
+        "truncated": _truncation_seen,
     }
     if was_cancelled:
         result["stopped"] = True

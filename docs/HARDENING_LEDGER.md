@@ -31,7 +31,7 @@ Status key: ⬜ not started · 🔶 in progress · ✅ done · 🚫 n/a
 | # | Surface | Status | Modes found / fixed / ruled-out | Beads |
 |---|---------|--------|----------------------------------|-------|
 | 1 | ZoomInfo Contact Enrich | ✅ done | Fieldless-match → blank leads + uniform 64 score, backfill lost. Fixed: pid stamp (C2) + `contact_has_core_data` filter + fail-loud banner (C1/C3). Force-fail tests added. | HADES-mcx |
-| 2 | ZoomInfo Contact/Company Search | ⬜ | | |
+| 2 | ZoomInfo Contact/Company Search | ✅ done | FOUND+FIXED: silent page-cap truncation (`max_pages` stops the sweep before the real last page with no signal → operator trusts a partial "N found" as complete). Now: `_search_was_truncated` + `client.last_search_truncated` (loud warn) → `expand_search` result['truncated'] → geo-page `st.warning`. RULED OUT: 200-but-empty (shows "0 found" — visible); `_request` raises on non-200 so errors aren't swallowed as data. SIBLING TO SWEEP: schema-rename → blank preview fields (same class as enrich; lower risk, operator sees blanks pre-selection). | HADES-4u2 |
 | 3 | ZoomInfo Company Enrich | ⬜ | merge_company_data fills gaps silently; check empty/partial company responses → silent SIC/industry blanks | |
 | 4 | ZoomInfo Intent pipeline (headless) | ⬜ | scheduled; confirm failures alert (notify_failure) vs vanish | |
 | 5 | ZoomInfo auth/token + usage | ⬜ | partial-entitlement degradation (root trigger of the incident); usage endpoint accuracy | |
