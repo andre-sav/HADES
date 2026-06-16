@@ -8,7 +8,7 @@ updates this file so recursion never redoes settled work.
 > `fix/hades-silent-failure-hardening` (7 commits, 837 tests pass, not yet
 > pushed). HADES-fxr ✅ done (focused enrich+search integration tests). Next:
 > supervised sweep of Auth/Usage (#5) + Intent (#4). A fresh work instance
-> starts there.
+> starts there. **Operating rules for any instance: `docs/WORKING-MODEL.md`.**
 
 Status key: ⬜ not started · 🔶 in progress · ✅ done · 🚫 n/a
 
