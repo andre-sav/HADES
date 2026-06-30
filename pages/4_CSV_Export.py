@@ -11,7 +11,7 @@ from datetime import datetime
 from turso_db import get_database
 from export import export_leads_to_csv, get_export_summary, build_vanillasoft_row
 from vanillasoft_client import push_leads
-from dedup import find_duplicates, flag_duplicates_in_list
+from dedup import find_duplicates, flag_duplicates_in_list, get_dedup_days_back
 from export_dedup import apply_export_dedup
 from utils import get_call_center_agents
 from ui_components import (
@@ -268,15 +268,16 @@ if intent_leads and geo_leads:
 # =============================================================================
 # CROSS-SESSION EXPORT DEDUP (previously exported companies)
 # =============================================================================
+_dedup_days = get_dedup_days_back()
 include_exported = st.checkbox(
     "Include previously exported companies",
     value=False,
     key="export_include_prev_exported",
-    help="When unchecked, leads from companies already exported in the last 180 days are removed.",
+    help=f"When unchecked, leads from companies already exported in the last {_dedup_days} days are removed.",
 )
 
 dedup_result = apply_export_dedup(
-    leads_to_export, db, days_back=180, include_exported=include_exported,
+    leads_to_export, db, days_back=_dedup_days, include_exported=include_exported,
 )
 
 if dedup_result["filtered_count"] > 0:

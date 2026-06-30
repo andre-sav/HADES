@@ -139,7 +139,7 @@ class OutcomesMixin:
             for r in rows
         ]
 
-    def get_exported_company_ids(self, days_back: int = 180) -> dict[str, dict]:
+    def get_exported_company_ids(self, days_back: int = 365) -> dict[str, dict]:
         """Get companies exported within the last N days.
 
         Returns dict mapping company_id -> {company_name, exported_at, workflow_type}.

@@ -12,7 +12,7 @@ from dedup import normalize_company_name
 logger = logging.getLogger(__name__)
 
 
-def get_previously_exported(db, days_back: int = 180) -> dict:
+def get_previously_exported(db, days_back: int = 365) -> dict:
     """Query DB for previously exported companies.
 
     Returns:
@@ -81,7 +81,7 @@ def filter_previously_exported(
 def apply_export_dedup(
     contacts: list[dict],
     db,
-    days_back: int = 180,
+    days_back: int = 365,
     include_exported: bool = False,
 ) -> dict:
     """Convenience wrapper for workflow pages.

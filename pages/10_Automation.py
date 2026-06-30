@@ -604,4 +604,4 @@ else:
         with cfg5:
             metric_card("Accuracy Min", auto_config.get("accuracy_min", "—"))
         with cfg6:
-            metric_card("Dedup Days", auto_config.get("dedup_days_back", 180))
+            metric_card("Dedup Days", auto_config.get("dedup_days_back", 365))

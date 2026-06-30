@@ -67,6 +67,18 @@ def _get_fuzzy_threshold() -> float:
     return config.get("dedup", {}).get("fuzzy_threshold", 85)
 
 
+@lru_cache(maxsize=1)
+def get_dedup_days_back() -> int:
+    """Cross-session dedup recency window, in days. Cached for process lifetime.
+
+    Single source of truth for "how far back is a company still a duplicate."
+    Defaults to 365 to match the sales team's 1-year re-contact rule (HADES-fqw);
+    a shorter window would re-surface companies that are still active leads.
+    """
+    config = load_config()
+    return int(config.get("dedup", {}).get("days_back", 365))
+
+
 def fuzzy_company_match(
     name1: str,
     name2: str,

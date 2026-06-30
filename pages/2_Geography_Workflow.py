@@ -33,6 +33,7 @@ from zoominfo_client import (
 )
 from scoring import score_geography_leads, get_priority_label, get_priority_action
 from db._title_prefs import normalize_title
+from dedup import get_dedup_days_back
 from export_dedup import apply_export_dedup
 from export import merge_contact, merge_company_data, contact_has_core_data
 from cost_tracker import CostTracker
@@ -776,7 +777,7 @@ if has_operator:
             current_only = st.toggle("Current Employees Only", value=last_filters.get("current_only", True), key="geo_current_emp_switch")
 
         with qf_col4:
-            st.caption("Previously exported companies are filtered in search results (last 180 days).")
+            st.caption(f"Previously exported companies are filtered in search results (last {get_dedup_days_back()} days).")
 
         # Required phone fields (second row)
         st.markdown("---")
@@ -1176,7 +1177,8 @@ if has_operator:
             # Cross-session export dedup: filter previously exported companies
             include_exported = st.session_state.get("geo_include_exported", False)
             dedup_result = apply_export_dedup(
-                result["contacts"], db, days_back=180, include_exported=include_exported,
+                result["contacts"], db, days_back=get_dedup_days_back(),
+                include_exported=include_exported,
             )
             st.session_state.geo_dedup_result = dedup_result
 
@@ -1336,7 +1338,7 @@ if (
                 "Include previously exported",
                 value=_prev_val,
                 key="geo_include_exported_cb",
-                help="Show contacts exported in the last 180 days. Useful if you want to re-contact previous leads.",
+                help=f"Show contacts exported in the last {get_dedup_days_back()} days. Useful if you want to re-contact previous leads.",
             )
             if _new_val != _prev_val:
                 st.session_state.geo_include_exported = _new_val

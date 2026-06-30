@@ -47,7 +47,7 @@ from zoominfo_client import (
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
 from scoring import score_intent_leads, score_intent_contacts, get_priority_label, compute_stale_summary
-from dedup import dedupe_leads
+from dedup import dedupe_leads, get_dedup_days_back
 from export import export_leads_to_csv, merge_contact, merge_company_data
 from export_dedup import get_previously_exported, filter_previously_exported
 from expand_search import build_contacts_by_company
@@ -124,7 +124,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
 
         # Cross-session dedup
         if db is not None:
-            dedup_days = config.get("dedup_days_back", 180)
+            dedup_days = config.get("dedup_days_back", get_dedup_days_back())
             lookup = get_previously_exported(db, days_back=dedup_days)
             new_leads, filtered_leads = filter_previously_exported(scored_leads, lookup)
             summary["dedup_filtered"] = len(filtered_leads)
@@ -221,7 +221,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             summary["stale_summary"] = compute_stale_summary(intent_results)
 
         # Cross-session dedup: filter previously exported companies
-        dedup_days = config.get("dedup_days_back", 180)
+        dedup_days = config.get("dedup_days_back", get_dedup_days_back())
         lookup = get_previously_exported(db, days_back=dedup_days)
         new_leads, filtered_leads = filter_previously_exported(scored_leads, lookup)
         summary["dedup_filtered"] = len(filtered_leads)

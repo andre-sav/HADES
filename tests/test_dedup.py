@@ -5,6 +5,8 @@ Run with: pytest tests/test_dedup.py -v
 """
 
 
+from unittest.mock import patch
+
 from dedup import (
     normalize_company_name,
     get_dedup_key,
@@ -14,6 +16,7 @@ from dedup import (
     fuzzy_company_match,
     merge_lead_lists,
     flag_duplicates_in_list,
+    get_dedup_days_back,
 )
 
 
@@ -438,6 +441,36 @@ class TestMergeLeadListsFuzzy:
         merged, dup_count = merge_lead_lists(intent, geo)
         assert len(merged) == 2
         assert dup_count == 0
+
+
+class TestDedupDaysBack:
+    """Tests for the cross-session dedup recency window.
+
+    Business re-contact rule is 1 year (365 days), not 6 months. See HADES-fqw.
+    """
+
+    def setup_method(self):
+        get_dedup_days_back.cache_clear()
+
+    def teardown_method(self):
+        get_dedup_days_back.cache_clear()
+
+    def test_defaults_to_one_year_when_config_missing(self):
+        """With no dedup config present, the window must default to a full year."""
+        with patch("dedup.load_config", return_value={}):
+            get_dedup_days_back.cache_clear()
+            assert get_dedup_days_back() == 365
+
+    def test_reads_value_from_config(self):
+        """The window is sourced from config['dedup']['days_back']."""
+        with patch("dedup.load_config", return_value={"dedup": {"days_back": 200}}):
+            get_dedup_days_back.cache_clear()
+            assert get_dedup_days_back() == 200
+
+    def test_shipped_config_is_one_year(self):
+        """Regression: the actual icp.yaml must encode the 1-year business rule."""
+        get_dedup_days_back.cache_clear()
+        assert get_dedup_days_back() == 365
 
 
 class TestFlagDuplicatesFuzzy:

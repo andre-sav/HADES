@@ -255,7 +255,7 @@ class TestApplyExportDedup:
         assert result["contacts"][0]["companyName"] == "New Co"
         assert result["filtered_count"] == 1
         assert result["total_before_filter"] == 2
-        assert result["days_back"] == 180
+        assert result["days_back"] == 365
 
     def test_custom_days_back(self):
         mock_db = MagicMock()
