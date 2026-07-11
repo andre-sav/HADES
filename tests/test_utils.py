@@ -497,3 +497,27 @@ class TestZipPrefixStateCorrections:
         # neighboring OK prefixes stay OK
         assert get_state_from_zip("73101") == "OK"
         assert get_state_from_zip("73401") == "OK"
+
+
+class TestClearConfigCaches:
+    """R-08 (HADES-zw1): applying calibration rewrites icp.yaml but the
+    process-lifetime lru_caches kept serving the OLD config — scoring silently
+    ignored the applied calibration until reboot."""
+
+    def test_load_config_cache_cleared(self, tmp_path, monkeypatch):
+        from utils import load_config, clear_config_caches
+        first = load_config()
+        assert load_config() is first  # cached (same object)
+        clear_config_caches()
+        second = load_config()
+        assert second is not first  # cache actually dropped
+
+    def test_cascades_to_dedup_caches(self):
+        import dedup
+        from utils import clear_config_caches
+        dedup.get_dedup_days_back()          # prime
+        dedup._get_fuzzy_threshold()         # prime
+        assert dedup.get_dedup_days_back.cache_info().currsize == 1
+        clear_config_caches()
+        assert dedup.get_dedup_days_back.cache_info().currsize == 0
+        assert dedup._get_fuzzy_threshold.cache_info().currsize == 0

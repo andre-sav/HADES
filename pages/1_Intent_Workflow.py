@@ -154,6 +154,31 @@ for key, default in defaults.items():
         st.session_state[key] = default
 
 
+def _reset_intent_downstream():
+    """Invalidate everything derived from a previous search's results.
+
+    Called whenever a NEW search's companies land in session state (HADES-aoe):
+    without this, Step 2's confirmed selection, Step 3's contacts, and Step 4's
+    enriched results all survive a re-search, so search A's contacts get
+    reviewed/enriched/exported under search B's query params.
+    """
+    st.session_state.intent_selected_companies = {}
+    st.session_state.intent_companies_confirmed = False
+    st.session_state.intent_contacts_by_company = None
+    st.session_state.intent_selected_contacts = {}
+    st.session_state.intent_enrich_clicked = False
+    st.session_state.intent_enriched_contacts = None
+    st.session_state.intent_enrichment_done = False
+    st.session_state.intent_company_enrich_done = False
+    st.session_state.intent_usage_logged = False
+    st.session_state.intent_leads_staged = False
+    st.session_state.intent_results = None
+    st.session_state.intent_export_leads = None
+    st.session_state.intent_exported = False
+    st.session_state.pop("intent_numeric_map", None)
+    st.session_state.pop("intent_enrich_error", None)
+
+
 def _intent_cache_key(topics: list[str], signal_strengths: list[str]) -> str:
     """Generate a deterministic cache key from intent search parameters."""
     normalized = json.dumps(
@@ -534,6 +559,7 @@ if st.session_state.intent_search_pending:
             _rl.info(f"Intent Search (cached): {len(deduped)} companies")
             _rl.set_metric("intent_results", len(deduped))
 
+        _reset_intent_downstream()  # new results invalidate prior selections (HADES-aoe)
         st.session_state.intent_companies = deduped
         st.session_state.intent_search_executed = True
         st.session_state.intent_search_pending = False
@@ -673,6 +699,7 @@ if st.session_state.intent_search_pending:
                         _rl.info(f"Intent Search: {len(deduped)} companies")
                         _rl.set_metric("intent_results", len(deduped))
 
+                    _reset_intent_downstream()  # new results invalidate prior selections (HADES-aoe)
                     st.session_state.intent_companies = deduped
                     st.session_state.intent_search_executed = True
                     st.session_state.intent_search_pending = False
@@ -1459,6 +1486,9 @@ if (
         st.session_state.intent_contacts_by_company
         and st.session_state.intent_selected_contacts
         and not st.session_state.intent_enrichment_done
+        # A failed attempt must NOT retry automatically on the next rerun —
+        # every retry spends credits (HADES-2xo). Explicit Retry button below.
+        and not st.session_state.get("intent_enrich_error")
         and (
             st.session_state.intent_mode == "autopilot"
             or st.session_state.intent_enrich_clicked
@@ -1526,6 +1556,8 @@ if (
                         except PipelineError as e:
                             logger.error("Enrichment failed: %s", e.user_message)
                             enrich_status.update(label="Enrichment failed", state="error")
+                            st.session_state.intent_enrich_error = e.user_message
+                            st.session_state.intent_enrich_clicked = False
                             _rl = st.session_state.get("intent_run_logger")
                             if _rl:
                                 _rl.error(f"Contact Enrich failed: {e.user_message}")
@@ -1543,6 +1575,8 @@ if (
                         except Exception:
                             logger.exception("Enrichment failed")
                             enrich_status.update(label="Enrichment failed", state="error")
+                            st.session_state.intent_enrich_error = "Unexpected error — check application logs"
+                            st.session_state.intent_enrich_clicked = False
                             _rl = st.session_state.get("intent_run_logger")
                             if _rl:
                                 _rl.error("Contact Enrich failed unexpectedly")
@@ -1557,6 +1591,17 @@ if (
                                 st.session_state.intent_run_id = None
                             st.error("Enrichment failed unexpectedly. Check application logs.")
 
+
+# Persistent enrichment-failure panel (survives reruns; explicit retry only)
+if st.session_state.get("intent_enrich_error") and not st.session_state.intent_enrichment_done:
+    st.error(
+        f"Enrichment failed: {st.session_state.intent_enrich_error}. "
+        "It will not retry automatically (each attempt spends credits)."
+    )
+    if st.button("\U0001f504 Retry Enrichment", key="intent_enrich_retry_btn"):
+        st.session_state.pop("intent_enrich_error", None)
+        st.session_state.intent_enrich_clicked = True
+        st.rerun()
 
 # =============================================================================
 # STEP 4: RESULTS & EXPORT
@@ -1804,6 +1849,10 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
                     st.session_state.intent_enriched_contacts = None
                     st.session_state.intent_enrich_clicked = False
                     st.session_state.intent_usage_logged = False
+                    # Re-enriched leads must re-stage, or "Load Most Recent"
+                    # restores the stale first result set (HADES-aoe)
+                    st.session_state.intent_leads_staged = False
+                    st.session_state.pop("intent_enrich_error", None)
                     st.rerun()
 
         with col2:

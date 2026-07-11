@@ -82,6 +82,21 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
+def clear_config_caches() -> None:
+    """Drop every process-lifetime cache derived from icp.yaml.
+
+    Must be called after anything rewrites the config file (Score Calibration
+    "Apply", HADES-zw1) — otherwise scoring keeps using the superseded values
+    until the next app reboot while the UI claims the update took effect.
+    Cascades to consumers that hold their own lru_cache over config values.
+    """
+    load_config.cache_clear()
+    import dedup  # local import — dedup imports utils at module level
+
+    dedup._get_fuzzy_threshold.cache_clear()
+    dedup.get_dedup_days_back.cache_clear()
+
+
 def get_hard_filters() -> dict:
     """Get hard ICP filters for API queries."""
     config = load_config()

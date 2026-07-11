@@ -211,6 +211,7 @@ def _reset_geo_search_state():
     st.session_state.geo_dedup_result = None
     st.session_state.geo_last_search_params = {}
     st.session_state.pop("geo_export_leads", None)
+    st.session_state.pop("geo_enrich_error", None)
     # Complete any in-flight pipeline run as cancelled
     _reset_run_id = st.session_state.get("geo_run_id")
     _reset_rl = st.session_state.get("geo_run_logger")
@@ -1021,6 +1022,13 @@ if has_operator:
             st.error("No search parameters found. Please preview the request first.")
             st.stop()
 
+        # Invalidate ALL downstream state from any previous search (HADES-aoe):
+        # without this, enrichment/staging flags survive and the Results section
+        # re-renders the OLD enriched contacts relabeled with the NEW search's
+        # metadata — the operator exports search A believing it's search B.
+        # (sp is captured above; the reset clears geo_pending_search_params.)
+        _reset_geo_search_state()
+
         search_zip_codes = sp["zip_codes"]
         search_states = sp["states"]
         search_location_type = sp["location_type"]
@@ -1652,7 +1660,11 @@ def _record_geo_title_preferences():
 # =============================================================================
 # ENRICHMENT STEP - After selection confirmed (both modes)
 # =============================================================================
-if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_contacts and not st.session_state.geo_enrichment_done:
+if (st.session_state.geo_selection_confirmed and st.session_state.geo_selected_contacts
+        and not st.session_state.geo_enrichment_done
+        # A failed attempt must NOT retry automatically on the next rerun —
+        # every retry spends credits (HADES-2xo). Explicit Retry button below.
+        and not st.session_state.get("geo_enrich_error")):
     st.markdown("---")
 
     if st.session_state.geo_mode == "manual":
@@ -1707,6 +1719,7 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                     st.rerun()
                 except PipelineError as e:
                     st.error(f"Enrichment failed: {e.user_message}")
+                    st.session_state.geo_enrich_error = e.user_message
                     _rl = st.session_state.get("geo_run_logger")
                     if _rl:
                         _rl.error(f"Contact Enrich failed: {e.user_message}")
@@ -1723,6 +1736,7 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                 except Exception:
                     logger.exception("Geography enrichment failed")
                     st.error("Enrichment failed unexpectedly. Check application logs.")
+                    st.session_state.geo_enrich_error = "Unexpected error — check application logs"
                     _rl = st.session_state.get("geo_run_logger")
                     if _rl:
                         _rl.error("Contact Enrich failed unexpectedly")
@@ -1738,6 +1752,16 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
     else:
         st.error("No valid person IDs found in selected contacts")
 
+
+# Persistent enrichment-failure panel (survives reruns; explicit retry only)
+if st.session_state.get("geo_enrich_error") and not st.session_state.geo_enrichment_done:
+    st.error(
+        f"Enrichment failed: {st.session_state.geo_enrich_error}. "
+        "It will not retry automatically (each attempt spends credits)."
+    )
+    if st.button("\U0001f504 Retry Enrichment", key="geo_enrich_retry_btn"):
+        st.session_state.pop("geo_enrich_error", None)
+        st.rerun()
 
 # =============================================================================
 # FINAL RESULTS - After enrichment complete (both modes)
@@ -2079,4 +2103,8 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             st.session_state.geo_company_enrich_done = False
             st.session_state.geo_enriched_contacts = None
             st.session_state.geo_usage_logged = False
+            # Re-enriched leads must re-stage, or "Load Most Recent"
+            # restores the stale first result set (HADES-aoe)
+            st.session_state.geo_leads_staged = False
+            st.session_state.pop("geo_enrich_error", None)
             st.rerun()
