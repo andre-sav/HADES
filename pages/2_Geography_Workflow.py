@@ -49,7 +49,7 @@ from utils import (
     get_default_radius,
     get_default_target_contacts,
 )
-from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, haversine_distance
+from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, haversine_distance, distance_between_zips
 from expand_search import (
     expand_search,
     build_contacts_by_company,
@@ -1775,7 +1775,6 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
     center_zip = st.session_state.geo_query_params.get("center_zip") or (
         st.session_state.geo_query_params.get("zip_codes", [""])[0]
     )
-    centroids = load_zip_centroids()
 
     for i, contact in enumerate(enriched_contacts):
         pid = str(contact.get("id") or contact.get("personId") or "")
@@ -1785,15 +1784,17 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         enriched_contacts[i] = merge_contact(search_data, contact)
         contact = enriched_contacts[i]
 
-        # Compute distance from contact ZIP to center ZIP
+        # Compute distance from contact ZIP to center ZIP. distance_between_zips
+        # normalizes messy ZoomInfo ZIPs (ZIP+4, int, 4-digit) before the
+        # centroid lookup — a raw miss used to silently leave distance unset,
+        # and scoring then fabricated a 15mi default (HADES-1hw).
         contact_zip = (
             contact.get("zipCode")
             or contact.get("companyZipCode", "")
         )
-        if contact_zip and center_zip and contact_zip in centroids and center_zip in centroids:
-            c_lat, c_lng, _ = centroids[contact_zip]
-            t_lat, t_lng, _ = centroids[center_zip]
-            contact["distance"] = round(haversine_distance(c_lat, c_lng, t_lat, t_lng), 2)
+        _dist = distance_between_zips(contact_zip, center_zip)
+        if _dist is not None:
+            contact["distance"] = _dist
 
     # Company Enrich — fills sicCode, industry, employeeCount (free if contact already enriched)
     # Only run once per search (avoid re-calling API on every Streamlit rerun)

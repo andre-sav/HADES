@@ -982,3 +982,42 @@ class TestMergeNumericCompanyKeys:
         company_scores = {"hashed-1": {"_score": 88}}
         merge_numeric_company_keys(company_scores, {"hashed-1": 100})
         assert list(company_scores.keys()) == ["hashed-1"]
+
+
+class TestEmployeeScoreDefensiveParsing:
+    """R-07 (HADES-tow): missing/messy employee counts silently scored 100
+    (the post-calibration TOP bucket) because the fallback constant 50 lands
+    in the 50-100 bucket. Unknown must be neutral; messy must parse."""
+
+    def test_missing_employee_count_is_neutral(self):
+        from scoring import calculate_geography_score
+        lead = {"firstName": "A", "companyName": "Acme"}
+        result = calculate_geography_score(lead)
+        assert result["employee_score"] == 50  # neutral, NOT the 100 top bucket
+
+    def test_zero_employees_is_neutral(self):
+        from scoring import calculate_geography_score
+        result = calculate_geography_score({"employees": 0})
+        assert result["employee_score"] == 50
+
+    def test_comma_string_parses(self):
+        from scoring import calculate_geography_score
+        # "1,200" employees → 501+ bucket → score 20 per calibrated config
+        result = calculate_geography_score({"employees": "1,200"})
+        assert result["employee_score"] == 20
+
+    def test_plus_string_parses(self):
+        from scoring import calculate_geography_score
+        # "500+" → 500 → 101-500 bucket → 80
+        result = calculate_geography_score({"employees": "500+"})
+        assert result["employee_score"] == 80
+
+    def test_int_in_top_bucket_still_scores_100(self):
+        from scoring import calculate_geography_score
+        result = calculate_geography_score({"employees": 75})
+        assert result["employee_score"] == 100
+
+    def test_unparseable_is_neutral(self):
+        from scoring import calculate_geography_score
+        result = calculate_geography_score({"employees": "unknown"})
+        assert result["employee_score"] == 50

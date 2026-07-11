@@ -470,3 +470,30 @@ class TestXSSEscaping:
             if re.search(r'st\.error\(f["\'].*\{e\}|st\.error\(str\(e\)', content):
                 violations.append(str(py_file))
         assert violations == [], f"Raw exceptions in st.error(): {violations}"
+
+
+class TestZipPrefixStateCorrections:
+    """R-05 (HADES-1b8): 201xx is Northern Virginia, not DC; single-ZIP
+    exceptions 06390 (Fishers Island NY) and 733xx (Austin TX)."""
+
+    def test_201_prefix_is_virginia(self):
+        # Ashburn, Manassas, Dulles — all VA
+        assert get_state_from_zip("20147") == "VA"
+        assert get_state_from_zip("20110") == "VA"
+        assert get_state_from_zip("20166") == "VA"
+
+    def test_dc_prefixes_still_dc(self):
+        assert get_state_from_zip("20001") == "DC"  # 200xx
+        assert get_state_from_zip("20500") == "DC"  # 205xx (White House)
+        assert get_state_from_zip("20220") == "DC"  # 202xx
+
+    def test_fishers_island_ny(self):
+        assert get_state_from_zip("06390") == "NY"
+        # rest of 063xx stays CT
+        assert get_state_from_zip("06320") == "CT"
+
+    def test_austin_733_is_texas(self):
+        assert get_state_from_zip("73301") == "TX"
+        # neighboring OK prefixes stay OK
+        assert get_state_from_zip("73101") == "OK"
+        assert get_state_from_zip("73401") == "OK"

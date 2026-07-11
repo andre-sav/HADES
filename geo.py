@@ -154,3 +154,30 @@ def get_state_counts_from_zips(zips: list[dict]) -> dict[str, int]:
         state_counts[state] = state_counts.get(state, 0) + 1
 
     return state_counts
+
+
+def distance_between_zips(zip_a, zip_b) -> float | None:
+    """Haversine distance in miles between two ZIP centroids, or None.
+
+    Normalizes both inputs first — ZoomInfo ZIPs arrive as ZIP+4
+    ("75201-1234"), ints, and 4-digit leading-zero-stripped forms, and a raw
+    value silently misses the 5-char centroid keys (HADES-1hw: the geography
+    page then fabricated a 15mi default for 40% of the composite score).
+
+    Returns None when either ZIP cannot be resolved so callers can surface
+    "distance unknown" instead of inventing one.
+    """
+    from utils import normalize_zip  # local import; utils pulls in streamlit
+
+    za = normalize_zip(str(zip_a)) if zip_a is not None else None
+    zb = normalize_zip(str(zip_b)) if zip_b is not None else None
+    if not za or not zb:
+        return None
+
+    centroids = load_zip_centroids()
+    if za not in centroids or zb not in centroids:
+        return None
+
+    a_lat, a_lng, _ = centroids[za]
+    b_lat, b_lng, _ = centroids[zb]
+    return round(haversine_distance(a_lat, a_lng, b_lat, b_lng), 2)

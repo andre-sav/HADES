@@ -58,8 +58,8 @@ class TestEnrichChainHealthy:
         assert len(deliverable) == 2
         names = {f"{l['firstName']} {l['lastName']}" for l in deliverable}
         assert names == {"Nancy Zappolo", "Anne Kenneally"}
-        # Healthy data must NOT collapse to the empty-lead baseline of 64.
-        assert any(l["_score"] != 64 for l in scored) or all(contact_has_core_data(l) for l in scored)
+        # Healthy data must NOT collapse to the empty-lead baseline (54 post-HADES-tow).
+        assert any(l["_score"] != 54 for l in scored) or all(contact_has_core_data(l) for l in scored)
         assert evaluate_enrichment_batch(enriched)["severity"] == "ok"
 
 
@@ -74,8 +74,11 @@ class TestEnrichChainAllFieldless:
 
         # No deliverable leads — the fail-loud P0 path (block + st.stop) fires.
         assert deliverable == []
-        # Without backfill, every lead collapses to the empty-lead baseline 64.
-        assert scored and all(l["_score"] == 64 for l in scored)
+        # Without backfill, every lead collapses to the empty-lead baseline.
+        # 54 = proximity 70*.40 + onsite 40*.25 + authority 40*.15 + employee 50*.20
+        # (was 64 before HADES-tow made unknown employee counts score neutral 50
+        # instead of the calibrated top bucket 100).
+        assert scored and all(l["_score"] == 54 for l in scored)
         assert evaluate_enrichment_batch(enriched)["severity"] == "critical"
 
     def test_fieldless_enrich_is_rescued_by_search_backfill(self, client):

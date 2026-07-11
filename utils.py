@@ -385,8 +385,18 @@ ZIP_PREFIX_TO_STATE = {
     **{str(i): "WI" for i in range(530, 550)},
     # Wyoming (820-831)
     **{str(i): "WY" for i in range(820, 832)},
-    # DC (200-205)
-    **{str(i): "DC" for i in range(200, 206)},
+    # DC (200, 202-205) — 201xx is Northern Virginia, NOT DC (HADES-1b8:
+    # the mislabel sent state=DC for Ashburn/Manassas searches → zero results)
+    "200": "DC",
+    "201": "VA",
+    **{str(i): "DC" for i in range(202, 206)},
+    # Single-prefix corrections (later keys override the ranges above)
+    "733": "TX",  # Austin TX (73301/73344), not Oklahoma
+}
+
+# Whole-prefix maps can't express single-ZIP exceptions:
+ZIP_EXCEPTIONS_TO_STATE = {
+    "06390": "NY",  # Fishers Island NY — the only non-CT ZIP in 063xx
 }
 
 
@@ -441,6 +451,8 @@ def get_state_from_zip(zip_code: str) -> str | None:
     cleaned = normalize_zip(zip_code)
     if not cleaned:
         return None
+    if cleaned in ZIP_EXCEPTIONS_TO_STATE:
+        return ZIP_EXCEPTIONS_TO_STATE[cleaned]
     prefix = cleaned[:3]
     return ZIP_PREFIX_TO_STATE.get(prefix)
 

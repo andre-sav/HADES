@@ -181,13 +181,14 @@ def calculate_geography_score(lead: dict, target_zip: str = None) -> dict:
     sic_code = lead.get("sicCode", "")
     onsite_score = get_onsite_likelihood_score(sic_code)
 
-    # Employee scale score
-    employees = lead.get("employees") or lead.get("employeeCount") or 50
-    try:
-        employee_count = int(employees)
-    except (ValueError, TypeError):
-        employee_count = 50
-    employee_score = get_employee_scale_score(employee_count)
+    # Employee scale score — parse defensively; unknown scores NEUTRAL.
+    # The old fallback constant 50 landed in the calibrated 50-100 bucket,
+    # silently giving missing/messy counts the TOP score of 100 (HADES-tow).
+    employee_count = _parse_employee_count(lead)
+    if employee_count is None:
+        employee_score = EMPLOYEE_UNKNOWN_SCORE
+    else:
+        employee_score = get_employee_scale_score(employee_count)
 
     # Authority score
     authority_score = _calculate_authority_score(lead)
@@ -342,6 +343,28 @@ def calculate_age_days(date_str: str | None) -> int:
 
     except (ValueError, TypeError):
         return 999  # Parse error treated as very old
+
+
+# Neutral employee component for leads whose headcount is unknown — must not
+# coincide with any calibrated bucket's top score (HADES-tow).
+EMPLOYEE_UNKNOWN_SCORE = 50
+
+
+def _parse_employee_count(lead: dict) -> int | None:
+    """Parse employee count defensively; None when genuinely unknown.
+
+    ZoomInfo delivers headcounts as ints, "1,200", "500+", or not at all.
+    0/blank/unparseable are treated as unknown rather than as a tiny company.
+    """
+    raw = lead.get("employees")
+    if raw in (None, "", 0, "0"):
+        raw = lead.get("employeeCount")
+    if raw in (None, "", 0, "0"):
+        return None
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    digits = re.sub(r"[^\d]", "", str(raw))
+    return int(digits) if digits else None
 
 
 def merge_numeric_company_keys(
