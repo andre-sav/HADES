@@ -108,6 +108,10 @@ if not intent_leads and not geo_leads:
                 ss_key = "intent_export_leads" if export_row["workflow_type"] == "intent" else "geo_export_leads"
                 st.session_state[ss_key] = export_row["leads"]
                 st.session_state["_loaded_staged_id"] = export_row["id"]
+                # Remember this batch's id: its own outcome rows (recorded when
+                # the automation generated it) must not dedup-block re-delivery
+                # of the very same batch (HADES-guz).
+                st.session_state["_loaded_staged_batch_id"] = export_row.get("batch_id")
                 # Restore operator if available
                 if export_row.get("operator_id"):
                     op = db.get_operator(export_row["operator_id"])
@@ -278,6 +282,7 @@ include_exported = st.checkbox(
 
 dedup_result = apply_export_dedup(
     leads_to_export, db, days_back=_dedup_days, include_exported=include_exported,
+    exclude_batch_id=st.session_state.get("_loaded_staged_batch_id"),
 )
 
 if dedup_result["filtered_count"] > 0:

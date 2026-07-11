@@ -54,7 +54,7 @@ from scoring import (
     merge_numeric_company_keys,
 )
 from dedup import dedupe_leads
-from export import merge_contact, merge_company_data
+from export import merge_contact, merge_company_data, contact_has_core_data
 from cost_tracker import CostTracker
 from expand_search import build_contacts_by_company
 from db._title_prefs import normalize_title
@@ -1638,6 +1638,19 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
         lead["_priority"] = get_priority_label(score)
         lead["_priority_action"] = get_priority_action(score)
+
+    # C1 fail-loud guard (incident 2026-06-15) — mirror of the Geography path:
+    # enrichment can return matched-but-fieldless records when ZoomInfo
+    # credits/entitlement lapse. Surface the problem instead of rendering an
+    # authoritative-looking table of blanks (HADES-wr2).
+    _empty_count = sum(1 for lead in scored if not contact_has_core_data(lead))
+    if _empty_count:
+        st.warning(
+            f"⚠️ {_empty_count} enriched contact(s) came back without usable "
+            "contact data (possible ZoomInfo credit/entitlement issue) and were "
+            "excluded from results and export."
+        )
+        scored = [lead for lead in scored if contact_has_core_data(lead)]
 
     st.session_state.intent_results = scored
 

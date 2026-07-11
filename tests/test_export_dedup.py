@@ -263,7 +263,7 @@ class TestApplyExportDedup:
 
         apply_export_dedup([], mock_db, days_back=90)
 
-        mock_db.get_exported_company_ids.assert_called_once_with(days_back=90)
+        mock_db.get_exported_company_ids.assert_called_once_with(days_back=90, exclude_batch_id=None)
 
     def test_contacts_without_company_id(self):
         """Contacts with no companyId should use name fallback."""
@@ -313,3 +313,14 @@ class TestNumericCompanyIdOverride:
         }
         new, filtered = filter_previously_exported(contacts, lookup)
         assert len(filtered) == 1
+
+
+class TestExcludeBatchIdPassThrough:
+    """HADES-guz: apply_export_dedup forwards exclude_batch_id to the DB layer."""
+
+    def test_pass_through(self):
+        mock_db = MagicMock()
+        mock_db.get_exported_company_ids.return_value = {}
+        apply_export_dedup([], mock_db, exclude_batch_id="B-123")
+        _, kwargs = mock_db.get_exported_company_ids.call_args
+        assert kwargs.get("exclude_batch_id") == "B-123"

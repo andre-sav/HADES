@@ -12,7 +12,8 @@ from dedup import normalize_company_name
 logger = logging.getLogger(__name__)
 
 
-def get_previously_exported(db, days_back: int = 365) -> dict:
+def get_previously_exported(db, days_back: int = 365,
+                            exclude_batch_id: str | None = None) -> dict:
     """Query DB for previously exported companies.
 
     Returns:
@@ -21,7 +22,8 @@ def get_previously_exported(db, days_back: int = 365) -> dict:
             "by_name": {normalized_name: {company_name, exported_at, workflow_type}},
         }
     """
-    exported = db.get_exported_company_ids(days_back=days_back)
+    exported = db.get_exported_company_ids(days_back=days_back,
+                                           exclude_batch_id=exclude_batch_id)
 
     by_id = exported  # Already keyed by company_id
     by_name = {}
@@ -87,6 +89,7 @@ def apply_export_dedup(
     db,
     days_back: int = 365,
     include_exported: bool = False,
+    exclude_batch_id: str | None = None,
 ) -> dict:
     """Convenience wrapper for workflow pages.
 
@@ -100,7 +103,8 @@ def apply_export_dedup(
         }
     """
     total_before = len(contacts)
-    lookup = get_previously_exported(db, days_back=days_back)
+    lookup = get_previously_exported(db, days_back=days_back,
+                                     exclude_batch_id=exclude_batch_id)
 
     new_contacts, filtered_contacts = filter_previously_exported(contacts, lookup)
 

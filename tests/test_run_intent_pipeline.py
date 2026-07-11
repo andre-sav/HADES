@@ -740,3 +740,145 @@ class TestHashedNumericIdBridge:
 
         assert result["summary"]["dedup_filtered"] == 1
         assert result["summary"]["companies_selected"] == 1  # only c2
+
+
+class TestFailLoudAutomation:
+    """R-06/R-13 (HADES-wr2/HADES-guz): the headless pipeline must fail loud.
+
+    Blank-lead guard (C1), resolution-failure honesty, budget-skip alerting,
+    email-delivery flags.
+    """
+
+    def _standard_mocks(self, MockClient, MockDB, MockCostTracker, target=2):
+        config = _make_config(target_companies=target)
+        creds = _make_creds()
+        client = MockClient.return_value
+        client.search_intent_all_pages.return_value = [
+            _make_intent_lead("c1", "Acme Corp"),
+            _make_intent_lead("c2", "Beta Inc"),
+        ]
+        client.search_contacts_all_pages.return_value = [
+            _make_contact("p1", "100", "Acme Corp"),
+            _make_contact("p2", "200", "Beta Inc"),
+        ]
+        db = MockDB.return_value
+        db.has_running_pipeline.return_value = False
+        db.get_company_ids_bulk.return_value = {}
+        db.get_exported_company_ids.return_value = {}
+        db.execute.return_value = [(1,)]
+        budget = MagicMock()
+        budget.alert_level = None
+        MockCostTracker.return_value.check_budget.return_value = budget
+        return config, creds, client, db
+
+    @patch("scripts.run_intent_pipeline.send_alert")
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_fieldless_enriched_contacts_dropped(self, MockClient, MockDB, MockCostTracker, mock_alert):
+        """A merged-but-still-fieldless record must not be scored/exported."""
+        config, creds, client, db = self._standard_mocks(MockClient, MockDB, MockCostTracker)
+        client.enrich_contacts_batch.side_effect = [
+            [
+                {"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
+                {"id": "p_c2", "company": {"id": 200, "name": "Beta Inc"}, "companyId": 200},
+            ],
+            # one real contact + one fieldless record whose id matches no
+            # search-phase contact (so the C2 merge cannot backfill it)
+            [_make_contact("p1", "100", "Acme Corp"),
+             {"id": "p_stranger", "personId": "p_stranger"}],
+        ]
+        result = run_pipeline(config, creds)
+        assert result["success"] is True
+        assert result["summary"]["contacts_exported"] == 1
+        assert result["summary"]["fieldless_dropped"] == 1
+
+    @patch("scripts.run_intent_pipeline.send_alert")
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_all_fieldless_enrichment_fails_run(self, MockClient, MockDB, MockCostTracker, mock_alert):
+        """The 2026-06-15 shape: every enriched record fieldless → error run + alert, no export."""
+        config, creds, client, db = self._standard_mocks(MockClient, MockDB, MockCostTracker)
+        client.enrich_contacts_batch.side_effect = [
+            [
+                {"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
+                {"id": "p_c2", "company": {"id": 200, "name": "Beta Inc"}, "companyId": 200},
+            ],
+            [{"id": "p_ghost1"}, {"id": "p_ghost2"}],
+        ]
+        result = run_pipeline(config, creds)
+        assert result["success"] is False
+        # run completed with error status
+        status_arg = db.complete_pipeline_run.call_args[0][1]
+        assert status_arg == "error"
+        # nothing exported, nothing recorded
+        db.record_lead_outcomes_batch.assert_not_called()
+        # operator alerted
+        assert mock_alert.called
+
+    @patch("scripts.run_intent_pipeline.send_alert")
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_resolution_failure_is_error_run(self, MockClient, MockDB, MockCostTracker, mock_alert):
+        """Company-ID resolution API failure must not report 'success'."""
+        config, creds, client, db = self._standard_mocks(MockClient, MockDB, MockCostTracker)
+        client.enrich_contacts_batch.side_effect = Exception("429 rate limited")
+        result = run_pipeline(config, creds)
+        assert result["success"] is False
+        status_arg = db.complete_pipeline_run.call_args[0][1]
+        assert status_arg == "error"
+
+    @patch("scripts.run_intent_pipeline.send_alert")
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_budget_exceeded_sends_alert(self, MockClient, MockDB, MockCostTracker, mock_alert):
+        """The silent green budget-skip must at least attempt an alert."""
+        config = _make_config()
+        creds = _make_creds()
+        MockDB.return_value.has_running_pipeline.return_value = False
+        budget = MagicMock()
+        budget.alert_level = "exceeded"
+        budget.alert_message = "Weekly cap reached"
+        MockCostTracker.return_value.check_budget.return_value = budget
+        result = run_pipeline(config, creds)
+        assert result["summary"].get("budget_exceeded") is True
+        assert mock_alert.called
+
+    @patch("scripts.run_intent_pipeline.send_email")
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_email_failure_sets_flag(self, MockClient, MockDB, MockCostTracker, mock_send):
+        """Email delivery failure must be visible in the summary (drives a red run)."""
+        config, creds, client, db = self._standard_mocks(MockClient, MockDB, MockCostTracker)
+        creds = _make_creds(SMTP_USER="u", SMTP_PASSWORD="p", EMAIL_RECIPIENTS="a@b.c")
+        client.enrich_contacts_batch.side_effect = [
+            [{"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
+             {"id": "p_c2", "company": {"id": 200, "name": "Beta Inc"}, "companyId": 200}],
+            [_make_contact("p1", "100", "Acme Corp"),
+             _make_contact("p2", "200", "Beta Inc")],
+        ]
+        mock_send.side_effect = Exception("SMTP down")
+        result = run_pipeline(config, creds)
+        assert result["success"] is True  # leads ARE staged
+        assert result["summary"].get("email_failed") is True
+
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_email_skipped_no_smtp_sets_flag(self, MockClient, MockDB, MockCostTracker):
+        """SMTP unconfigured on an email-flagged run must be visible in the summary."""
+        config, creds, client, db = self._standard_mocks(MockClient, MockDB, MockCostTracker)
+        client.enrich_contacts_batch.side_effect = [
+            [{"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
+             {"id": "p_c2", "company": {"id": 200, "name": "Beta Inc"}, "companyId": 200}],
+            [_make_contact("p1", "100", "Acme Corp"),
+             _make_contact("p2", "200", "Beta Inc")],
+        ]
+        creds = _make_creds(SMTP_USER=None, SMTP_PASSWORD=None, EMAIL_RECIPIENTS=None)
+        result = run_pipeline(config, creds)
+        assert result["success"] is True
+        assert result["summary"].get("email_skipped_no_smtp") is True

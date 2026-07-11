@@ -10,8 +10,12 @@ returns fieldless records once credits are exhausted).
 Run from a scheduled GitHub Actions workflow:
     python scripts/check_zoominfo_health.py
 
-Always exits 0 (the email IS the signal; a non-zero exit would chain a second
-generic failure alert on top). Prints the verdict to stdout for the run log.
+Exit code: 0 when healthy, or when an alert email was actually delivered (the
+email is the signal). Exits 1 when the verdict is critical/unknown AND the
+alert channel could not deliver — otherwise a critical verdict with SMTP
+unconfigured vanishes into a green run and nobody is ever told (HADES-2oe).
+The red run makes GitHub's own workflow-failure notification the fallback
+channel. Prints the verdict to stdout for the run log.
 """
 
 from __future__ import annotations
@@ -70,7 +74,13 @@ def main() -> int:
             )
         if not verdict.get("breaches"):
             body_lines.append("  (none parseable — see message above)")
-        send_alert(f"[HADES] ZoomInfo health {verdict['severity'].upper()}", "\n".join(body_lines))
+        sent = send_alert(f"[HADES] ZoomInfo health {verdict['severity'].upper()}", "\n".join(body_lines))
+        if not sent and verdict["severity"] in ("critical", "unknown"):
+            # No human-visible signal exists: fail the run so GitHub's own
+            # failure notification becomes the fallback channel (HADES-2oe).
+            logger.error("Alert email undeliverable for %s verdict — failing the "
+                         "run so the condition is visible.", verdict["severity"])
+            return 1
 
     return 0
 

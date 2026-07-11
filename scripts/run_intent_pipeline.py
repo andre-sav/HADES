@@ -54,7 +54,13 @@ from scoring import (
     merge_numeric_company_keys,
 )
 from dedup import dedupe_leads, get_dedup_days_back
-from export import export_leads_to_csv, merge_contact, merge_company_data
+from export import export_leads_to_csv, merge_contact, merge_company_data, contact_has_core_data
+from monitoring import evaluate_enrichment_batch
+
+try:  # package import (tests) vs script execution (cron adds scripts/ to path)
+    from scripts.notify_failure import send_alert
+except ImportError:  # pragma: no cover
+    from notify_failure import send_alert
 from export_dedup import get_previously_exported, filter_previously_exported
 from expand_search import build_contacts_by_company
 from cost_tracker import CostTracker
@@ -210,6 +216,16 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             summary["budget_exceeded"] = True
             summary.update(run_logger.to_summary())
             db.complete_pipeline_run(run_id, "skipped", summary, None, 0, 0, msg)
+            # A silent green skip means reps stop receiving leads with no
+            # signal until someone opens the dashboard (HADES-guz).
+            try:
+                send_alert(
+                    "[HADES] Intent pipeline SKIPPED — weekly budget exceeded",
+                    f"{msg}\n\nNo leads will be delivered until the weekly "
+                    "window resets or the budget is raised in config/icp.yaml.",
+                )
+            except Exception:
+                logger.exception("Budget-skip alert failed")
             return {"success": True, "csv_content": None, "csv_filename": None,
                     "batch_id": None, "summary": summary, "error": msg}
 
@@ -283,6 +299,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         company_ids = list(selected_companies.keys())
         cached = db.get_company_ids_bulk(company_ids)
         numeric_map = {}  # hashed_id → numeric_id
+        resolution_error = None  # set if the resolution API call itself fails
 
         for hid in company_ids:
             if hid in cached:
@@ -322,9 +339,26 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
                             numeric_map[hid] = int(numeric_id)
                             db.save_company_id(hid, int(numeric_id), company_name)
                 except Exception as e:
+                    resolution_error = str(e)
                     logger.warning("Batch company ID resolution failed: %s", e)
+                    run_logger.error(f"Company ID resolution failed: {e}")
 
         if not numeric_map:
+            if resolution_error:
+                # The enrichment API blew up (429/auth/credit exhaustion — the
+                # incident shape). Reporting "success" here made daily lead
+                # delivery stop while every dashboard stayed green (HADES-guz).
+                msg = f"Company ID resolution failed: {resolution_error}"
+                logger.error(msg)
+                summary.update(run_logger.to_summary())
+                db.complete_pipeline_run(run_id, "error", summary, None, 0, 0, msg)
+                try:
+                    send_alert("[HADES] Intent pipeline FAILED — company ID resolution", msg)
+                except Exception:
+                    logger.exception("Resolution-failure alert failed")
+                return {"success": False, "csv_content": None, "csv_filename": None,
+                        "batch_id": None, "summary": summary, "error": msg}
+            # Legitimately nothing to resolve (e.g. no recommended contacts).
             logger.warning("Could not resolve any company IDs")
             summary.update(run_logger.to_summary())
             db.complete_pipeline_run(run_id, "success", summary, None, 0, 0, None)
@@ -401,6 +435,38 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             search_data = search_by_pid.get(pid, {})
             enriched[i] = merge_contact(search_data, contact)
 
+        # C1 guard (HADES-wr2): drop merged-but-still-fieldless records instead
+        # of scoring/exporting blank leads — the 2026-06-15 incident class was
+        # previously guarded only on the Geography UI path. Credits are still
+        # counted per enrich response (each match consumed a credit).
+        _enriched_total = len(enriched)
+        batch_verdict = evaluate_enrichment_batch(enriched)
+        if batch_verdict["severity"] != "ok":
+            logger.warning(batch_verdict["message"])
+            run_logger.warn(batch_verdict["message"])
+            try:
+                send_alert(
+                    f"[HADES] Intent enrichment {batch_verdict['severity'].upper()}",
+                    batch_verdict["message"],
+                )
+            except Exception:
+                logger.exception("Enrichment-health alert failed")
+        enriched = [c for c in enriched if contact_has_core_data(c)]
+        dropped = _enriched_total - len(enriched)
+        if dropped:
+            summary["fieldless_dropped"] = dropped
+            run_logger.warn(f"Contact Enrich: {dropped} fieldless record(s) dropped")
+        if not enriched:
+            msg = ("All enriched contacts came back fieldless — likely ZoomInfo "
+                   "credit/entitlement exhaustion. Nothing exported.")
+            summary.update(run_logger.to_summary())
+            db.complete_pipeline_run(
+                run_id, "error", summary, None,
+                summary.get("credits_used", 0), 0, msg,
+            )
+            return {"success": False, "csv_content": None, "csv_filename": None,
+                    "batch_id": None, "summary": summary, "error": msg}
+
         # Company Enrich — fills sicCode, industry, employeeCount
         company_ids = list({str(c.get("companyId") or "") for c in enriched} - {""})
         if company_ids:
@@ -414,11 +480,12 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
                 logger.warning("Company Enrich failed (non-fatal): %s", e, exc_info=True)
                 run_logger.warn(f"Company Enrich failed (non-fatal): {e}")
 
-        # Log credit usage
+        # Log credit usage — credits per enrich response (every match consumed
+        # a credit, fieldless or not); leads = validated records only.
         cost_tracker.log_usage(
             workflow_type="intent",
             query_params={"topics": config["topics"], "source": "automation"},
-            credits_used=len(enriched),
+            credits_used=_enriched_total,
             leads_returned=len(enriched),
         )
 
@@ -497,15 +564,31 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             "error": None,
         }
 
-        # Send email if SMTP credentials are available and not suppressed
-        if send_email_flag and _has_smtp_creds(creds):
-            try:
-                date_str = datetime.now().strftime("%Y-%m-%d")
-                msg = build_email(result, creds, date_str)
-                send_email(msg, creds)
-                logger.info("Email sent to %s", creds.get("EMAIL_RECIPIENTS", ""))
-            except Exception:
-                logger.warning("Email delivery failed — leads are saved", exc_info=True)
+        # Send email if SMTP credentials are available and not suppressed.
+        # Delivery outcome is recorded in the summary so main() can turn a
+        # missed delivery into a red run instead of a silent green (HADES-guz).
+        if send_email_flag:
+            if _has_smtp_creds(creds):
+                try:
+                    date_str = datetime.now().strftime("%Y-%m-%d")
+                    msg = build_email(result, creds, date_str)
+                    send_email(msg, creds)
+                    logger.info("Email sent to %s", creds.get("EMAIL_RECIPIENTS", ""))
+                    summary["email_sent"] = True
+                except Exception:
+                    summary["email_failed"] = True
+                    logger.error(
+                        "Email delivery FAILED — leads are staged; pull the batch "
+                        "from the CSV Export page (Load Most Recent)",
+                        exc_info=True,
+                    )
+            else:
+                summary["email_skipped_no_smtp"] = True
+                logger.error(
+                    "SMTP not configured — email skipped. Leads are staged only; "
+                    "no rep was notified. Configure SMTP_USER/SMTP_PASSWORD/"
+                    "EMAIL_RECIPIENTS secrets."
+                )
 
         return result
     except PipelineError as e:
@@ -720,6 +803,15 @@ def main():
     if result.get("csv_content"):
         logger.info("CSV ready: %s (%d bytes)",
                     result["csv_filename"], len(result["csv_content"]))
+
+    # A run whose leads never reached a rep is not a green run: exit non-zero
+    # so the scheduled workflow goes red and GitHub's own failure notification
+    # fires even when SMTP (the primary channel) is down/unconfigured (HADES-guz).
+    s = result.get("summary", {})
+    if s.get("email_failed") or s.get("email_skipped_no_smtp"):
+        logger.error("Leads staged but NOT delivered by email — failing the run "
+                     "so the missed delivery is visible.")
+        sys.exit(2)
 
 
 def _has_smtp_creds(creds: dict) -> bool:

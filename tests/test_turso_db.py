@@ -1094,3 +1094,39 @@ class TestMigrations:
         all_queries = [str(c) for c in mock_conn.execute.call_args_list]
         alter_calls = [q for q in all_queries if "ALTER" in q]
         assert len(alter_calls) == 0
+
+
+class TestExcludeBatchId:
+    """HADES-guz: a loaded staged batch must not be blocked by its own outcome rows."""
+
+    def _db(self):
+        from turso_db import TursoDatabase
+        from unittest.mock import MagicMock, patch
+        with patch.object(TursoDatabase, "__init__", lambda self: None):
+            db = TursoDatabase()
+        db._conn = MagicMock()
+        return db
+
+    def test_exclude_batch_id_added_to_query(self):
+        from unittest.mock import MagicMock
+        db = self._db()
+        captured = {}
+        def fake_execute(query, params=()):
+            captured["query"] = query
+            captured["params"] = params
+            return []
+        db.execute = fake_execute
+        db.get_exported_company_ids(days_back=365, exclude_batch_id="HADES-20260711-001")
+        assert "batch_id != ?" in captured["query"]
+        assert "HADES-20260711-001" in captured["params"]
+
+    def test_no_exclude_means_no_batch_condition(self):
+        db = self._db()
+        captured = {}
+        def fake_execute(query, params=()):
+            captured["query"] = query
+            captured["params"] = params
+            return []
+        db.execute = fake_execute
+        db.get_exported_company_ids(days_back=365)
+        assert "batch_id" not in captured["query"]
