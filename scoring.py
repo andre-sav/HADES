@@ -344,6 +344,26 @@ def calculate_age_days(date_str: str | None) -> int:
         return 999  # Parse error treated as very old
 
 
+def merge_numeric_company_keys(
+    company_scores: dict[str, dict],
+    numeric_map: dict,
+) -> dict[str, dict]:
+    """Alias hashed-keyed company data under resolved NUMERIC companyIds.
+
+    Intent search returns hashed company IDs, but Contact Search runs on the
+    resolved numeric IDs — so contacts reaching score_intent_contacts carry
+    numeric companyIds that a hashed-keyed company_scores dict can never match
+    (HADES-hec: the 60%-weighted company component silently defaulted to 50
+    for every contact). Returns a new dict with both key forms present.
+    """
+    merged = dict(company_scores)
+    for hid, nid in numeric_map.items():
+        data = company_scores.get(str(hid))
+        if data is not None:
+            merged[str(nid)] = data
+    return merged
+
+
 def score_intent_contacts(
     contacts: list[dict],
     company_scores: dict[str, dict],

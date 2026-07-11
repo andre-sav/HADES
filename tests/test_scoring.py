@@ -953,3 +953,32 @@ class TestStaleSummary:
         guidance = build_stale_guidance(summary, ["Vending Machines", "Breakroom Solutions"], ["High", "Medium"])
         assert any("re-check" in g for g in guidance)
         assert any("barely stale" in g for g in guidance)
+
+
+class TestMergeNumericCompanyKeys:
+    """R-02 (HADES-hec): company_scores is keyed by hashed intent IDs while
+    contacts carry resolved numeric companyIds — the lookup must work by both."""
+
+    def test_adds_numeric_aliases(self):
+        from scoring import merge_numeric_company_keys
+        company_scores = {"hashed-1": {"_score": 88}, "hashed-2": {"_score": 72}}
+        numeric_map = {"hashed-1": 100, "hashed-2": 200}
+        merged = merge_numeric_company_keys(company_scores, numeric_map)
+        assert merged["100"] is company_scores["hashed-1"]
+        assert merged["200"] is company_scores["hashed-2"]
+        # hashed keys retained
+        assert merged["hashed-1"]["_score"] == 88
+
+    def test_unresolved_hashed_ids_ignored(self):
+        from scoring import merge_numeric_company_keys
+        company_scores = {"hashed-1": {"_score": 88}}
+        numeric_map = {"hashed-1": 100, "hashed-gone": 300}  # not in scores
+        merged = merge_numeric_company_keys(company_scores, numeric_map)
+        assert "100" in merged
+        assert "300" not in merged
+
+    def test_original_dict_not_mutated(self):
+        from scoring import merge_numeric_company_keys
+        company_scores = {"hashed-1": {"_score": 88}}
+        merge_numeric_company_keys(company_scores, {"hashed-1": 100})
+        assert list(company_scores.keys()) == ["hashed-1"]

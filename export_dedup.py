@@ -54,7 +54,11 @@ def filter_previously_exported(
     filtered = []
 
     for contact in contacts:
-        cid = str(contact.get("companyId", "")) if contact.get("companyId") else ""
+        # _numeric_company_id (stamped by the intent pipeline from the
+        # hashed→numeric mapping cache) takes precedence: lead_outcomes stores
+        # numeric IDs, so a hashed companyId can never match by_id (HADES-oq9).
+        raw_cid = contact.get("_numeric_company_id") or contact.get("companyId")
+        cid = str(raw_cid) if raw_cid else ""
         company_name = contact.get("companyName", "") or ""
 
         match = None

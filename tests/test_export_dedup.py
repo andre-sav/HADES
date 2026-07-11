@@ -280,3 +280,36 @@ class TestApplyExportDedup:
 
         assert result["filtered_count"] == 1
         assert len(result["contacts"]) == 0
+
+
+class TestNumericCompanyIdOverride:
+    """R-15 (HADES-oq9): intent leads carry HASHED companyIds while lead_outcomes
+    stores NUMERIC ones — the pipeline translates via the id-mapping cache and
+    stamps _numeric_company_id, which must take precedence for ID matching."""
+
+    def test_numeric_override_matches_by_id(self):
+        """Hashed companyId misses, but the translated numeric id must match."""
+        contacts = [{
+            "companyName": "Acme Corp",
+            "companyId": "hashed-abc123",
+            "_numeric_company_id": "100",
+        }]
+        lookup = {
+            "by_id": {"100": {"company_name": "Totally Different Stored Name",
+                              "exported_at": "2026-06-01", "workflow_type": "intent"}},
+            "by_name": {},  # name fallback intentionally cannot rescue this
+        }
+        new, filtered = filter_previously_exported(contacts, lookup)
+        assert len(filtered) == 1
+        assert filtered[0]["_previously_exported"] is True
+
+    def test_without_override_falls_back_to_company_id(self):
+        """No _numeric_company_id → existing companyId behavior unchanged."""
+        contacts = [{"companyName": "Beta Inc", "companyId": "123"}]
+        lookup = {
+            "by_id": {"123": {"company_name": "Beta Inc",
+                              "exported_at": "2026-06-01", "workflow_type": "geography"}},
+            "by_name": {},
+        }
+        new, filtered = filter_previously_exported(contacts, lookup)
+        assert len(filtered) == 1

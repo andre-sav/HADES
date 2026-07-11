@@ -46,7 +46,13 @@ from zoominfo_client import (
     ContactQueryParams,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
-from scoring import score_intent_leads, score_intent_contacts, get_priority_label, compute_stale_summary
+from scoring import (
+    score_intent_leads,
+    score_intent_contacts,
+    get_priority_label,
+    compute_stale_summary,
+    merge_numeric_company_keys,
+)
 from dedup import dedupe_leads, get_dedup_days_back
 from export import export_leads_to_csv, merge_contact, merge_company_data
 from export_dedup import get_previously_exported, filter_previously_exported
@@ -55,6 +61,24 @@ from cost_tracker import CostTracker
 from utils import get_call_center_agents, get_sic_codes, get_employee_minimum, get_default_phone_fields
 
 logger = logging.getLogger("intent_pipeline")
+
+
+def _stamp_numeric_company_ids(leads: list[dict], db) -> None:
+    """Stamp _numeric_company_id from the persistent hashed→numeric cache.
+
+    Intent leads carry HASHED companyIds while lead_outcomes stores NUMERIC
+    ones, so cross-session dedup's ID branch could never match (HADES-oq9).
+    Any previously exported company was necessarily resolved before export,
+    so its mapping is in the cache — exactly the rows dedup needs to catch.
+    """
+    hashed = [str(lead["companyId"]) for lead in leads if lead.get("companyId")]
+    if not hashed:
+        return
+    cached = db.get_company_ids_bulk(hashed)
+    for lead in leads:
+        hid = str(lead.get("companyId", ""))
+        if hid in cached:
+            lead["_numeric_company_id"] = str(cached[hid]["numeric_id"])
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +149,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         # Cross-session dedup
         if db is not None:
             dedup_days = config.get("dedup_days_back", get_dedup_days_back())
+            _stamp_numeric_company_ids(scored_leads, db)
             lookup = get_previously_exported(db, days_back=dedup_days)
             new_leads, filtered_leads = filter_previously_exported(scored_leads, lookup)
             summary["dedup_filtered"] = len(filtered_leads)
@@ -220,8 +245,11 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         if not scored_leads:
             summary["stale_summary"] = compute_stale_summary(intent_results)
 
-        # Cross-session dedup: filter previously exported companies
+        # Cross-session dedup: filter previously exported companies.
+        # Hashed intent IDs are translated to numeric via the mapping cache
+        # first — lead_outcomes stores numeric IDs (HADES-oq9).
         dedup_days = config.get("dedup_days_back", get_dedup_days_back())
+        _stamp_numeric_company_ids(scored_leads, db)
         lookup = get_previously_exported(db, days_back=dedup_days)
         new_leads, filtered_leads = filter_previously_exported(scored_leads, lookup)
         summary["dedup_filtered"] = len(filtered_leads)
@@ -302,6 +330,12 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             db.complete_pipeline_run(run_id, "success", summary, None, 0, 0, None)
             return {"success": True, "csv_content": None, "csv_filename": None,
                     "batch_id": None, "summary": summary, "error": "No company IDs resolved"}
+
+        # Contacts from Step 4 carry NUMERIC companyIds — alias the hashed-keyed
+        # company data under the resolved numeric IDs so scoring can find it
+        # (HADES-hec: the lookup missed 100% and defaulted the 60%-weighted
+        # company component to 50 for every contact).
+        company_scores = merge_numeric_company_keys(company_scores, numeric_map)
 
         # ─── Step 4: Contact search + auto-select ───
         logger.info("Step 4: Contact search for %d companies", len(numeric_map))

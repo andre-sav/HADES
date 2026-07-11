@@ -51,6 +51,7 @@ from scoring import (
     calculate_age_days,
     compute_stale_summary,
     build_stale_guidance,
+    merge_numeric_company_keys,
 )
 from dedup import dedupe_leads
 from export import merge_contact, merge_company_data
@@ -1137,6 +1138,9 @@ if (
 
                 st.write(f"Resolved {len(numeric_map)}/{len(company_ids)} company IDs.")
                 logger.info("Company ID resolution complete: %d/%d resolved", len(numeric_map), len(company_ids))
+                # Persist for scoring: enriched contacts carry NUMERIC companyIds,
+                # so company_scores must be aliased by numeric ID too (HADES-hec).
+                st.session_state.intent_numeric_map = numeric_map
 
                 if not numeric_map:
                     search_status.update(label="Could not resolve any company IDs", state="complete")
@@ -1613,6 +1617,12 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
     company_scores = {}
     for cid, company_data in st.session_state.intent_selected_companies.items():
         company_scores[str(cid)] = company_data
+
+    # Alias by resolved numeric ID — enriched contacts carry numeric companyIds,
+    # so the hashed-keyed dict alone can never match (HADES-hec).
+    company_scores = merge_numeric_company_keys(
+        company_scores, st.session_state.get("intent_numeric_map") or {}
+    )
 
     # Score contacts
     scored = score_intent_contacts(enriched_contacts, company_scores)

@@ -650,3 +650,93 @@ class TestPipelineRunLogging:
         assert result["success"] is False
         assert result["error"] == "Pipeline already running"
         db.start_pipeline_run.assert_not_called()
+
+
+class TestHashedNumericIdBridge:
+    """R-02/R-15 (HADES-hec/HADES-oq9): the hashed↔numeric companyId split.
+
+    Intent search returns hashed IDs; contact search + lead_outcomes use
+    numeric IDs. Scoring and cross-session dedup must bridge the two spaces.
+    """
+
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_contact_scoring_uses_company_intent_score(self, MockClient, MockDB, MockCostTracker):
+        """The 60%-weighted company component must come from the intent lead,
+        not silently default to 50 because the numeric companyId missed the
+        hashed-keyed company_scores dict."""
+        from scoring import score_intent_leads
+
+        config = _make_config(target_companies=1)
+        creds = _make_creds()
+
+        intent_lead = _make_intent_lead("c1", "Acme Corp", strength="High")
+        expected_company_score = score_intent_leads([intent_lead])[0]["_score"]
+        assert expected_company_score != 50  # oracle must be distinguishable
+
+        client = MockClient.return_value
+        client.search_intent_all_pages.return_value = [_make_intent_lead("c1", "Acme Corp", strength="High")]
+        client.search_contacts_all_pages.return_value = [_make_contact("p1", "100", "Acme Corp")]
+        client.enrich_contacts_batch.side_effect = [
+            [{"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100}],
+            [_make_contact("p1", "100", "Acme Corp")],
+        ]
+
+        db = MockDB.return_value
+        db.has_running_pipeline.return_value = False
+        db.get_company_ids_bulk.return_value = {}
+        db.get_exported_company_ids.return_value = {}
+        db.execute.return_value = [(1,)]
+
+        budget = MagicMock()
+        budget.alert_level = None
+        MockCostTracker.return_value.check_budget.return_value = budget
+
+        result = run_pipeline(config, creds)
+        assert result["success"] is True
+
+        # The lead dict handed to build_outcome_row is the scored contact —
+        # its _company_intent_score must be the intent lead's score, not the
+        # default-50 that a hashed-key miss produces.
+        lead_arg = db.build_outcome_row.call_args_list[0][0][0]
+        assert lead_arg["_company_intent_score"] == expected_company_score
+
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_cross_session_dedup_matches_numeric_history(self, MockClient, MockDB, MockCostTracker):
+        """A company exported last month (numeric id in lead_outcomes) must be
+        filtered even though the incoming intent lead carries a hashed id and
+        the stored company name differs (name fallback cannot rescue)."""
+        config = _make_config(target_companies=5)
+        creds = _make_creds()
+
+        budget = MagicMock()
+        budget.alert_level = None
+        MockCostTracker.return_value.check_budget.return_value = budget
+
+        client = MockClient.return_value
+        client.search_intent_all_pages.return_value = [
+            _make_intent_lead("c1", "Acme Corp"),
+            _make_intent_lead("c2", "Beta Inc"),
+        ]
+        client.search_contacts_all_pages.return_value = []
+        client.enrich_contacts_batch.return_value = []
+
+        db = MockDB.return_value
+        db.has_running_pipeline.return_value = False
+        # History stores the NUMERIC id, under a name that does not normalize
+        # to the incoming "Acme Corp" — only the id bridge can match.
+        db.get_exported_company_ids.return_value = {
+            "100": {"company_name": "Acme Holdings International Group",
+                    "exported_at": "2026-06-01", "workflow_type": "intent"},
+        }
+        # The persistent mapping cache knows c1 → 100 (resolution ran when it
+        # was first exported). c2 has never been seen.
+        db.get_company_ids_bulk.return_value = {"c1": {"numeric_id": 100, "company_name": "Acme Corp"}}
+
+        result = run_pipeline(config, creds)
+
+        assert result["summary"]["dedup_filtered"] == 1
+        assert result["summary"]["companies_selected"] == 1  # only c2
