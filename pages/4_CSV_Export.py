@@ -488,8 +488,12 @@ if push_clicked and _vs_push_available:
     _op_name = selected_operator.get("operator_name") if selected_operator else None
     confirm_push_dialog(len(leads_to_export), _op_name)
 
-# Push flow — only fires after dialog confirmation (pop ensures single execution)
-if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
+# Push flow — fires after dialog confirmation (pop ensures single execution),
+# or when the user requested a retry of previously failed leads (HADES-1ue).
+_retry_rows = st.session_state.pop("_vs_retry_rows", None)
+_push_confirmed = st.session_state.pop("vs_push_confirmed", False)
+if (_push_confirmed or _retry_rows) and _vs_push_available:
+    rows_to_push = _retry_rows if _retry_rows else vs_rows
     progress_bar = st.progress(0, text="Pushing to VanillaSoft...")
     log_container = st.container()
 
@@ -499,9 +503,16 @@ if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
         err = f" ({result.error})" if result.error else ""
         log_container.caption(f"{icon} {result.lead_name} \u2014 {result.company}{err}")
 
-    summary = push_leads(vs_rows, web_lead_id=_vs_web_lead_id, progress_callback=_on_progress)
+    summary = push_leads(rows_to_push, web_lead_id=_vs_web_lead_id, progress_callback=_on_progress)
 
     progress_bar.empty()
+
+    # Cumulative succeeded count across the initial push + retries (a retry
+    # pushes exactly the previously-failed rows, so the new failure set fully
+    # replaces the old one).
+    _prior_succeeded = st.session_state.get("_vs_push_succeeded_total", 0) if _retry_rows else 0
+    _total_succeeded = _prior_succeeded + len(summary.succeeded)
+    st.session_state["_vs_push_succeeded_total"] = _total_succeeded
 
     # Summary banner
     if summary.failed:
@@ -534,10 +545,38 @@ if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
         if outcome_rows:
             db.record_lead_outcomes_batch(outcome_rows)
 
-    # Update query log
+    # Update query log (cumulative across retries)
     last_query = db.get_last_query(workflow_type)
     if last_query:
-        db.update_query_exported(last_query["id"], len(summary.succeeded))
+        db.update_query_exported(last_query["id"], _total_succeeded)
+
+    # Persist failed-lead state OUTSIDE the single-fire block so the panel
+    # survives reruns and Retry can actually be observed (HADES-1ue: the old
+    # in-block button was never executed on its own click's rerun, and
+    # _vs_retry_rows had no consumer).
+    failed_pids = {r.person_id for r in summary.failed if r.person_id}
+    failed_names = {(r.lead_name, r.company) for r in summary.failed if not r.person_id}
+
+    def _is_failed_row(r):
+        pid = r.get("_personId")
+        if pid and pid in failed_pids:
+            return True
+        if not pid:
+            key = (f"{r.get('First Name', '')} {r.get('Last Name', '')}".strip(), r.get("Company", ""))
+            return key in failed_names
+        return False
+
+    if summary.failed:
+        st.session_state["vs_push_failed_state"] = {
+            "results": [
+                {"name": r.lead_name, "company": r.company, "error": r.error, "person_id": r.person_id}
+                for r in summary.failed
+            ],
+            "rows": [r for r in rows_to_push if _is_failed_row(r)],
+            "cache_key": _export_cache_key,
+        }
+    else:
+        st.session_state.pop("vs_push_failed_state", None)
 
     # Mark staged export
     staged_id = st.session_state.get("_loaded_staged_id")
@@ -552,7 +591,7 @@ if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
 
     # Store metadata
     st.session_state.last_export_metadata = {
-        "count": len(summary.succeeded),
+        "count": _total_succeeded,
         "timestamp": datetime.now().isoformat(),
         "operator": selected_operator.get("operator_name") if selected_operator else None,
         "batch_id": batch_id,
@@ -563,47 +602,34 @@ if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
     else:
         st.session_state["geo_exported"] = True
 
-    # Failed leads — retry + CSV fallback
-    if summary.failed:
-        st.markdown("---")
-        st.markdown(f"**Failed ({len(summary.failed)}):**")
-        for r in summary.failed:
-            st.caption(f"\u2716 {r.lead_name} \u2014 {r.company} ({r.error})")
+# Failed leads — rendered from persisted state so the panel (and the Retry
+# button) survives the rerun that follows the push (HADES-1ue).
+_failed_state = st.session_state.get("vs_push_failed_state")
+if _failed_state and _failed_state.get("cache_key") == _export_cache_key and _failed_state.get("rows"):
+    st.markdown("---")
+    st.markdown(f"**Failed ({len(_failed_state['results'])}):**")
+    for r in _failed_state["results"]:
+        st.caption(f"\u2716 {r['name']} \u2014 {r['company']} ({r['error']})")
 
-        # Match failed rows by personId, fallback to name+company
-        failed_pids = {r.person_id for r in summary.failed if r.person_id}
-        failed_names = {(r.lead_name, r.company) for r in summary.failed if not r.person_id}
-
-        def _is_failed_row(r):
-            pid = r.get("_personId")
-            if pid and pid in failed_pids:
-                return True
-            if not pid:
-                key = (f"{r.get('First Name', '')} {r.get('Last Name', '')}".strip(), r.get("Company", ""))
-                return key in failed_names
-            return False
-
-        fcol1, fcol2 = st.columns(2)
-        with fcol1:
-            if st.button("\U0001f504 Retry Failed", use_container_width=True):
-                retry_rows = [r for r in vs_rows if _is_failed_row(r)]
-                st.session_state["_vs_retry_rows"] = retry_rows
-                st.rerun()
-        with fcol2:
-            failed_csv_rows = [r for r in vs_rows if _is_failed_row(r)]
-            if failed_csv_rows:
-                import csv as csv_mod
-                import io
-                from utils import VANILLASOFT_COLUMNS
-                out = io.StringIO()
-                writer = csv_mod.DictWriter(out, fieldnames=VANILLASOFT_COLUMNS, extrasaction="ignore")
-                writer.writeheader()
-                for r in failed_csv_rows:
-                    writer.writerow(r)
-                st.download_button(
-                    "\U0001f4be Download Failed as CSV",
-                    data=out.getvalue(),
-                    file_name=f"HADES-failed-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
+    fcol1, fcol2 = st.columns(2)
+    with fcol1:
+        if st.button("\U0001f504 Retry Failed", use_container_width=True,
+                     disabled=not _vs_push_available):
+            st.session_state["_vs_retry_rows"] = _failed_state["rows"]
+            st.rerun()
+    with fcol2:
+        import csv as csv_mod
+        import io
+        from utils import VANILLASOFT_COLUMNS
+        out = io.StringIO()
+        writer = csv_mod.DictWriter(out, fieldnames=VANILLASOFT_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for r in _failed_state["rows"]:
+            writer.writerow(r)
+        st.download_button(
+            "\U0001f4be Download Failed as CSV",
+            data=out.getvalue(),
+            file_name=f"HADES-failed-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )

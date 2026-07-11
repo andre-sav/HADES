@@ -62,26 +62,26 @@ def test_build_xml_basic():
         "Company": "Acme Corp",
         "Email": "john@acme.com",
     }
-    xml = _build_xml(row)
+    xml = _build_xml(row).decode("utf-8")
     assert "<FirstName>John</FirstName>" in xml
     assert "<LastName>Smith</LastName>" in xml
     assert "<Company>Acme Corp</Company>" in xml
     assert "<Email>john@acme.com</Email>" in xml
-    assert xml.startswith("<Lead>")
+    assert "<Lead>" in xml
     assert xml.endswith("</Lead>")
 
 
 def test_build_xml_escapes_special_chars():
     row = {"Company": "AT&T <Corp>", "First Name": 'O"Brien'}
-    xml = _build_xml(row)
+    xml = _build_xml(row).decode("utf-8")
     assert "&amp;" in xml
     assert "&lt;" in xml
-    assert xml.startswith("<Lead>")
+    assert "<Lead>" in xml
 
 
 def test_build_xml_skips_empty_fields():
     row = {"First Name": "John", "Last Name": "", "Email": None, "Company": "  "}
-    xml = _build_xml(row)
+    xml = _build_xml(row).decode("utf-8")
     assert "<FirstName>John</FirstName>" in xml
     assert "LastName" not in xml
     assert "Email" not in xml
@@ -91,7 +91,7 @@ def test_build_xml_skips_empty_fields():
 def test_build_xml_skips_unmapped_columns():
     """Square Footage etc. should not appear in XML."""
     row = {"Square Footage": "5000", "First Name": "John"}
-    xml = _build_xml(row)
+    xml = _build_xml(row).decode("utf-8")
     assert "SquareFootage" not in xml
     assert "5000" not in xml
     assert "<FirstName>John</FirstName>" in xml
@@ -100,7 +100,7 @@ def test_build_xml_skips_unmapped_columns():
 def test_build_xml_ignores_person_id_metadata():
     """_personId metadata should not appear in XML payload."""
     row = {"First Name": "John", "Company": "Acme", "_personId": "98765"}
-    xml = _build_xml(row)
+    xml = _build_xml(row).decode("utf-8")
     assert "personId" not in xml.lower()
     assert "98765" not in xml
 
@@ -252,3 +252,73 @@ class TestPushLeads:
         assert len(progress_calls) == 2
         assert progress_calls[0] == (1, 2, True)
         assert progress_calls[1] == (2, 2, True)
+
+
+class TestEncodingRobustness:
+    """R-01 (HADES-kc0): non-Latin-1 text must not crash a push mid-batch.
+
+    Root cause: a str body is latin-1-encoded by http.client, raising
+    UnicodeEncodeError (a ValueError) that escaped push_lead's
+    requests.exceptions-only handlers and killed the whole batch before
+    outcome recording. Force-fail tests per convention C4.
+    """
+
+    def test_build_xml_returns_utf8_bytes_with_declaration(self):
+        """Body must be pre-encoded UTF-8 bytes so http.client never latin-1 encodes."""
+        row = {"First Name": "José", "Last Name": "Muñoz", "Company": "Peña – Sons"}
+        body = _build_xml(row)
+        assert isinstance(body, bytes)
+        decoded = body.decode("utf-8")  # must round-trip
+        assert "encoding" in decoded[:60].lower()  # XML declaration present
+        assert "José" in decoded
+        assert "–" in decoded  # en-dash survives
+
+    def test_build_xml_strips_xml_invalid_control_chars(self):
+        """Control chars (\\x0b etc.) produce invalid XML if serialized raw — strip them."""
+        row = {"First Name": "A", "Last Name": "B", "Company": "Acme\x0bCorp\x00Ltd"}
+        body = _build_xml(row)
+        decoded = body.decode("utf-8")
+        assert "\x0b" not in decoded
+        assert "\x00" not in decoded
+        assert "AcmeCorpLtd" in decoded
+
+    @patch("vanillasoft_client.requests.post")
+    def test_push_lead_en_dash_succeeds(self, mock_post):
+        """The exact incident input: an en-dash in a field must push, not raise."""
+        mock_post.return_value = MagicMock(
+            status_code=200, text="<ReturnValue>Success</ReturnValue>"
+        )
+        row = {"First Name": "A", "Last Name": "B", "Company": "C",
+               "Title": "Manager – Facilities"}
+        result = push_lead(row, web_lead_id="test-id")
+        assert result.success is True
+        # body sent as bytes with utf-8 charset declared
+        _, kwargs = mock_post.call_args
+        assert isinstance(kwargs["data"], bytes)
+        assert "charset=utf-8" in kwargs["headers"]["Content-Type"]
+
+    @patch("vanillasoft_client.requests.post")
+    def test_push_lead_unexpected_exception_becomes_failed_result(self, mock_post):
+        """Any non-requests exception must become PushResult(success=False), never escape."""
+        mock_post.side_effect = UnicodeEncodeError("latin-1", "x", 0, 1, "boom")
+        row = {"First Name": "A", "Last Name": "B", "Company": "C"}
+        result = push_lead(row, web_lead_id="test-id")
+        assert result.success is False
+        assert "boom" in result.error or "latin-1" in result.error
+
+    @patch("vanillasoft_client.requests.post")
+    @patch("vanillasoft_client.time.sleep")
+    def test_push_leads_batch_survives_mid_batch_exception(self, mock_sleep, mock_post):
+        """Lead 2/3 blowing up must not lose lead 3 or the summary (partial-batch truth)."""
+        ok = MagicMock(status_code=200, text="<ReturnValue>Success</ReturnValue>")
+        mock_post.side_effect = [ok, ValueError("mid-batch explosion"), ok]
+        rows = [
+            {"First Name": "A", "Last Name": "One", "Company": "C1"},
+            {"First Name": "B", "Last Name": "Two", "Company": "C2"},
+            {"First Name": "C", "Last Name": "Three", "Company": "C3"},
+        ]
+        summary = push_leads(rows, web_lead_id="test-id")
+        assert summary.total == 3
+        assert len(summary.succeeded) == 2
+        assert len(summary.failed) == 1
+        assert summary.failed[0].lead_name == "B Two"
