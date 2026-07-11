@@ -80,13 +80,16 @@ class TestFilterByCompanyNameFallback:
         assert len(filtered) == 1
         assert filtered[0]["companyName"] == "Acme Corp"
 
-    def test_no_fallback_when_id_matches(self):
-        """company_id match takes priority; name fallback only when no ID."""
+    def test_present_but_unknown_id_is_not_filtered_by_name(self):
+        """R-03 (HADES-u1x): a contact with a valid companyId that is NOT in
+        the exported set is PROOF the company was never exported — the name
+        fallback must not fire. Same-name franchises (Planet Fitness Dallas
+        vs Fort Worth) are different companies per ZoomInfo's own IDs."""
         contacts = [
-            {"companyName": "Acme Corp", "companyId": "999"},  # ID not in lookup
+            {"companyName": "Acme Corp", "companyId": "999"},  # never exported
         ]
         lookup = {
-            "by_id": {},
+            "by_id": {"111": {"company_name": "Acme Corp", "exported_at": "2026-01-10", "workflow_type": "geography"}},
             "by_name": {
                 "acme": {"company_name": "Acme Corp", "exported_at": "2026-01-10", "workflow_type": "geography"},
             },
@@ -94,7 +97,20 @@ class TestFilterByCompanyNameFallback:
 
         new, filtered = filter_previously_exported(contacts, lookup)
 
-        # Falls through to name match since ID "999" not found
+        # The ID proves this is a different company — keep the lead.
+        assert len(filtered) == 0
+        assert len(new) == 1
+
+    def test_name_fallback_still_fires_without_id(self):
+        """Contacts with NO companyId still dedup by normalized name."""
+        contacts = [{"companyName": "Acme Corp", "companyId": ""}]
+        lookup = {
+            "by_id": {},
+            "by_name": {
+                "acme": {"company_name": "Acme Corp", "exported_at": "2026-01-10", "workflow_type": "geography"},
+            },
+        }
+        new, filtered = filter_previously_exported(contacts, lookup)
         assert len(filtered) == 1
 
 
@@ -324,3 +340,32 @@ class TestExcludeBatchIdPassThrough:
         apply_export_dedup([], mock_db, exclude_batch_id="B-123")
         _, kwargs = mock_db.get_exported_company_ids.call_args
         assert kwargs.get("exclude_batch_id") == "B-123"
+
+
+class TestHashedIdNameFallback:
+    """R-03 × R-15 interplay: an untranslated HASHED intent id lives in a
+    different id-space than lead_outcomes' numeric ids, so it cannot prove
+    'never exported' — the name fallback must still fire for those."""
+
+    def test_untranslated_hashed_id_still_dedups_by_name(self):
+        contacts = [{"companyName": "Acme Corp", "companyId": "a1b2c3hashed"}]
+        lookup = {
+            "by_id": {"100": {"company_name": "Acme Corp", "exported_at": "2026-06-01", "workflow_type": "geography"}},
+            "by_name": {
+                "acme": {"company_name": "Acme Corp", "exported_at": "2026-06-01", "workflow_type": "geography"},
+            },
+        }
+        new, filtered = filter_previously_exported(contacts, lookup)
+        assert len(filtered) == 1
+
+    def test_numeric_id_not_in_history_blocks_name_fallback(self):
+        """Numeric id-space: present-but-unknown = proof of never-exported."""
+        contacts = [{"companyName": "Acme Corp", "companyId": "222"}]
+        lookup = {
+            "by_id": {"111": {"company_name": "Acme Corp", "exported_at": "2026-06-01", "workflow_type": "geography"}},
+            "by_name": {
+                "acme": {"company_name": "Acme Corp", "exported_at": "2026-06-01", "workflow_type": "geography"},
+            },
+        }
+        new, filtered = filter_previously_exported(contacts, lookup)
+        assert len(filtered) == 0

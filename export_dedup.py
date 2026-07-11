@@ -68,8 +68,14 @@ def filter_previously_exported(
         # Try company_id match first
         if cid and cid in by_id:
             match = by_id[cid]
-        # Fallback to normalized company name
-        elif company_name:
+        # Name fallback ONLY when the contact has no usable companyId: a
+        # present-but-unknown NUMERIC ID is proof the company was never
+        # exported (matching by name there silently dropped same-name
+        # franchises — Planet Fitness Dallas vs Fort Worth, HADES-u1x).
+        # An untranslated HASHED intent id (non-numeric) lives in a different
+        # id-space than lead_outcomes, proves nothing, and still needs the
+        # name fallback.
+        elif company_name and (not cid or not cid.isdigit()):
             normalized = normalize_company_name(company_name)
             if normalized and normalized in by_name:
                 match = by_name[normalized]
