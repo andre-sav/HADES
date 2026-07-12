@@ -212,6 +212,7 @@ def _reset_geo_search_state():
     st.session_state.geo_last_search_params = {}
     st.session_state.pop("geo_export_leads", None)
     st.session_state.pop("geo_enrich_error", None)
+    st.session_state.pop("geo_search_error", None)
     # Complete any in-flight pipeline run as cancelled
     _reset_run_id = st.session_state.get("geo_run_id")
     _reset_rl = st.session_state.get("geo_run_logger")
@@ -1266,6 +1267,10 @@ if has_operator:
                 try:
                     if job.error:
                         st.error(f"Search failed: {job.error}")
+                        # Persist: the st.rerun() below redraws the whole page
+                        # immediately, so an inline-only error simply vanished
+                        # and the search looked like it never happened (HADES-709)
+                        st.session_state["geo_search_error"] = job.error
                         # Log search failure to pipeline run
                         _rl = st.session_state.get("geo_run_logger")
                         _run_id = st.session_state.get("geo_run_id")
@@ -1280,6 +1285,7 @@ if has_operator:
                             st.session_state.geo_run_logger = None
                             st.session_state.geo_run_id = None
                     elif job.result:
+                        st.session_state.pop("geo_search_error", None)
                         _store_geo_results(job.result, sp)
                 finally:
                     # Clean up job state even if _store_geo_results fails
@@ -1302,6 +1308,14 @@ if has_operator:
                 st.toast("Stopping after current API call...")
 
         _geo_search_monitor()
+
+    # Persisted failure from the background search (survives the post-job rerun)
+    _search_err = st.session_state.get("geo_search_error")
+    if _search_err and not st.session_state.get("geo_search_job"):
+        st.error(f"Search failed: {_search_err} — adjust parameters and search again.")
+        if st.button("Dismiss", key="geo_search_err_dismiss"):
+            st.session_state.pop("geo_search_error", None)
+            st.rerun()
 
 
 # =============================================================================
