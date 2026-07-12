@@ -1,7 +1,39 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-05-17
+**Date:** 2026-07-11
 **Status:** P0 ZIP centroid corruption + P1 Home/Business phone-column inversion fixed in response to operator field report. 775 tests passing. All prior sessions: 764 tests passing through session 50. See session 51 below for the current change.
+
+
+## Session Summary (2026-07-11, autonomous session — user away)
+
+### What Was Done
+
+Executed the full recommended attack order from the whole-project accuracy/
+efficiency review (docs/CODE_REVIEW_2026-07-11-accuracy-efficiency.md), then an
+autonomous work order (docs/plans/AUTONOMOUS_WORKPLAN_2026-07-11.md) covering
+the P2 tail. **All review P0s (2), P1s (11), and P2s (9 of 9 — one partial)
+are closed**, plus 5 P3 quick wins. Suite: 840 → **924 tests**, green at every
+commit, every fix TDD'd, every commit pushed.
+
+Highlights: VS push survives non-Latin-1 + working Retry; hashed/numeric
+companyId spaces bridged (intent scoring + dedup); blank-lead guard on all
+paths + alerting made real (red runs when the email channel is down); franchise
+false-drops fixed; ZIP normalization + VA/DC prefix + neutral unknown headcount;
+session-state lifecycle (stale cross-search exports, enrich auto-retry);
+calibration cache; cache TTL/keys; DB connection lock + no partial-transaction
+commit; fuzzy state veto; credit accounting + spend-point budget gate.
+
+### Next Steps
+
+1. **HADES-fpd (R-27)** — per-rerun Turso fan-out caching; deferred for an
+   invalidation design (see bd notes).
+2. **HADES-dio** — dedup vs non-HADES VanillaSoft leads; blocked on a sample
+   VS export from the user (gating question already asked).
+3. **HADES-7qi** — remaining P3 tail (see bd notes for what landed).
+4. Configure SMTP secrets — scheduled runs now go RED when email delivery is
+   missed (intentional forcing function from HADES-guz/2oe).
+5. Intent live test — R-02's fix means intent scoring will behave differently
+   (correctly) from any prior observation.
 
 ## Session Summary (2026-05-17, Session 51)
 
