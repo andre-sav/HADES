@@ -734,12 +734,15 @@ class ZoomInfoClient:
         current_page = 1
         raw_keys = []
         raw_sample = {}
+        last_total_pages = 0
         params = replace(params)  # Local copy to avoid mutating caller's params
+        self.last_search_truncated = None  # per-call reset (thread-local)
 
         while current_page <= max_pages:
             params.page = current_page
             result = self.search_intent(params)
             all_leads.extend(result["data"])
+            last_total_pages = result["pagination"]["totalPages"]
 
             # Capture raw API keys from first page for debugging
             if current_page == 1:
@@ -753,6 +756,23 @@ class ZoomInfoClient:
                 break
 
             current_page += 1
+
+        # Fail loud on a silent coverage cap — the sibling of the HADES-4u2
+        # contact-search bug: the page limit stopped the sweep before the real
+        # last page, so callers are seeing a partial company set (HADES-mms).
+        pages_fetched = min(current_page, max_pages)
+        if _search_was_truncated(pages_fetched, max_pages, last_total_pages):
+            self.last_search_truncated = {
+                "pages_fetched": pages_fetched,
+                "total_pages": last_total_pages,
+                "max_pages": max_pages,
+                "fetched": len(all_leads),
+            }
+            logger.warning(
+                "Intent Search TRUNCATED at page cap: fetched %d pages of %d "
+                "(max_pages=%d) — partial set of %d companies",
+                pages_fetched, last_total_pages, max_pages, len(all_leads),
+            )
 
         logger.info(f"Intent Search (all pages) complete: {len(all_leads)} total leads from {current_page} pages")
         # Attach debug info to help diagnose field mapping issues

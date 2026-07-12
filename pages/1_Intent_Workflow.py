@@ -701,6 +701,8 @@ if st.session_state.intent_search_pending:
                         _rl.set_metric("intent_results", len(deduped))
 
                     _reset_intent_downstream()  # new results invalidate prior selections (HADES-aoe)
+                    # Partial-coverage signal (HADES-mms): page cap stopped the sweep
+                    st.session_state["_intent_search_truncated"] = client.last_search_truncated
                     st.session_state.intent_companies = deduped
                     st.session_state.intent_search_executed = True
                     st.session_state.intent_search_pending = False
@@ -905,6 +907,13 @@ if _has_debug:
 # CACHE / DEDUP INDICATORS (shown after search, before company list)
 # =============================================================================
 if st.session_state.intent_search_executed and st.session_state.intent_companies:
+    _trunc = st.session_state.get("_intent_search_truncated")
+    if _trunc:
+        st.warning(
+            f"⚠️ Partial results: the page cap stopped the intent sweep at "
+            f"{_trunc['pages_fetched']}/{_trunc['total_pages']} pages — more companies "
+            f"match these topics than are shown ({_trunc['fetched']} fetched)."
+        )
     _indicator_parts = []
     _dedup_removed = st.session_state.get("_intent_dedup_removed", 0)
     if _dedup_removed:
@@ -1192,6 +1201,15 @@ if (
                         st.write(f"Contact search: page {current_page}/{total_pages}")
 
                     contacts = client.search_contacts_all_pages(params, max_pages=5, progress_callback=_contact_page_progress)
+                    _c_trunc = client.last_search_truncated
+                    if _c_trunc:
+                        st.warning(
+                            f"⚠️ Partial contact set: page cap stopped the sweep at "
+                            f"{_c_trunc['pages_fetched']}/{_c_trunc['total_pages']} pages."
+                        )
+                        _rl = st.session_state.get("intent_run_logger")
+                        if _rl:
+                            _rl.warn(f"Contact Search truncated: {_c_trunc['pages_fetched']}/{_c_trunc['total_pages']} pages")
 
                     if not contacts:
                         logger.info("Contact search returned 0 results")

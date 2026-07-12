@@ -140,6 +140,14 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         )
         intent_results = client.search_intent_all_pages(intent_params, max_pages=10)
         summary["intent_results"] = len(intent_results)
+        _trunc = client.last_search_truncated
+        if _trunc:
+            summary["intent_search_truncated"] = _trunc
+            msg = (f"Intent search truncated at page cap: "
+                   f"{_trunc['pages_fetched']}/{_trunc['total_pages']} pages")
+            logger.warning(msg)
+            if run_logger is not None:
+                run_logger.warn(msg)
 
         if not intent_results:
             return {"success": True, "csv_content": None, "csv_filename": None,
@@ -241,6 +249,14 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         )
         intent_results = client.search_intent_all_pages(intent_params, max_pages=10)
         summary["intent_results"] = len(intent_results)
+        _trunc = client.last_search_truncated
+        if _trunc:
+            summary["intent_search_truncated"] = _trunc
+            msg = (f"Intent search truncated at page cap: "
+                   f"{_trunc['pages_fetched']}/{_trunc['total_pages']} pages")
+            logger.warning(msg)
+            if run_logger is not None:
+                run_logger.warn(msg)
         logger.info("Intent search returned %d results", len(intent_results))
         run_logger.info(f"Intent Search: {len(intent_results)} results")
         run_logger.set_metric("intent_results", len(intent_results))
@@ -385,6 +401,13 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
 
         contacts = client.search_contacts_all_pages(contact_params, max_pages=5)
         summary["contacts_found"] = len(contacts)
+        _c_trunc = client.last_search_truncated
+        if _c_trunc:
+            summary["contact_search_truncated"] = _c_trunc
+            msg = (f"Contact search truncated at page cap: "
+                   f"{_c_trunc['pages_fetched']}/{_c_trunc['total_pages']} pages")
+            logger.warning(msg)
+            run_logger.warn(msg)
         logger.info("Contact search returned %d contacts", len(contacts))
         run_logger.info(f"Contact Search: {len(contacts)} contacts")
         run_logger.set_metric("contacts_found", len(contacts))

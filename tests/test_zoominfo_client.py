@@ -371,6 +371,35 @@ class TestIntentSearch:
             results = client.search_intent_all_pages(params)
 
         assert len(results) == 4
+        assert client.last_search_truncated is None  # complete sweep, no signal
+
+    def test_search_intent_all_pages_truncation_signal(self, client):
+        """R-25 (HADES-mms): a page cap stopping the sweep before the real
+        last page must set last_search_truncated — the fixed contact-search
+        bug (HADES-4u2) had this silent sibling on the intent endpoint."""
+        def _page(n, total_pages):
+            return {"data": [{"id": n}], "pagination": {"totalResults": total_pages, "pageSize": 1, "currentPage": n, "totalPages": total_pages}}
+
+        with patch.object(client, "search_intent", side_effect=[_page(1, 5), _page(2, 5)]):
+            params = IntentQueryParams(topics=["Vending"], page_size=1)
+            results = client.search_intent_all_pages(params, max_pages=2)
+
+        assert len(results) == 2
+        sig = client.last_search_truncated
+        assert sig is not None
+        assert sig["pages_fetched"] == 2
+        assert sig["total_pages"] == 5
+        assert sig["max_pages"] == 2
+
+    def test_search_intent_all_pages_resets_stale_signal(self, client):
+        """A prior truncation signal must not leak into a complete sweep."""
+        client.last_search_truncated = {"stale": True}
+        with patch.object(client, "search_intent", return_value={
+            "data": [{"id": 1}],
+            "pagination": {"totalResults": 1, "pageSize": 1, "currentPage": 1, "totalPages": 1},
+        }):
+            client.search_intent_all_pages(IntentQueryParams(topics=["V"], page_size=1))
+        assert client.last_search_truncated is None
 
 
 class TestCompanySearch:
