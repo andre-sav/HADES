@@ -217,7 +217,10 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
 
     try:
         # --- Budget check ---
-        budget = cost_tracker.check_budget("intent", config["target_companies"])
+        # Worst-case spend is ~2x target: one resolution enrich per uncached
+        # company plus one full enrich per selected contact (HADES-n7u — the
+        # old estimate of 1x let the crossing run overshoot the weekly cap).
+        budget = cost_tracker.check_budget("intent", config["target_companies"] * 2)
         if budget.alert_level == "exceeded":
             msg = f"Budget exceeded: {budget.alert_message}"
             logger.warning(msg)
@@ -354,6 +357,15 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
                         if numeric_id:
                             numeric_map[hid] = int(numeric_id)
                             db.save_company_id(hid, int(numeric_id), company_name)
+                    # These enriches consume real credits — previously invisible
+                    # to the Usage Dashboard and the weekly gate (HADES-n7u)
+                    if enriched:
+                        cost_tracker.log_usage(
+                            workflow_type="intent",
+                            query_params={"source": "id_resolution", "topics": config["topics"]},
+                            credits_used=len(enriched),
+                            leads_returned=0,
+                        )
                 except Exception as e:
                     resolution_error = str(e)
                     logger.warning("Batch company ID resolution failed: %s", e)

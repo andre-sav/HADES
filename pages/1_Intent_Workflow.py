@@ -1204,6 +1204,15 @@ if (
                 else:
                     st.write(f"All {len(numeric_map)} company IDs found in cache.")
 
+                # Resolution enriches consume credits — log them (HADES-n7u)
+                _resolution_enriches = len(numeric_map) - len(cached)
+                if _resolution_enriches > 0 and not st.session_state.intent_test_mode:
+                    cost_tracker.log_usage(
+                        workflow_type="intent",
+                        query_params={"source": "id_resolution"},
+                        credits_used=_resolution_enriches,
+                        leads_returned=0,
+                    )
                 st.write(f"Resolved {len(numeric_map)}/{len(company_ids)} company IDs.")
                 logger.info("Company ID resolution complete: %d/%d resolved", len(numeric_map), len(company_ids))
                 # Persist for scoring: enriched contacts carry NUMERIC companyIds,
@@ -1557,6 +1566,19 @@ if (
     )
 
     if should_enrich:
+            # Gate at the point credits are actually spent — the search-time
+            # check ran hours earlier against a stale snapshot (HADES-n7u)
+            _budget_now = cost_tracker.check_budget(
+                "intent", len(st.session_state.intent_selected_contacts))
+            if _budget_now.alert_level == "exceeded":
+                # Route through the persistent enrich-error panel (C6: no
+                # st.stop with an open pipeline run) — Retry re-checks budget
+                st.session_state.intent_enrich_error = (
+                    "Weekly intent budget exceeded — enrichment blocked. "
+                    + (_budget_now.alert_message or "")
+                )
+                st.session_state.intent_enrich_clicked = False
+                st.rerun()
             selected_contacts = list(st.session_state.intent_selected_contacts.values())
             person_ids = [
                 c.get("personId") or c.get("id")

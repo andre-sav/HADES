@@ -882,3 +882,66 @@ class TestFailLoudAutomation:
         result = run_pipeline(config, creds)
         assert result["success"] is True
         assert result["summary"].get("email_skipped_no_smtp") is True
+
+
+class TestResolutionCreditAccounting:
+    """R-21 (HADES-n7u): ID-resolution enriches spend credits that were never
+    logged — the Usage Dashboard and weekly budget gate were blind to them."""
+
+    @patch("scripts.run_intent_pipeline.send_alert")
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_resolution_enriches_logged(self, MockClient, MockDB, MockCostTracker, _alert):
+        config = _make_config(target_companies=2)
+        creds = _make_creds()
+        client = MockClient.return_value
+        client.search_intent_all_pages.return_value = [
+            _make_intent_lead("c1", "Acme Corp"),
+            _make_intent_lead("c2", "Beta Inc"),
+        ]
+        client.search_contacts_all_pages.return_value = [
+            _make_contact("p1", "100", "Acme Corp")]
+        client.enrich_contacts_batch.side_effect = [
+            [{"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
+             {"id": "p_c2", "company": {"id": 200, "name": "Beta Inc"}, "companyId": 200}],
+            [_make_contact("p1", "100", "Acme Corp")],
+        ]
+        db = MockDB.return_value
+        db.has_running_pipeline.return_value = False
+        db.get_company_ids_bulk.return_value = {}
+        db.get_exported_company_ids.return_value = {}
+        db.execute.return_value = [(1,)]
+        tracker = MockCostTracker.return_value
+        budget = MagicMock()
+        budget.alert_level = None
+        tracker.check_budget.return_value = budget
+
+        result = run_pipeline(config, creds)
+        assert result["success"] is True
+
+        # One log_usage call must be the resolution spend (2 credits)
+        resolution_logs = [
+            c for c in tracker.log_usage.call_args_list
+            if c.kwargs.get("query_params", {}).get("source") == "id_resolution"
+        ]
+        assert len(resolution_logs) == 1
+        assert resolution_logs[0].kwargs["credits_used"] == 2
+
+    @patch("scripts.run_intent_pipeline.send_alert")
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_budget_estimate_covers_worst_case(self, MockClient, MockDB, MockCostTracker, _alert):
+        """Estimate was target (25) while worst case is resolution+enrich (2x)."""
+        config = _make_config(target_companies=25)
+        creds = _make_creds()
+        MockDB.return_value.has_running_pipeline.return_value = False
+        tracker = MockCostTracker.return_value
+        budget = MagicMock()
+        budget.alert_level = "exceeded"
+        budget.alert_message = "cap"
+        tracker.check_budget.return_value = budget
+        run_pipeline(config, creds)
+        estimate = tracker.check_budget.call_args[0][1]
+        assert estimate == 50  # 2 x target: resolution + full enrich
