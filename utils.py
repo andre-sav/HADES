@@ -82,6 +82,29 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
+def intent_cache_key(topics: list[str], signal_strengths: list[str],
+                     sic_codes: list[str], employee_min) -> str:
+    """Deterministic cache key covering EVERY parameter the intent API call sends.
+
+    The old key hashed only topics+signals, so an icp.yaml change (SIC list,
+    employee minimum — routinely tuned) replayed week-old results filtered by
+    the OLD criteria as fresh cache hits for the 7-day TTL (HADES-h83).
+    """
+    import hashlib
+    import json as _json
+
+    normalized = _json.dumps(
+        {
+            "topics": sorted(topics),
+            "signals": sorted(signal_strengths),
+            "sic_codes": sorted(str(s) for s in (sic_codes or [])),
+            "employee_min": employee_min,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+
 def parse_db_timestamp(ts):
     """Parse a DB timestamp string into an AWARE UTC datetime, or None.
 

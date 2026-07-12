@@ -563,3 +563,33 @@ class TestParseDbTimestamp:
         dt = parse_db_timestamp("2026-07-11 14:30:00")
         delta = datetime.now(timezone.utc) - dt  # must not raise TypeError
         assert delta.total_seconds() != 0 or True
+
+
+class TestIntentCacheKey:
+    """R-18 (HADES-h83): the cache key hashed only topics+signals while the
+    actual API query also sends config-derived sic_codes and employee_min —
+    an icp.yaml change replayed week-old results filtered by OLD criteria."""
+
+    def test_same_inputs_same_key(self):
+        from utils import intent_cache_key
+        k1 = intent_cache_key(["Vending"], ["High"], ["7011", "8051"], 50)
+        k2 = intent_cache_key(["Vending"], ["High"], ["8051", "7011"], 50)  # order-insensitive
+        assert k1 == k2
+
+    def test_sic_change_changes_key(self):
+        from utils import intent_cache_key
+        k1 = intent_cache_key(["Vending"], ["High"], ["7011"], 50)
+        k2 = intent_cache_key(["Vending"], ["High"], ["7011", "4213"], 50)
+        assert k1 != k2
+
+    def test_employee_min_change_changes_key(self):
+        from utils import intent_cache_key
+        k1 = intent_cache_key(["Vending"], ["High"], ["7011"], 50)
+        k2 = intent_cache_key(["Vending"], ["High"], ["7011"], 100)
+        assert k1 != k2
+
+    def test_topics_change_changes_key(self):
+        from utils import intent_cache_key
+        k1 = intent_cache_key(["Vending"], ["High"], ["7011"], 50)
+        k2 = intent_cache_key(["Coffee"], ["High"], ["7011"], 50)
+        assert k1 != k2

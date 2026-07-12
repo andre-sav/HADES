@@ -63,6 +63,7 @@ from utils import (
     get_sic_codes,
     get_sic_codes_with_descriptions,
     get_employee_minimum,
+    intent_cache_key,
     get_employee_maximum,
     get_default_accuracy,
     get_default_management_levels,
@@ -180,12 +181,12 @@ def _reset_intent_downstream():
 
 
 def _intent_cache_key(topics: list[str], signal_strengths: list[str]) -> str:
-    """Generate a deterministic cache key from intent search parameters."""
-    normalized = json.dumps(
-        {"topics": sorted(topics), "signals": sorted(signal_strengths)},
-        sort_keys=True,
-    )
-    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+    """Cache key covering every parameter the API call sends (HADES-h83).
+
+    Includes the config-derived SIC list and employee minimum — an icp.yaml
+    change must miss the cache, not replay results filtered by old criteria.
+    """
+    return intent_cache_key(topics, signal_strengths, get_sic_codes(), get_employee_minimum())
 
 
 # =============================================================================
