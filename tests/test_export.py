@@ -200,7 +200,7 @@ class TestBuildVanillasoftRow:
         """_personId metadata should not appear as a CSV column."""
         leads = [{"companyName": "Acme", "personId": "123456"}]
         csv_content, _, _ = export_leads_to_csv(leads)
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         assert "_personId" not in reader.fieldnames
 
     def test_contact_owner_from_parameter(self):
@@ -468,7 +468,7 @@ class TestExportLeadsToCsv:
         leads = [{"companyName": "Test Corp"}]
         csv_content, filename, _ = export_leads_to_csv(leads)
 
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         headers = reader.fieldnames
 
         assert headers == VANILLASOFT_COLUMNS
@@ -481,7 +481,7 @@ class TestExportLeadsToCsv:
         ]
         csv_content, filename, _ = export_leads_to_csv(leads)
 
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
 
         assert len(rows) == 2
@@ -517,7 +517,7 @@ class TestExportLeadsToCsv:
         }
 
         csv_content, _, _batch = export_leads_to_csv(leads, operator=operator)
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
 
         for row in rows:
@@ -527,7 +527,7 @@ class TestExportLeadsToCsv:
         """Test export with empty leads list."""
         csv_content, filename, _ = export_leads_to_csv([])
 
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
 
         assert len(rows) == 0
@@ -540,7 +540,7 @@ class TestExportLeadsToCsv:
         leads = [{"companyName": "Test Corp"}]
         csv_content, _, _batch = export_leads_to_csv(leads, data_source="ZoomInfo")
 
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
 
         today = datetime.now().strftime("%b %d %Y")
@@ -562,7 +562,7 @@ class TestContactOwnerRoundRobin:
         agents = ["agent1@hlmii.com", "agent2@hlmii.com"]
 
         csv_content, _, _ = export_leads_to_csv(leads, agents=agents)
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
 
         assert rows[0]["Contact Owner"] == "agent1@hlmii.com"
@@ -575,7 +575,7 @@ class TestContactOwnerRoundRobin:
         """Test that Contact Owner is empty when no agents provided."""
         leads = [{"companyName": "A"}]
         csv_content, _, _ = export_leads_to_csv(leads, agents=None)
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
         assert rows[0]["Contact Owner"] == ""
 
@@ -583,7 +583,7 @@ class TestContactOwnerRoundRobin:
         """Test that empty agents list [] doesn't crash with ZeroDivisionError."""
         leads = [{"companyName": "A"}, {"companyName": "B"}]
         csv_content, _, _ = export_leads_to_csv(leads, agents=[])
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
         assert rows[0]["Contact Owner"] == ""
         assert rows[1]["Contact Owner"] == ""
@@ -592,7 +592,7 @@ class TestContactOwnerRoundRobin:
         """Test that single agent gets all rows."""
         leads = [{"companyName": "A"}, {"companyName": "B"}]
         csv_content, _, _ = export_leads_to_csv(leads, agents=["solo@hlmii.com"])
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
         assert all(row["Contact Owner"] == "solo@hlmii.com" for row in rows)
 
@@ -771,7 +771,7 @@ class TestExportWithBatchId:
         leads = [{"companyName": "Test", "_score": 90}]
         csv_content, _, batch_id = export_leads_to_csv(leads, db=mock_db)
 
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
         assert f"Batch: {batch_id}" in rows[0]["Import Notes"]
 
@@ -975,3 +975,20 @@ class TestRecordCsvExport:
         db = MagicMock()
         assert record_csv_export(db, [], "B", "intent") == 0
         db.record_lead_outcomes_batch.assert_not_called()
+
+
+class TestCsvBom:
+    """P3 (HADES-7qi): CSVs open in Excel by default on the sales floor —
+    without a BOM, non-ASCII names render as mojibake and get re-saved
+    corrupted. The project's own import side reads utf-8-sig for this reason."""
+
+    def test_csv_content_starts_with_bom(self):
+        from unittest.mock import MagicMock
+        from export import export_leads_to_csv
+        db = MagicMock()
+        db.execute.return_value = [(1,)]
+        leads = [{"firstName": "José", "lastName": "Muñoz", "companyName": "Peña & Sons"}]
+        csv_content, _, _ = export_leads_to_csv(leads, operator=None,
+                                                workflow_type="geography", db=db)
+        assert csv_content.startswith("﻿")
+        assert "José" in csv_content

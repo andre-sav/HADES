@@ -208,8 +208,16 @@ class SchemaMixin:
         # Migrations for existing tables (add columns if they don't exist)
         self._run_migrations()
 
-        # PII retention: purge old staged exports on startup
+        # PII retention + growth control: purge old rows on startup.
+        # clear_expired_cache/purge_old_error_logs previously had NO callers —
+        # expired cache blobs and error logs grew unbounded (HADES-7qi).
         self.purge_old_staged_exports(days=90)
+        try:
+            self.clear_expired_cache()
+            self.purge_old_error_logs(days=90)
+        except Exception:  # purge must never block startup
+            import logging
+            logging.getLogger(__name__).warning("Startup purge failed", exc_info=True)
 
     def _run_migrations(self) -> None:
         """Run schema migrations for existing tables."""

@@ -1270,3 +1270,30 @@ class TestConnectionThreadSafety:
         db._lock = SpyLock()
         db.execute("SELECT 1")
         assert seen == ["acquired"]
+
+
+class TestP3QuickWins:
+    """Grouped P3 fixes from the 2026-07-11 review (HADES-7qi)."""
+
+    def test_init_schema_wires_cache_and_error_log_purges(self):
+        """clear_expired_cache and purge_old_error_logs had ZERO callers —
+        unbounded Turso growth. They belong next to the staged purge."""
+        import inspect
+        from db._schema import SchemaMixin
+        src = inspect.getsource(SchemaMixin.init_schema)
+        assert "clear_expired_cache" in src
+        assert "purge_old_error_logs" in src
+
+    def test_recent_operator_ids_orders_by_max_created(self):
+        """DISTINCT + ORDER BY created_at returns an arbitrary row's timestamp
+        per operator (observed: the oldest) — wrong recent-operators order."""
+        from turso_db import TursoDatabase
+        from unittest.mock import MagicMock, patch
+        with patch.object(TursoDatabase, "__init__", lambda self: None):
+            db = TursoDatabase()
+        captured = {}
+        db.execute = lambda q, p=(): captured.update({"q": q}) or []
+        db.get_recent_operator_ids(limit=5)
+        q = captured["q"].upper()
+        assert "GROUP BY" in q
+        assert "MAX(CREATED_AT)" in q

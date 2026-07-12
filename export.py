@@ -294,7 +294,10 @@ def export_leads_to_csv(
         )
         writer.writerow(row)
 
-    csv_content = output.getvalue()
+    # utf-8-sig BOM: the sales floor opens these in Excel, which renders
+    # BOM-less UTF-8 as mojibake (the import side reads utf-8-sig for the
+    # same reason) — HADES-7qi.
+    csv_content = "\ufeff" + output.getvalue()
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = f"HADES-{workflow_type}-{timestamp}.csv"
 

@@ -433,17 +433,29 @@ if st.session_state.pop("auto_run_confirmed", False) and not st.session_state.ge
 
             if result["success"]:
                 exported = result.get("summary", {}).get("contacts_exported", 0)
-                st.success(f"Pipeline complete — {exported} leads exported.")
+                _note = f"Pipeline complete — {exported} leads exported."
                 if result.get("batch_id"):
-                    st.caption(f"Batch {result['batch_id']}")
+                    _note += f" Batch {result['batch_id']}."
+                st.session_state["_auto_run_outcome"] = ("success", _note)
             else:
-                st.error(f"Pipeline failed: {result.get('error', 'Unknown error')}")
+                st.session_state["_auto_run_outcome"] = (
+                    "error", f"Pipeline failed: {result.get('error', 'Unknown error')}")
     except Exception as e:
         logger.error(f"Pipeline error: {e}", exc_info=True)
-        st.error("Pipeline error. Please try again or check the logs.")
+        st.session_state["_auto_run_outcome"] = (
+            "error", "Pipeline error before a run record was written — check the logs. "
+                     "Do NOT re-click blindly; a retry spends credits.")
     finally:
         st.session_state["auto_run_triggered"] = False
     st.rerun()
+
+# Run Now outcome — persisted across the rerun that used to wipe it (HADES-7qi)
+_outcome = st.session_state.pop("_auto_run_outcome", None)
+if _outcome:
+    if _outcome[0] == "success":
+        st.success(_outcome[1])
+    else:
+        st.error(_outcome[1])
 
 
 # --- Run History ---
@@ -556,15 +568,15 @@ if _reexport_batch:
                     if not contact.get("employees") and outcome.get("employee_count"):
                         contact["employees"] = outcome["employee_count"]
 
-                # Stage for CSV Export page
-                db.save_staged_export(
+                # Stage for CSV Export page — mark the row we just created
+                # (fetching "the newest row" instead could stamp a concurrent
+                # user's export on a same-second tie, HADES-7qi)
+                _staged_id = db.save_staged_export(
                     workflow_type="intent",
                     leads=enriched,
                     query_params={"re_export_batch": _reexport_batch},
                 )
-                staged_rows = db.get_staged_exports(limit=1)
-                if staged_rows:
-                    db.mark_staged_exported(staged_rows[0]["id"], _reexport_batch)
+                db.mark_staged_exported(_staged_id, _reexport_batch)
 
                 st.write(f"Staged {len(enriched)} leads for export")
                 reexport_status.update(
