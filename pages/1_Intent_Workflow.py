@@ -513,6 +513,19 @@ if st.session_state.intent_search_pending:
 
     # Pipeline run tracking (skip in test mode)
     if not st.session_state.intent_test_mode:
+        # A prior run still open here would be orphaned as 'running' forever
+        # when its run_id is overwritten below (HADES-mq5)
+        _prev_run_id = st.session_state.get("intent_run_id")
+        if _prev_run_id:
+            _prev_rl = st.session_state.get("intent_run_logger")
+            try:
+                db.complete_pipeline_run(
+                    _prev_run_id, "cancelled",
+                    _prev_rl.to_summary() if _prev_rl else {},
+                    None, 0, 0, "Superseded by a new search",
+                )
+            except Exception:
+                logger.warning("Could not close prior pipeline run", exc_info=True)
         st.session_state.intent_run_logger = RunLogger()
         st.session_state.intent_run_id = db.start_pipeline_run(
             "intent", "manual", {
@@ -1275,6 +1288,17 @@ if (
                 _rl = st.session_state.get("intent_run_logger")
                 if _rl:
                     _rl.error(f"Contact Search failed: {e.user_message}")
+                # Close the run — the generic handler below did this but the
+                # PipelineError path left it 'running' forever (HADES-mq5)
+                _run_id = st.session_state.get("intent_run_id")
+                if _rl and _run_id:
+                    db.complete_pipeline_run(
+                        _run_id, "failed", _rl.to_summary(),
+                        batch_id=None, credits_used=0,
+                        leads_exported=0, error=e.user_message,
+                    )
+                    st.session_state.intent_run_logger = None
+                    st.session_state.intent_run_id = None
                 st.error(e.user_message)
                 try:
                     db.log_error(
@@ -1580,6 +1604,16 @@ if (
                             _rl = st.session_state.get("intent_run_logger")
                             if _rl:
                                 _rl.error(f"Contact Enrich failed: {e.user_message}")
+                            # Close the run (was left 'running' forever, HADES-mq5)
+                            _run_id = st.session_state.get("intent_run_id")
+                            if _rl and _run_id:
+                                db.complete_pipeline_run(
+                                    _run_id, "failed", _rl.to_summary(),
+                                    batch_id=None, credits_used=0,
+                                    leads_exported=0, error=e.user_message,
+                                )
+                                st.session_state.intent_run_logger = None
+                                st.session_state.intent_run_id = None
                             st.error(f"Enrichment failed: {e.user_message}")
                             try:
                                 db.log_error(
