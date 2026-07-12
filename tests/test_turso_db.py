@@ -1191,3 +1191,82 @@ class TestCacheExpiryFormat:
         assert "datetime(expires_at)" in src
         assert "expires_at > CURRENT_TIMESTAMP" not in src
         assert "expires_at <= CURRENT_TIMESTAMP" not in src
+
+
+class TestConnectionThreadSafety:
+    """R-19 (HADES-638): one cached connection is shared by every Streamlit
+    session/thread with no lock, and a stale-stream reconnect inside an open
+    transaction silently replayed only the failing statement — committing a
+    partial transaction."""
+
+    def _db(self):
+        from turso_db import TursoDatabase
+        from unittest.mock import MagicMock, patch
+        with patch.object(TursoDatabase, "__init__", lambda self: None):
+            db = TursoDatabase()
+        db._conn = MagicMock()
+        db._in_transaction = False
+        return db
+
+    def test_stale_stream_inside_transaction_raises(self):
+        """No single-statement replay inside a transaction: earlier uncommitted
+        statements died with the old stream — replaying just this one and then
+        committing would persist a partial transaction."""
+        import pytest
+        db = self._db()
+        stale = Exception("Hrana: api error: status=404, `stream not found`")
+        db._conn.execute.side_effect = stale
+        reconnected = MagicMock()
+        db._reconnect = MagicMock(return_value=reconnected)
+        with pytest.raises(Exception, match="stream not found"):
+            with db.transaction():
+                db.execute_write("INSERT INTO t VALUES (?)", ("x",))
+        db._reconnect.assert_not_called()
+        reconnected.execute.assert_not_called()
+
+    def test_stale_stream_outside_transaction_still_replays(self):
+        db = self._db()
+        stale = Exception("Hrana: api error: status=404, `stream not found`")
+        db._conn.execute.side_effect = stale
+        reconnected = MagicMock()
+        cursor = MagicMock()
+        cursor.lastrowid = 7
+        reconnected.execute.return_value = cursor
+        db._reconnect = MagicMock(return_value=reconnected)
+        assert db.execute_write("INSERT INTO t VALUES (?)", ("x",)) == 7
+        reconnected.commit.assert_called_once()
+
+    def test_transaction_holds_the_lock(self):
+        """While one thread is inside transaction(), another thread must not
+        be able to acquire the connection lock (serialized access)."""
+        import threading
+        db = self._db()
+        acquired_during_txn = []
+        with db.transaction():
+            def _try():
+                acquired_during_txn.append(db.lock.acquire(blocking=False))
+            t = threading.Thread(target=_try)
+            t.start()
+            t.join()
+        assert acquired_during_txn == [False]
+        # and it is released afterwards
+        assert db.lock.acquire(blocking=False) is True
+        db.lock.release()
+
+    def test_execute_serialized_under_lock(self):
+        """execute() must run under the shared lock."""
+        db = self._db()
+        db._conn.execute.return_value.fetchall.return_value = []
+        seen = []
+        real_lock = db.lock
+
+        class SpyLock:
+            def __enter__(self):
+                seen.append("acquired")
+                return real_lock.__enter__()
+            def __exit__(self, *a):
+                return real_lock.__exit__(*a)
+
+        db._lock = SpyLock()
+        db.execute("SELECT 1")
+        assert seen == ["acquired"]
