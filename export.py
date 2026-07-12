@@ -335,3 +335,33 @@ def get_export_summary(leads: list[dict]) -> dict:
         "by_priority": by_priority,
         "by_state": dict(sorted(by_state.items(), key=lambda x: -x[1])[:5]),
     }
+
+
+def record_csv_export(db, leads: list[dict], batch_id: str | None,
+                      workflow_type: str) -> int:
+    """Record lead_outcomes rows for a downloaded CSV batch.
+
+    The download path previously recorded nothing (HADES-rkr), so companies
+    exported via CSV re-surfaced in every future search inside the 1-year
+    re-contact window. Idempotent per (batch_id, person_id) via the DB's
+    INSERT OR IGNORE + unique index, so a repeated click cannot double-record.
+
+    Returns the number of rows submitted.
+    """
+    import json
+    from datetime import timezone
+
+    if not batch_id or not leads:
+        return 0
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for lead in leads:
+        features = {k: v for k, v in lead.items() if k.startswith("_") and v is not None}
+        rows.append(db.build_outcome_row(
+            lead, batch_id, workflow_type, now_iso,
+            json.dumps(features) if features else None,
+        ))
+    db.record_lead_outcomes_batch(rows)
+    logger.info("CSV export recorded: %d leads, batch %s (%s)", len(rows), batch_id, workflow_type)
+    return len(rows)

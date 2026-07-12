@@ -921,3 +921,57 @@ class TestFieldlessEnrichmentBackfill:
         assert merged["firstName"] == "Nancy"
         assert merged["companyName"] == "BaneCare"
         assert contact_has_core_data(merged) is True
+
+
+class TestRecordCsvExport:
+    """R-12 (HADES-rkr): CSV downloads must enter lead_outcomes, or the
+    exported companies re-surface in every future search inside the 1-year
+    re-contact window (the rep audit email's exact complaint)."""
+
+    def _leads(self):
+        return [
+            {"personId": "p1", "companyId": "100", "companyName": "Acme",
+             "firstName": "A", "lastName": "One", "_score": 82, "_priority": "High"},
+            {"personId": "p2", "companyId": "200", "companyName": "Beta",
+             "firstName": "B", "lastName": "Two", "_score": 65},
+        ]
+
+    def test_records_one_outcome_row_per_lead(self):
+        from unittest.mock import MagicMock
+        from export import record_csv_export
+        db = MagicMock()
+        db.build_outcome_row.side_effect = lambda *a, **k: ("row",)
+        count = record_csv_export(db, self._leads(), "HADES-B1", "geography")
+        assert count == 2
+        assert db.build_outcome_row.call_count == 2
+        db.record_lead_outcomes_batch.assert_called_once()
+        # workflow + batch flow through
+        args = db.build_outcome_row.call_args_list[0][0]
+        assert args[1] == "HADES-B1"
+        assert args[2] == "geography"
+
+    def test_features_json_carries_underscore_fields(self):
+        from unittest.mock import MagicMock
+        import json as _json
+        from export import record_csv_export
+        db = MagicMock()
+        db.build_outcome_row.side_effect = lambda *a, **k: ("row",)
+        record_csv_export(db, self._leads(), "B", "intent")
+        features_arg = db.build_outcome_row.call_args_list[0][0][4]
+        features = _json.loads(features_arg)
+        assert features["_score"] == 82
+        assert features["_priority"] == "High"
+
+    def test_no_batch_id_records_nothing(self):
+        from unittest.mock import MagicMock
+        from export import record_csv_export
+        db = MagicMock()
+        assert record_csv_export(db, self._leads(), None, "intent") == 0
+        db.record_lead_outcomes_batch.assert_not_called()
+
+    def test_empty_leads_records_nothing(self):
+        from unittest.mock import MagicMock
+        from export import record_csv_export
+        db = MagicMock()
+        assert record_csv_export(db, [], "B", "intent") == 0
+        db.record_lead_outcomes_batch.assert_not_called()

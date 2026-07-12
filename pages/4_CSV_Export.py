@@ -9,7 +9,7 @@ import streamlit as st
 from datetime import datetime
 
 from turso_db import get_database
-from export import export_leads_to_csv, get_export_summary, build_vanillasoft_row
+from export import export_leads_to_csv, get_export_summary, build_vanillasoft_row, record_csv_export
 from vanillasoft_client import push_leads
 from dedup import find_duplicates, flag_duplicates_in_list, get_dedup_days_back
 from export_dedup import apply_export_dedup
@@ -461,6 +461,38 @@ def confirm_push_dialog(lead_count, operator_name):
         if st.button("Cancel", use_container_width=True):
             st.rerun()
 
+def _on_csv_download():
+    """Record the download as an export (HADES-rkr).
+
+    Runs once per click via on_click, before the rerun. Session-guarded per
+    lead set so repeated clicks on the same batch don't re-record (the DB's
+    INSERT OR IGNORE unique index is the second line of defense).
+    """
+    if st.session_state.get("_csv_download_recorded") == _export_cache_key:
+        return
+    recorded = record_csv_export(db, leads_to_export, batch_id, workflow_type)
+    if not recorded:
+        return
+    st.session_state["_csv_download_recorded"] = _export_cache_key
+    last_query = db.get_last_query(workflow_type)
+    if last_query:
+        db.update_query_exported(last_query["id"], recorded)
+    staged_id = st.session_state.get("_loaded_staged_id")
+    if staged_id and batch_id:
+        db.mark_staged_exported(staged_id, batch_id)
+    st.session_state.last_export_metadata = {
+        "count": recorded,
+        "timestamp": datetime.now().isoformat(),
+        "operator": selected_operator.get("operator_name") if selected_operator else None,
+        "batch_id": batch_id,
+        "method": "CSV downloaded",
+    }
+    if workflow_type == "intent":
+        st.session_state["intent_exported"] = True
+    else:
+        st.session_state["geo_exported"] = True
+
+
 # Buttons
 col1, col2, col3 = st.columns([2, 1, 1])
 
@@ -485,7 +517,9 @@ with col3:
         file_name=filename,
         mime="text/csv",
         use_container_width=True,
-        help="Download a CSV file formatted for VanillaSoft import (31 columns).",
+        help="Download a CSV file formatted for VanillaSoft import (31 columns). "
+             "Downloading marks these companies as exported for dedup purposes.",
+        on_click=_on_csv_download,
     )
 
 # Open confirmation dialog on button click
