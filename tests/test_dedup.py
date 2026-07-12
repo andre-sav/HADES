@@ -488,3 +488,51 @@ class TestFlagDuplicatesFuzzy:
         flagged = flag_duplicates_in_list(leads, other)
         assert flagged[0]["_is_duplicate"] is True
         assert flagged[1]["_is_duplicate"] is False
+
+
+class TestFuzzyStateGuard:
+    """R-16 (HADES-0r7): token_sort_ratio ≥ 85 matches realistic DISTINCT
+    companies ("atria senior living" vs "artis senior living" = 89.5) and the
+    cross-workflow exclusion silently drops the lower-scored lead. Known
+    different states = proof of different companies → never a fuzzy match."""
+
+    def test_find_duplicates_fuzzy_blocked_by_state_conflict(self):
+        leads1 = [{"phone": "555-111-1111", "companyName": "Atria Senior Living",
+                   "state": "TX", "_score": 80}]
+        leads2 = [{"phone": "555-222-2222", "companyName": "Artis Senior Living",
+                   "state": "FL", "_score": 70}]
+        assert find_duplicates(leads1, leads2) == []
+
+    def test_find_duplicates_fuzzy_allowed_same_state(self):
+        leads1 = [{"phone": "555-111-1111", "companyName": "Acme Services",
+                   "state": "TX", "_score": 80}]
+        leads2 = [{"phone": "555-222-2222", "companyName": "Acmee Services LLC",
+                   "state": "TX", "_score": 70}]
+        assert len(find_duplicates(leads1, leads2)) == 1
+
+    def test_find_duplicates_fuzzy_allowed_when_state_unknown(self):
+        """Missing state on either side keeps today's behavior (no proof)."""
+        leads1 = [{"phone": "555-111-1111", "companyName": "Acme Services", "_score": 80}]
+        leads2 = [{"phone": "555-222-2222", "companyName": "Acmee Services LLC",
+                   "state": "TX", "_score": 70}]
+        assert len(find_duplicates(leads1, leads2)) == 1
+
+    def test_exact_key_match_ignores_state(self):
+        """Tier-1 exact phone+name match is identity — state cannot veto it."""
+        leads1 = [{"phone": "555-111-1111", "companyName": "Acme", "state": "TX"}]
+        leads2 = [{"phone": "555-111-1111", "companyName": "Acme", "state": "FL"}]
+        assert len(find_duplicates(leads1, leads2)) == 1
+
+    def test_flag_duplicates_fuzzy_blocked_by_state_conflict(self):
+        leads = [{"phone": "555-111-1111", "companyName": "North Dallas Fitness",
+                  "state": "TX"}]
+        other = [{"phone": "555-222-2222", "companyName": "South Dallas Fitness",
+                  "state": "OK"}]
+        flagged = flag_duplicates_in_list(leads, other)
+        assert flagged[0]["_is_duplicate"] is False
+
+    def test_flag_duplicates_fuzzy_allowed_same_state(self):
+        leads = [{"phone": "555-111-1111", "companyName": "Acme Services", "state": "TX"}]
+        other = [{"phone": "555-333-3333", "companyName": "Acmee Services LLC", "state": "TX"}]
+        flagged = flag_duplicates_in_list(leads, other)
+        assert flagged[0]["_is_duplicate"] is True

@@ -108,6 +108,24 @@ def fuzzy_company_match(
     return score >= threshold
 
 
+def _lead_state(lead: dict) -> str:
+    """Best-effort state code from a lead dict ('' when unknown)."""
+    return str(lead.get("state") or lead.get("State") or "").strip().upper()
+
+
+def states_conflict(lead1: dict, lead2: dict) -> bool:
+    """True when both leads carry a KNOWN state and the states differ.
+
+    Two distinct known states are proof of two distinct companies — a fuzzy
+    name score can never override that (HADES-0r7: token_sort_ratio ≥ 85
+    matched real distinct chains like "atria"/"artis senior living" at 89.5
+    and the cross-workflow exclusion silently dropped the lower-scored lead).
+    Unknown state on either side proves nothing → no veto.
+    """
+    s1, s2 = _lead_state(lead1), _lead_state(lead2)
+    return bool(s1 and s2 and s1 != s2)
+
+
 def get_dedup_key(lead: dict) -> str:
     """
     Generate deduplication key from lead data.
@@ -251,8 +269,10 @@ def find_duplicates(
                 best_idx = idx
                 break
 
-            # Tier 2/3: fuzzy company match
-            if company1 and company2 and fuzzy_company_match(company1, company2):
+            # Tier 2/3: fuzzy company match — vetoed by a known-state conflict
+            # (two known different states = two different companies, HADES-0r7)
+            if (company1 and company2 and not states_conflict(lead1, lead2)
+                    and fuzzy_company_match(company1, company2)):
                 best_match = lead2
                 best_idx = idx
                 break
@@ -349,7 +369,7 @@ def flag_duplicates_in_list(leads: list[dict], other_leads: list[dict]) -> list[
     Uses exact key match first, then fuzzy company name fallback.
     """
     other_keys = set()
-    other_companies = []
+    other_companies = []  # (normalized_name, lead) — lead kept for the state veto
     for lead in other_leads:
         key = get_dedup_key(lead)
         if key and key != "|":
@@ -358,7 +378,7 @@ def flag_duplicates_in_list(leads: list[dict], other_leads: list[dict]) -> list[
             lead.get("companyName", "") or lead.get("Company", "") or ""
         )
         if company:
-            other_companies.append(company)
+            other_companies.append((company, lead))
 
     for lead in leads:
         key = get_dedup_key(lead)
@@ -368,11 +388,15 @@ def flag_duplicates_in_list(leads: list[dict], other_leads: list[dict]) -> list[
             lead["_is_duplicate"] = True
             continue
 
-        # Tier 2/3: fuzzy company fallback
+        # Tier 2/3: fuzzy company fallback — vetoed by a known-state conflict
+        # (two known different states = two different companies, HADES-0r7)
         company = normalize_company_name(
             lead.get("companyName", "") or lead.get("Company", "") or ""
         )
-        if company and any(fuzzy_company_match(company, oc) for oc in other_companies):
+        if company and any(
+            not states_conflict(lead, other) and fuzzy_company_match(company, oc)
+            for oc, other in other_companies
+        ):
             lead["_is_duplicate"] = True
         else:
             lead["_is_duplicate"] = False
