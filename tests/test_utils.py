@@ -521,3 +521,45 @@ class TestClearConfigCaches:
         clear_config_caches()
         assert dedup.get_dedup_days_back.cache_info().currsize == 0
         assert dedup._get_fuzzy_threshold.cache_info().currsize == 0
+
+
+class TestParseDbTimestamp:
+    """R-22 (HADES-eke): naive CURRENT_TIMESTAMP strings minus aware now()
+    raised TypeError on every row — swallowed into a permanent 'Unknown'
+    freshness badge. Naive DB timestamps are UTC and must parse as such."""
+
+    def test_sqlite_current_timestamp_format(self):
+        from datetime import timezone
+        from utils import parse_db_timestamp
+        dt = parse_db_timestamp("2026-07-11 14:30:00")
+        assert dt is not None
+        assert dt.tzinfo is not None  # aware — subtractable from now(UTC)
+        assert dt.astimezone(timezone.utc).hour == 14
+
+    def test_iso_with_offset(self):
+        from datetime import timezone
+        from utils import parse_db_timestamp
+        dt = parse_db_timestamp("2026-07-11T14:30:00+00:00")
+        assert dt == dt.astimezone(timezone.utc)
+
+    def test_iso_with_z_suffix(self):
+        from utils import parse_db_timestamp
+        assert parse_db_timestamp("2026-07-11T14:30:00Z") is not None
+
+    def test_naive_iso_t_format(self):
+        from utils import parse_db_timestamp
+        dt = parse_db_timestamp("2026-07-11T14:30:00.123456")
+        assert dt is not None and dt.tzinfo is not None
+
+    def test_garbage_returns_none(self):
+        from utils import parse_db_timestamp
+        assert parse_db_timestamp("not a date") is None
+        assert parse_db_timestamp("") is None
+        assert parse_db_timestamp(None) is None
+
+    def test_subtractable_from_utc_now(self):
+        from datetime import datetime, timezone
+        from utils import parse_db_timestamp
+        dt = parse_db_timestamp("2026-07-11 14:30:00")
+        delta = datetime.now(timezone.utc) - dt  # must not raise TypeError
+        assert delta.total_seconds() != 0 or True

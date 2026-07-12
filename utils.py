@@ -82,6 +82,27 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
+def parse_db_timestamp(ts):
+    """Parse a DB timestamp string into an AWARE UTC datetime, or None.
+
+    Every naive timestamp this app stores (SQLite CURRENT_TIMESTAMP
+    'YYYY-MM-DD HH:MM:SS', naive ISO) is UTC on the production runtimes, but
+    `datetime.now(timezone.utc) - naive` raises TypeError — which the home
+    page swallowed into a permanent 'Unknown' freshness badge (HADES-eke).
+    """
+    from datetime import datetime as _dt, timezone as _tz
+
+    if not ts or not isinstance(ts, str):
+        return None
+    try:
+        dt = _dt.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_tz.utc)
+    return dt
+
+
 def clear_config_caches() -> None:
     """Drop every process-lifetime cache derived from icp.yaml.
 
