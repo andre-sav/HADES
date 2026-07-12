@@ -450,7 +450,14 @@ def expand_search(
         should_skip = False
         skip_reason = None
 
-        if "radius" in step and step["radius"] <= current_params["radius"]:
+        if "radius" in step and not center_zip:
+            # Without a center ZIP (manual ZIP list / template mode) a radius
+            # step cannot recalculate ZIPs — do_search would re-run the exact
+            # same ZIP list while the expansion report claimed a wider radius
+            # was searched (HADES-1lq: up to 4 duplicate sweeps per search).
+            should_skip = True
+            skip_reason = "radius expansion unavailable (manual ZIP list — no center ZIP)"
+        elif "radius" in step and step["radius"] <= current_params["radius"]:
             should_skip = True
             skip_reason = f"radius {step['radius']}mi <= current {current_params['radius']}mi"
         if "accuracy_min" in step and step["accuracy_min"] >= current_params["accuracy_min"]:

@@ -684,3 +684,73 @@ class TestExpansionSteps:
         ]
         for step in steps:
             assert step["param"] in valid_params
+
+
+class TestRadiusExpansionRequiresCenterZip:
+    """R-26 (HADES-1lq): without a center ZIP (manual ZIP list / template mode)
+    a radius step cannot recalculate ZIPs — the sweep re-runs byte-identical
+    searches while the expansion report claims a larger radius was searched."""
+
+    @patch("expand_search.time.sleep")
+    def test_radius_steps_skipped_without_center_zip(self, mock_sleep):
+        from expand_search import expand_search
+        from unittest.mock import Mock
+
+        mock_client = Mock()
+        mock_client.search_contacts_all_pages.return_value = []
+        mock_client.last_search_truncated = None
+
+        result = expand_search(
+            client=mock_client,
+            base_params={
+                "radius": 0,  # manual ZIP list mode
+                "accuracy_min": 95,
+                "management_levels": ["Manager"],
+                "employee_max": 5000,
+                "location_type": "PersonAndHQ",
+                "include_person_only": False,
+                "sic_codes": ["7011"],
+                "center_zip": None,
+            },
+            zip_codes=["75201", "75202"],
+            states=["TX"],
+            target=25,
+            stop_early=True,
+        )
+
+        # No expansion may claim a radius change
+        assert all(e.get("param") != "radius" for e in result["expansion_steps"]), \
+            result["expansion_steps"]
+        # And no duplicate identical sweeps: initial + mgmt(2) + employee(1) + accuracy(2)
+        assert result["searches_performed"] <= 6
+
+    @patch("expand_search.time.sleep")
+    def test_radius_steps_still_run_with_center_zip(self, mock_sleep):
+        from expand_search import expand_search
+        from unittest.mock import Mock, patch as _patch
+
+        mock_client = Mock()
+        mock_client.search_contacts_all_pages.return_value = []
+        mock_client.last_search_truncated = None
+
+        with _patch("expand_search.get_zips_in_radius", return_value=[{"zip": "75201", "state": "TX"}]), \
+             _patch("expand_search.get_states_from_zips", return_value=["TX"]):
+            result = expand_search(
+                client=mock_client,
+                base_params={
+                    "radius": 15.0,
+                    "accuracy_min": 95,
+                    "management_levels": ["Manager"],
+                    "employee_max": 5000,
+                    "location_type": "PersonAndHQ",
+                    "include_person_only": False,
+                    "sic_codes": ["7011"],
+                    "center_zip": "75201",
+                },
+                zip_codes=["75201"],
+                states=["TX"],
+                target=25,
+                stop_early=True,
+            )
+
+        assert any(e.get("param") == "radius" for e in result["expansion_steps"])
