@@ -1049,11 +1049,21 @@ if (
                 "Age": st.column_config.TextColumn("Age", width="small"),
             },
             disabled=["Company", "Score", "Priority", "Freshness", "Signal", "Topic", "Age"],
-            key="intent_company_editor",
+            # Key includes the filter state: data_editor keeps edited_rows by ROW
+            # POSITION under a stable key, so a filter change would remap stale
+            # edits onto different companies (HADES-c44)
+            key=f"intent_company_editor_{'_'.join(sorted(priority_filter))}_{'_'.join(sorted(freshness_filter))}",
         )
 
-        # Sync selections
-        selected = {}
+        # Sync selections — MERGE, don't rebuild: only displayed rows can
+        # change state. Rebuilding from displayed rows alone silently dropped
+        # every selection hidden by the current filters (HADES-c44).
+        displayed_cids = {row["_companyId"] for row in display_data}
+        selected = {
+            cid: lead
+            for cid, lead in st.session_state.intent_selected_companies.items()
+            if cid not in displayed_cids
+        }
         for idx, row in edited_df.iterrows():
             if row["Select"]:
                 cid = display_data[idx]["_companyId"]
@@ -1063,6 +1073,14 @@ if (
                         selected[cid] = lead
                         break
         st.session_state.intent_selected_companies = selected
+        _hidden_selected = len(selected) - sum(
+            1 for cid in selected if cid in displayed_cids
+        )
+        if _hidden_selected > 0:
+            st.caption(
+                f"ℹ️ {_hidden_selected} selected compan{'y is' if _hidden_selected == 1 else 'ies are'} "
+                "hidden by the current filters — still selected."
+            )
 
         # Bulk actions
         bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns([1, 1, 1, 1])
