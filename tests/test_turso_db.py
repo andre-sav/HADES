@@ -1130,3 +1130,64 @@ class TestExcludeBatchId:
         db.execute = fake_execute
         db.get_exported_company_ids(days_back=365)
         assert "batch_id" not in captured["query"]
+
+
+class TestCacheExpiryFormat:
+    """R-17 (HADES-8s5): expires_at was written as local 'T'-ISO but compared
+    lexicographically against CURRENT_TIMESTAMP (UTC, space) — 'T' > ' ' kept
+    entries 'fresh' through their whole expiry date."""
+
+    def _db(self):
+        from turso_db import TursoDatabase
+        from unittest.mock import MagicMock, patch
+        with patch.object(TursoDatabase, "__init__", lambda self: None):
+            db = TursoDatabase()
+        db._conn = MagicMock()
+        return db
+
+    def test_expires_at_written_in_sqlite_utc_format(self):
+        import re
+        from datetime import datetime, timezone
+        db = self._db()
+        captured = {}
+        db.execute_write = lambda q, p=(): captured.update({"q": q, "p": p})
+        db.cache_results("cid", "intent", {}, [], ttl_days=7)
+        expires_at = captured["p"][4]
+        # SQLite-native: 'YYYY-MM-DD HH:MM:SS' — no 'T', no microseconds, no offset
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", expires_at), expires_at
+        # and it is UTC-based: within a minute of now(UTC)+7d
+        dt = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        drift = abs((dt - datetime.now(timezone.utc)).total_seconds() - 7 * 86400)
+        assert drift < 60
+
+    def test_reads_normalize_legacy_t_format(self):
+        """The read/purge/stats SQL must compare via datetime(expires_at) so
+        legacy 'T'-format rows expire correctly. Verified against real SQLite."""
+        import sqlite3
+        from datetime import datetime, timedelta, timezone
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE zoominfo_cache (id TEXT, expires_at TEXT)")
+        now_utc = datetime.now(timezone.utc)
+        expired_dt = now_utc - timedelta(seconds=5)
+        expired_t = expired_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
+        fresh_t = (now_utc + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.%f")
+        conn.execute("INSERT INTO zoominfo_cache VALUES ('old', ?)", (expired_t,))
+        conn.execute("INSERT INTO zoominfo_cache VALUES ('new', ?)", (fresh_t,))
+        # the buggy raw compare keeps the expired row "fresh" whenever the
+        # expiry DATE equals today's UTC date ('T' > ' ' at position 10)
+        buggy = conn.execute(
+            "SELECT id FROM zoominfo_cache WHERE expires_at > CURRENT_TIMESTAMP").fetchall()
+        if expired_dt.date() == now_utc.date():  # skip only across UTC midnight
+            assert ("old",) in buggy  # documents the bug this fix removes
+        # the fixed compare expires it
+        fixed = conn.execute(
+            "SELECT id FROM zoominfo_cache WHERE datetime(expires_at) > datetime('now')").fetchall()
+        assert fixed == [("new",)]
+
+    def test_mixin_sql_uses_datetime_normalization(self):
+        import inspect
+        from db._cache import CacheMixin
+        src = inspect.getsource(CacheMixin)
+        assert "datetime(expires_at)" in src
+        assert "expires_at > CURRENT_TIMESTAMP" not in src
+        assert "expires_at <= CURRENT_TIMESTAMP" not in src
