@@ -181,6 +181,10 @@ pyopenssl==25.3.0
 pyparsing==3.3.2
     # via matplotlib
 pytest==9.0.2
+    # via
+    #   -r /Users/boss/Projects/HADES/requirements.txt
+    #   pytest-asyncio
+pytest-asyncio==1.3.0
     # via -r /Users/boss/Projects/HADES/requirements.txt
 python-dateutil==2.9.0.post0
     # via
