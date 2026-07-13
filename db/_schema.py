@@ -199,6 +199,25 @@ class SchemaMixin:
                 last_selected TIMESTAMP
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS vanillasoft_leads (
+                contact_id TEXT PRIMARY KEY,
+                company_name TEXT,
+                company_norm TEXT,
+                phone_business TEXT,
+                phone_mobile TEXT,
+                phone_home TEXT,
+                zip TEXT,
+                state TEXT,
+                lead_status TEXT,
+                added_date TEXT,
+                is_hades INTEGER NOT NULL DEFAULT 0,
+                list_source TEXT,
+                imported_at TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_vs_leads_added ON vanillasoft_leads(added_date)",
+            "CREATE INDEX IF NOT EXISTS idx_vs_leads_norm ON vanillasoft_leads(company_norm)",
         ]
 
         for statement in schema_statements:

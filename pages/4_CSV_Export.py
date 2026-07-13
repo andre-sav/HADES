@@ -13,6 +13,7 @@ from export import export_leads_to_csv, get_export_summary, build_vanillasoft_ro
 from vanillasoft_client import push_leads
 from dedup import find_duplicates, flag_duplicates_in_list, get_dedup_days_back
 from export_dedup import apply_export_dedup
+from vs_leads import parse_vs_export
 from utils import get_call_center_agents
 from ui_components import (
     inject_base_styles,
@@ -54,6 +55,72 @@ except Exception as e:
 # HEADER
 # =============================================================================
 page_header("Export", "Push leads to VanillaSoft or download CSV")
+
+
+def render_vs_history_section():
+    """VanillaSoft lead-history import + status (HADES-dio).
+
+    The vanillasoft_leads table is the third dedup source — leads created
+    outside HADES (other reps, pre-HADES records) are invisible to
+    lead_outcomes and would be re-pushed without it.
+    """
+    labeled_divider("VanillaSoft Lead History")
+    try:
+        stats = db.get_vs_leads_stats()
+    except Exception:
+        logger.warning("VS lead history stats unavailable", exc_info=True)
+        stats = {"total": 0, "hades": 0, "latest_added": None}
+
+    if stats["total"]:
+        st.caption(
+            f"{stats['total']:,} VanillaSoft leads on file for dedup "
+            f"({stats['hades']:,} HADES-pushed) · latest Added Date "
+            f"{str(stats['latest_added'] or '')[:10]}"
+        )
+    else:
+        st.warning(
+            "No VanillaSoft lead history imported — dedup cannot see leads created "
+            "outside HADES (other reps, pre-HADES records) and may re-push them. "
+            "Import a VanillaSoft contact export below."
+        )
+
+    with st.expander("Import VanillaSoft contact export", expanded=not stats["total"]):
+        st.caption(
+            "Upload a VanillaSoft contact export (.csv). Re-imports are safe — rows are "
+            "keyed on ContactID and updated in place. For files over the upload limit "
+            "(~200MB), run `python scripts/import_vs_leads.py <file>` locally instead."
+        )
+        uploaded = st.file_uploader(
+            "VS contact export (.csv)", type=["csv"], key="vs_history_upload",
+        )
+        if uploaded is None:
+            return
+        parsed = parse_vs_export(uploaded, uploaded.name)
+        if not parsed.total_rows:
+            st.error("Could not parse any rows — is this a VanillaSoft contact export?")
+            return
+        st.caption(
+            f"{parsed.total_rows:,} rows · {len(parsed.rows):,} importable · "
+            f"{parsed.hades_count:,} HADES-pushed · "
+            f"{parsed.skipped_unmatchable:,} skipped (no company or phone)"
+        )
+        # Rerun guard: the upload widget re-delivers the same file every rerun.
+        file_sig = f"{uploaded.name}:{uploaded.size}"
+        if st.session_state.get("_vs_import_done") == file_sig:
+            st.success("Imported — dedup now sees this history.")
+            return
+        if st.button(f"Import {len(parsed.rows):,} leads", key="vs_import_btn"):
+            progress = st.progress(0.0, text="Importing…")
+            rows = parsed.rows
+            chunk = 500
+            for i in range(0, len(rows), chunk):
+                db.upsert_vs_leads_batch(rows[i:i + chunk])
+                done = min(i + chunk, len(rows))
+                progress.progress(done / len(rows),
+                                  text=f"Importing… {done:,}/{len(rows):,}")
+            progress.empty()
+            st.session_state["_vs_import_done"] = file_sig
+            st.rerun()
 
 
 # =============================================================================
@@ -163,6 +230,7 @@ if not intent_leads and not geo_leads:
                 ],
             )
 
+    render_vs_history_section()
     st.stop()
 
 
@@ -299,9 +367,36 @@ if dedup_result["filtered_count"] > 0:
         )
         leads_to_export = dedup_result["contacts"]
 
-        if not leads_to_export:
-            st.warning("All leads have been previously exported. Check the box above to re-export anyway.")
-            st.stop()
+    # Flag-first visibility (HADES-dio): companies matched against imported
+    # VanillaSoft history came from OTHER reps/channels — show the operator
+    # what they matched so the drop is a confirmed decision, not a silent one.
+    _vs_filtered = [c for c in dedup_result["filtered_contacts"]
+                    if c.get("_dedup_source") == "vanillasoft"]
+    if _vs_filtered:
+        with st.expander(
+            f"Already in VanillaSoft from non-HADES sources ({len(_vs_filtered)})",
+            expanded=False,
+        ):
+            st.caption(
+                "Existing VanillaSoft leads (any rep or channel) added within the "
+                "dedup window. Use the checkbox above to include them anyway."
+            )
+            styled_table(
+                rows=[{
+                    "company": c.get("companyName", ""),
+                    "status": c.get("_vs_lead_status") or "—",
+                    "added": (c.get("_vs_added_date") or "")[:10],
+                } for c in _vs_filtered],
+                columns=[
+                    {"key": "company", "label": "Company"},
+                    {"key": "status", "label": "VS Status"},
+                    {"key": "added", "label": "Added Date", "mono": True},
+                ],
+            )
+
+    if not include_exported and not leads_to_export:
+        st.warning("All leads have been previously exported. Check the box above to re-export anyway.")
+        st.stop()
 
 
 # =============================================================================
@@ -672,3 +767,5 @@ if _failed_state and _failed_state.get("cache_key") == _export_cache_key and _fa
             mime="text/csv",
             use_container_width=True,
         )
+
+render_vs_history_section()

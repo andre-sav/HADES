@@ -1,15 +1,24 @@
 """
 Cross-session export deduplication.
 
-Filters search results against previously exported companies (from lead_outcomes table).
+Filters search results against previously exported companies (from the
+lead_outcomes table) AND against VanillaSoft lead history imported into
+the vanillasoft_leads table (HADES-dio: leads created by other reps or
+pre-HADES channels have no ZoomInfo companyId and were invisible here).
 Separate from dedup.py which handles in-memory, within-session dedup.
 """
 
 import logging
 
 from dedup import normalize_company_name
+from utils import normalize_zip
+from vs_leads import normalize_phone
 
 logger = logging.getLogger(__name__)
+
+# Contact fields that may carry a phone worth matching against VS history.
+_CONTACT_PHONE_FIELDS = ("phone", "directPhone", "mobilePhone",
+                         "companyPhone", "companyHQPhone")
 
 
 def get_previously_exported(db, days_back: int = 365,
@@ -20,6 +29,8 @@ def get_previously_exported(db, days_back: int = 365,
         {
             "by_id": {company_id: {company_name, exported_at, workflow_type}},
             "by_name": {normalized_name: {company_name, exported_at, workflow_type}},
+            "vs_by_name": {normalized_name: [vs_entry, ...]},
+            "vs_by_phone": {ten_digit_phone: vs_entry},
         }
     """
     exported = db.get_exported_company_ids(days_back=days_back,
@@ -34,7 +45,45 @@ def get_previously_exported(db, days_back: int = 365,
             if normalized and normalized not in by_name:
                 by_name[normalized] = meta
 
-    return {"by_id": by_id, "by_name": by_name}
+    # Third source: VanillaSoft lead history (no companyId universe — the
+    # index cutoff enforces the 1-year re-contact rule).
+    vs_by_name: dict[str, list] = {}
+    vs_by_phone: dict[str, dict] = {}
+    for entry in db.get_vs_dedup_index(days_back=days_back):
+        if entry.get("company_norm"):
+            vs_by_name.setdefault(entry["company_norm"], []).append(entry)
+        for ph in (entry.get("phone_business"), entry.get("phone_mobile"),
+                   entry.get("phone_home")):
+            if ph and ph not in vs_by_phone:
+                vs_by_phone[ph] = entry
+
+    return {"by_id": by_id, "by_name": by_name,
+            "vs_by_name": vs_by_name, "vs_by_phone": vs_by_phone}
+
+
+def _match_vs_lead(contact: dict, vs_by_name: dict, vs_by_phone: dict) -> dict | None:
+    """Match a contact against VanillaSoft history.
+
+    VS rows have no ZoomInfo companyId, so a name match alone would
+    re-introduce the franchise false-drop (HADES-u1x). Rules:
+    1. Any contact phone matching a VS phone — company-level proof.
+    2. Normalized name match corroborated by an exact ZIP match.
+    No contact ZIP -> no name matching -> keep the contact.
+    """
+    if vs_by_phone:
+        for f in _CONTACT_PHONE_FIELDS:
+            ph = normalize_phone(contact.get(f))
+            if ph and ph in vs_by_phone:
+                return vs_by_phone[ph]
+
+    if vs_by_name:
+        normalized = normalize_company_name(contact.get("companyName", "") or "")
+        czip = normalize_zip(contact.get("zip") or contact.get("zipCode") or "")
+        if normalized and czip:
+            for entry in vs_by_name.get(normalized, []):
+                if entry.get("zip") and entry["zip"] == czip:
+                    return entry
+    return None
 
 
 def filter_previously_exported(
@@ -51,6 +100,8 @@ def filter_previously_exported(
     """
     by_id = lookup.get("by_id", {})
     by_name = lookup.get("by_name", {})
+    vs_by_name = lookup.get("vs_by_name", {})
+    vs_by_phone = lookup.get("vs_by_phone", {})
 
     new = []
     filtered = []
@@ -83,6 +134,20 @@ def filter_previously_exported(
         if match:
             contact["_previously_exported"] = True
             contact["_last_exported_at"] = match.get("exported_at", "")
+            contact["_dedup_source"] = "lead_outcomes"
+            filtered.append(contact)
+            continue
+
+        # Third source: VanillaSoft history — runs regardless of companyId
+        # (VS rows live in a companyId-less universe, so a known-numeric id
+        # proves nothing here).
+        vs_match = _match_vs_lead(contact, vs_by_name, vs_by_phone)
+        if vs_match:
+            contact["_previously_exported"] = True
+            contact["_last_exported_at"] = vs_match.get("added_date", "")
+            contact["_dedup_source"] = "vanillasoft"
+            contact["_vs_lead_status"] = vs_match.get("lead_status", "")
+            contact["_vs_added_date"] = vs_match.get("added_date", "")
             filtered.append(contact)
         else:
             new.append(contact)
