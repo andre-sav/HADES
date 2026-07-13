@@ -82,11 +82,15 @@ The sibling block (`pages/1:521-527`) wraps the same call in try/except because 
 | N-13 | UI intent resolution credit logging counts successful resolutions, not enrich responses — under-counts spend vs the HADES-n7u billing rule the headless path implements | `pages/1_Intent_Workflow.py:1174-1215` vs `scripts/run_intent_pipeline.py:343-372` | Mirror the script's `len(enriched)` accounting |
 | N-14 | No retention purge for `credit_usage`, `query_history`, `company_id_mapping` (one row per API call, unbounded) — the 7qi purge pattern covers only cache/staged/error_log | `db/_schema.py:230-239` | Extend startup purge (~1yr caps; TTL for the mapping cache) |
 | N-15 | Automation page hardcodes dedup fallback `365`, duplicating `get_dedup_days_back()` (this literal already drifted 180→365 once on this branch) | `pages/10_Automation.py:619` | Source from the shared function |
+| N-16 | TOCTOU: `has_running_pipeline` check and `start_pipeline_run` insert are separate — a scheduled cron firing while a user clicks Run Now both pass the guard → concurrent runs, double credit spend | `scripts/run_intent_pipeline.py:208` + `db/_pipeline.py:51,122` | Atomic claim (INSERT-WHERE-NOT-EXISTS lock row, or the UPSERT+RETURNING pattern from `export.py`) |
+| N-17 | Intent UI resolves company IDs with one `enrich_contacts_batch(person_ids=[pid])` call per company (× 0.5s min-interval) — the headless path batches all pids into one call. Same UI/headless parity region as N-13 | `pages/1_Intent_Workflow.py:~1175-1195` | Mirror the script's `pid_to_hid` single-batch pattern |
 
 ## P3 — minor
 
 - `scripts/backfill_exports.py` never exits non-zero (manual-only today; wire an exit code before it's ever scheduled).
 - `zoho_sync.sync_outcomes` stage classification is a substring match — "Not Delivered"/"Undelivered" would record as `delivery`, open deals as `no_delivery`. Dormant (zero callers) and the module is already in the KNOWN tail; new detail worth capturing in that bead.
+- Intent UI budget pre-check hardcodes `check_budget("intent", 100)` regardless of the selected target (`pages/1_Intent_Workflow.py:488`) — warning-accuracy only, since the real gate now sits at the spend point (HADES-n7u, `:1571`).
+- **Housekeeping:** `HADES_CODEBASE_FLAT.md` (untracked, generated ~March for an external review) is a stale full-codebase snapshot sitting in the repo root — it polluted this review's CodeRabbit pass with already-fixed findings and will mislead any future tool that scans the working tree. Delete it (and `REVIEW_PROMPT.md`) or move them out of the repo.
 
 ## KNOWN tail items independently re-confirmed (tracked in HADES-7qi — no new count)
 
@@ -99,7 +103,7 @@ The sibling block (`pages/1:521-527`) wraps the same call in try/except because 
 
 ## Coverage statement
 
-- CodeRabbit pass on the full branch diff: 22 findings (10 major / 12 minor); the 5 majors shown above were manually verified; full listing appended below when the capture re-run completes. Overlap with agent findings was high (the `complete_pipeline_run` and budget-skip items were found by both).
+- CodeRabbit ran twice. First pass (22 findings, 10 major/12 minor): the 5 captured majors were verified and are incorporated as N-07/N-08/N-15; the remainder were lost to an output-capture error mid-run. Second pass (4 majors): all cited the stale `HADES_CODEBASE_FLAT.md` snapshot rather than live code — after triage against current source, 2 were real-and-current (N-16, N-17), 1 was demoted to P3 (hardcoded budget pre-check, mitigated by the n7u spend-point gate), and 1 was stale (the HADES-8s5 cache-format bug, already fixed). Full second-pass output: session scratchpad `review/coderabbit-full.txt`.
 - No live API or production-DB verification (per policy). `ZoomInfoAPIError` status-0 frequency, mixed int/str ID frequency, and VS switchboard-phone prevalence are code-verified, not wire-measured.
 - Dashboards/dev pages (5-9) were swept for the cross-cutting patterns only, as in the prior review.
 - Test suite after review + same-day fixes: **956 passed**.
