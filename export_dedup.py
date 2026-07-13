@@ -16,9 +16,12 @@ from vs_leads import normalize_phone
 
 logger = logging.getLogger(__name__)
 
-# Contact fields that may carry a phone worth matching against VS history.
-_CONTACT_PHONE_FIELDS = ("phone", "directPhone", "mobilePhone",
-                         "companyPhone", "companyHQPhone")
+# Person-level phones are unique to a contact — a match is company-level
+# proof on its own. companyPhone/companyHQPhone are the chain-wide
+# switchboard shared by every location of a franchise, so they only count
+# when the ZIP corroborates the same physical location (HADES-u1x class).
+_PERSON_PHONE_FIELDS = ("phone", "directPhone", "mobilePhone")
+_COMPANY_PHONE_FIELDS = ("companyPhone", "companyHQPhone")
 
 
 def get_previously_exported(db, days_back: int = 365,
@@ -66,20 +69,29 @@ def _match_vs_lead(contact: dict, vs_by_name: dict, vs_by_phone: dict) -> dict |
 
     VS rows have no ZoomInfo companyId, so a name match alone would
     re-introduce the franchise false-drop (HADES-u1x). Rules:
-    1. Any contact phone matching a VS phone — company-level proof.
-    2. Normalized name match corroborated by an exact ZIP match.
-    No contact ZIP -> no name matching -> keep the contact.
+    1. A person-level phone matching a VS phone — proof on its own.
+    2. A company switchboard phone, or a normalized name match, corroborated
+       by an exact ZIP match.
+    No contact ZIP -> no switchboard/name matching -> keep the contact.
     """
+    czip = normalize_zip(contact.get("zip") or contact.get("zipCode")
+                         or contact.get("companyZipCode") or "")
+
     if vs_by_phone:
-        for f in _CONTACT_PHONE_FIELDS:
+        for f in _PERSON_PHONE_FIELDS:
             ph = normalize_phone(contact.get(f))
             if ph and ph in vs_by_phone:
                 return vs_by_phone[ph]
+        if czip:
+            for f in _COMPANY_PHONE_FIELDS:
+                ph = normalize_phone(contact.get(f))
+                entry = vs_by_phone.get(ph) if ph else None
+                if entry and entry.get("zip") == czip:
+                    return entry
 
-    if vs_by_name:
+    if vs_by_name and czip:
         normalized = normalize_company_name(contact.get("companyName", "") or "")
-        czip = normalize_zip(contact.get("zip") or contact.get("zipCode") or "")
-        if normalized and czip:
+        if normalized:
             for entry in vs_by_name.get(normalized, []):
                 if entry.get("zip") and entry["zip"] == czip:
                     return entry

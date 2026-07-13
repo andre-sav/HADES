@@ -476,6 +476,43 @@ class TestVanillaSoftDedup:
             contacts, {"by_id": {}, "by_name": {}})
         assert len(new) == 1
 
+    def test_company_switchboard_phone_alone_does_not_filter(self):
+        """Franchise safety for phones: companyPhone/companyHQPhone are the
+        chain-wide switchboard — every location of a hotel/gym/nursing chain
+        shares them. Without ZIP corroboration they prove nothing."""
+        contacts = [{
+            "companyName": "Sunrise Senior Living Dallas",
+            "companyId": "555006",
+            "companyHQPhone": "(516) 374-9300",  # matches the VS entry's phone
+            "zip": "75201",                       # different location
+        }]
+        new, filtered = filter_previously_exported(contacts, self._lookup([_vs_entry()]))
+        assert len(new) == 1
+        assert len(filtered) == 0
+
+    def test_company_switchboard_phone_with_matching_zip_filters(self):
+        """Switchboard phone + same ZIP = same physical location = dup."""
+        contacts = [{
+            "companyName": "Sunrise Senior Living",  # name drifted, won't name-match
+            "companyId": "555007",
+            "companyPhone": "5163749300",
+            "zip": "11598",
+        }]
+        new, filtered = filter_previously_exported(contacts, self._lookup([_vs_entry()]))
+        assert len(filtered) == 1
+        assert filtered[0]["_dedup_source"] == "vanillasoft"
+
+    def test_company_zip_code_field_backs_name_match(self):
+        """companyZipCode is a valid corroboration source when the contact
+        carries no person-level zip (mirrors ZOOMINFO_TO_VANILLASOFT chaining)."""
+        contacts = [{
+            "companyName": "Woodmere Health Care Center",
+            "companyId": "555008",
+            "companyZipCode": "11598",
+        }]
+        new, filtered = filter_previously_exported(contacts, self._lookup([_vs_entry()]))
+        assert len(filtered) == 1
+
 
 class TestGetPreviouslyExportedVsSource:
     """get_previously_exported builds VS lookup indexes from the DB."""
