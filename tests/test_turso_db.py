@@ -1108,7 +1108,6 @@ class TestExcludeBatchId:
         return db
 
     def test_exclude_batch_id_added_to_query(self):
-        from unittest.mock import MagicMock
         db = self._db()
         captured = {}
         def fake_execute(query, params=()):
@@ -1288,7 +1287,7 @@ class TestP3QuickWins:
         """DISTINCT + ORDER BY created_at returns an arbitrary row's timestamp
         per operator (observed: the oldest) — wrong recent-operators order."""
         from turso_db import TursoDatabase
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
         with patch.object(TursoDatabase, "__init__", lambda self: None):
             db = TursoDatabase()
         captured = {}

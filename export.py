@@ -7,9 +7,9 @@ import io
 import logging
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
-
 from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT, format_phone
+
+logger = logging.getLogger(__name__)
 
 
 def contact_has_core_data(contact: dict) -> bool:

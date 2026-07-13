@@ -1,7 +1,6 @@
 """Tests for MetadataMixin (db/_metadata.py)."""
 
 import sys
-import pytest
 from unittest.mock import MagicMock
 
 # Mock external dependencies before importing

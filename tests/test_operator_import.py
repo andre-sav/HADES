@@ -1,6 +1,5 @@
 # tests/test_operator_import.py
 import io
-import pytest
 import pandas as pd
 
 from operator_import import (

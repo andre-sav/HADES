@@ -57,8 +57,8 @@ def main():
             status = "Exported" if exp.get("batch_id") else "Staged"
             missing_str = ", ".join(missing) if missing else "none"
             print(f"{exp['id']:>4}  {exp.get('created_at', ''):<20} {exp['workflow_type']:<12} {exp['lead_count']:>5}  {status:<10}  {missing_str}")
-        print(f"\nTo backfill: python scripts/backfill_exports.py --id <ID> [--id <ID2>]")
-        print(f"To backfill all: python scripts/backfill_exports.py --all")
+        print("\nTo backfill: python scripts/backfill_exports.py --id <ID> [--id <ID2>]")
+        print("To backfill all: python scripts/backfill_exports.py --all")
         return
 
     # Determine which exports to process

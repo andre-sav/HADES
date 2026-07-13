@@ -11,6 +11,7 @@ import logging
 from typing import Optional, List, Dict, Any
 
 from zoho_auth import ZohoAuth, MAX_RETRIES, BASE_DELAY_SECONDS, MAX_DELAY_SECONDS, RETRYABLE_STATUS_CODES
+from errors import ZohoAPIError  # noqa: F401 (re-exported for backward compat)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -26,9 +27,6 @@ if not logger.handlers:
     )
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
-
-
-from errors import ZohoAPIError  # noqa: F401 (re-exported for backward compat)
 
 
 class ZohoClient:

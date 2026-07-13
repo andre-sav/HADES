@@ -49,7 +49,7 @@ from utils import (
     get_default_radius,
     get_default_target_contacts,
 )
-from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, haversine_distance, distance_between_zips
+from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, distance_between_zips
 from expand_search import (
     expand_search,
     build_contacts_by_company,

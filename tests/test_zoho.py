@@ -79,7 +79,6 @@ class TestZohoAuth:
 
     @pytest.mark.asyncio
     async def test_refresh_access_token(self):
-        import httpx
         auth = self._make_auth()
 
         mock_response = MagicMock()

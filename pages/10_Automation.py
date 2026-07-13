@@ -8,9 +8,8 @@ import requests
 import streamlit as st
 
 from turso_db import get_database
-from scoring import build_stale_guidance, score_intent_contacts, get_priority_label
-from export import export_leads_to_csv
-from utils import get_automation_config, get_budget_config, get_call_center_agents
+from scoring import build_stale_guidance, get_priority_label
+from utils import get_automation_config, get_budget_config
 from ui_components import (
     inject_base_styles,
     page_header,
@@ -585,7 +584,7 @@ if _reexport_batch:
                 )
                 st.page_link("pages/4_CSV_Export.py", label="Open CSV Export", icon="📤")
 
-            except Exception as e:
+            except Exception:
                 reexport_status.update(label="Re-export failed", state="error")
                 logger.exception("Re-export failed")
                 st.error("Re-export failed. Check application logs for details.")

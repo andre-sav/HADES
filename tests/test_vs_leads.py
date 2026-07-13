@@ -9,7 +9,6 @@ import io
 import sys
 from unittest.mock import MagicMock
 
-import pytest
 
 sys.modules.setdefault("streamlit", MagicMock())
 sys.modules.setdefault("libsql_experimental", MagicMock())

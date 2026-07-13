@@ -13,7 +13,6 @@ from unittest.mock import MagicMock
 # Mock streamlit before importing modules that depend on it
 sys.modules.setdefault("streamlit", MagicMock())
 
-import pytest
 from errors import (
     PipelineError,
     ZoomInfoAuthError,

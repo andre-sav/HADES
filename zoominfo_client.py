@@ -15,7 +15,7 @@ import requests
 import streamlit as st
 
 from errors import (
-    ZoomInfoError,
+    ZoomInfoError,  # noqa: F401 (re-exported for backward compat)
     ZoomInfoAuthError,
     ZoomInfoRateLimitError,
     ZoomInfoAPIError,

@@ -1,6 +1,5 @@
 """Lead outcome tracking operations."""
 
-import json
 
 
 class OutcomesMixin:

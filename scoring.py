@@ -7,8 +7,6 @@ import re
 from datetime import datetime, date
 from statistics import median
 
-logger = logging.getLogger(__name__)
-
 from utils import (
     get_scoring_weights,
     get_signal_strength_score,
@@ -20,6 +18,8 @@ from utils import (
     get_authority_title_keywords,
     get_intent_topics,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _calculate_authority_score(contact: dict) -> int:

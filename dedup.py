@@ -6,10 +6,11 @@ import logging
 import re
 from functools import lru_cache
 
-logger = logging.getLogger(__name__)
-
 from rapidfuzz.fuzz import token_sort_ratio
+
 from utils import load_config, normalize_phone
+
+logger = logging.getLogger(__name__)
 
 
 # Common company suffixes to strip for matching

@@ -5,7 +5,6 @@ Pipeline: Intent Search → Select Companies → Resolve company IDs → Contact
 Dual mode: Autopilot (auto-select) and Manual Review (user selects companies + contacts).
 """
 
-import hashlib
 import html
 import json
 import logging
