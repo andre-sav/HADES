@@ -470,3 +470,126 @@ class TestXSSEscaping:
             if re.search(r'st\.error\(f["\'].*\{e\}|st\.error\(str\(e\)', content):
                 violations.append(str(py_file))
         assert violations == [], f"Raw exceptions in st.error(): {violations}"
+
+
+class TestZipPrefixStateCorrections:
+    """R-05 (HADES-1b8): 201xx is Northern Virginia, not DC; single-ZIP
+    exceptions 06390 (Fishers Island NY) and 733xx (Austin TX)."""
+
+    def test_201_prefix_is_virginia(self):
+        # Ashburn, Manassas, Dulles — all VA
+        assert get_state_from_zip("20147") == "VA"
+        assert get_state_from_zip("20110") == "VA"
+        assert get_state_from_zip("20166") == "VA"
+
+    def test_dc_prefixes_still_dc(self):
+        assert get_state_from_zip("20001") == "DC"  # 200xx
+        assert get_state_from_zip("20500") == "DC"  # 205xx (White House)
+        assert get_state_from_zip("20220") == "DC"  # 202xx
+
+    def test_fishers_island_ny(self):
+        assert get_state_from_zip("06390") == "NY"
+        # rest of 063xx stays CT
+        assert get_state_from_zip("06320") == "CT"
+
+    def test_austin_733_is_texas(self):
+        assert get_state_from_zip("73301") == "TX"
+        # neighboring OK prefixes stay OK
+        assert get_state_from_zip("73101") == "OK"
+        assert get_state_from_zip("73401") == "OK"
+
+
+class TestClearConfigCaches:
+    """R-08 (HADES-zw1): applying calibration rewrites icp.yaml but the
+    process-lifetime lru_caches kept serving the OLD config — scoring silently
+    ignored the applied calibration until reboot."""
+
+    def test_load_config_cache_cleared(self, tmp_path, monkeypatch):
+        from utils import load_config, clear_config_caches
+        first = load_config()
+        assert load_config() is first  # cached (same object)
+        clear_config_caches()
+        second = load_config()
+        assert second is not first  # cache actually dropped
+
+    def test_cascades_to_dedup_caches(self):
+        import dedup
+        from utils import clear_config_caches
+        dedup.get_dedup_days_back()          # prime
+        dedup._get_fuzzy_threshold()         # prime
+        assert dedup.get_dedup_days_back.cache_info().currsize == 1
+        clear_config_caches()
+        assert dedup.get_dedup_days_back.cache_info().currsize == 0
+        assert dedup._get_fuzzy_threshold.cache_info().currsize == 0
+
+
+class TestParseDbTimestamp:
+    """R-22 (HADES-eke): naive CURRENT_TIMESTAMP strings minus aware now()
+    raised TypeError on every row — swallowed into a permanent 'Unknown'
+    freshness badge. Naive DB timestamps are UTC and must parse as such."""
+
+    def test_sqlite_current_timestamp_format(self):
+        from datetime import timezone
+        from utils import parse_db_timestamp
+        dt = parse_db_timestamp("2026-07-11 14:30:00")
+        assert dt is not None
+        assert dt.tzinfo is not None  # aware — subtractable from now(UTC)
+        assert dt.astimezone(timezone.utc).hour == 14
+
+    def test_iso_with_offset(self):
+        from datetime import timezone
+        from utils import parse_db_timestamp
+        dt = parse_db_timestamp("2026-07-11T14:30:00+00:00")
+        assert dt == dt.astimezone(timezone.utc)
+
+    def test_iso_with_z_suffix(self):
+        from utils import parse_db_timestamp
+        assert parse_db_timestamp("2026-07-11T14:30:00Z") is not None
+
+    def test_naive_iso_t_format(self):
+        from utils import parse_db_timestamp
+        dt = parse_db_timestamp("2026-07-11T14:30:00.123456")
+        assert dt is not None and dt.tzinfo is not None
+
+    def test_garbage_returns_none(self):
+        from utils import parse_db_timestamp
+        assert parse_db_timestamp("not a date") is None
+        assert parse_db_timestamp("") is None
+        assert parse_db_timestamp(None) is None
+
+    def test_subtractable_from_utc_now(self):
+        from datetime import datetime, timezone
+        from utils import parse_db_timestamp
+        dt = parse_db_timestamp("2026-07-11 14:30:00")
+        delta = datetime.now(timezone.utc) - dt  # must not raise TypeError
+        assert delta.total_seconds() != 0 or True
+
+
+class TestIntentCacheKey:
+    """R-18 (HADES-h83): the cache key hashed only topics+signals while the
+    actual API query also sends config-derived sic_codes and employee_min —
+    an icp.yaml change replayed week-old results filtered by OLD criteria."""
+
+    def test_same_inputs_same_key(self):
+        from utils import intent_cache_key
+        k1 = intent_cache_key(["Vending"], ["High"], ["7011", "8051"], 50)
+        k2 = intent_cache_key(["Vending"], ["High"], ["8051", "7011"], 50)  # order-insensitive
+        assert k1 == k2
+
+    def test_sic_change_changes_key(self):
+        from utils import intent_cache_key
+        k1 = intent_cache_key(["Vending"], ["High"], ["7011"], 50)
+        k2 = intent_cache_key(["Vending"], ["High"], ["7011", "4213"], 50)
+        assert k1 != k2
+
+    def test_employee_min_change_changes_key(self):
+        from utils import intent_cache_key
+        k1 = intent_cache_key(["Vending"], ["High"], ["7011"], 50)
+        k2 = intent_cache_key(["Vending"], ["High"], ["7011"], 100)
+        assert k1 != k2
+
+    def test_topics_change_changes_key(self):
+        from utils import intent_cache_key
+        k1 = intent_cache_key(["Vending"], ["High"], ["7011"], 50)
+        k2 = intent_cache_key(["Coffee"], ["High"], ["7011"], 50)
+        assert k1 != k2

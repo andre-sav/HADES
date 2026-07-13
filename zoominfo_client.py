@@ -142,6 +142,35 @@ DEFAULT_ENRICH_OUTPUT_FIELDS = [
 ]
 
 
+def _stamp_requested_pid(contact: dict, item: dict) -> dict:
+    """Ensure an extracted enrich contact carries the requested personId.
+
+    ZoomInfo echoes each request key back as item["input"]. When enrichment
+    matches but returns a fieldless data[0] payload (credit/entitlement
+    exhaustion), the contact has no id of its own — so the downstream
+    search-phase backfill (keyed on id/personId) misses and the row renders
+    blank. Stamping the requested personId lets the backfill restore the lead.
+
+    Only fills a missing id; a real id returned by the API always wins.
+    """
+    requested = ""
+    inp = item.get("input")
+    if isinstance(inp, dict):
+        requested = str(inp.get("personId") or "")
+    if requested and not (contact.get("id") or contact.get("personId")):
+        return {**contact, "id": requested, "personId": requested}
+    return contact
+
+
+def _search_was_truncated(pages_fetched: int, max_pages: int, total_pages: int) -> bool:
+    """True when a page cap stopped a search sweep before the real last page.
+
+    A bounded sweep (max_pages) that returns fewer results than ZoomInfo actually
+    has is a silent coverage cap — the operator must be told the set is partial.
+    """
+    return pages_fetched >= max_pages and total_pages > max_pages
+
+
 @dataclass
 class CompanyEnrichParams:
     """Parameters for Company Enrich API query."""
@@ -187,9 +216,24 @@ class ZoomInfoClient:
         self._token_store = token_store  # TursoDatabase instance for token persistence
         self.last_exchange: dict | None = None  # Captures last API request/response for debugging
         self._last_auth_response: dict | None = None  # Captures auth error details for debugging
+        # Surfaces silent page-cap truncation from the last search sweep so callers
+        # (expand_search / the UI) can tell the operator the result set is incomplete.
+        # Thread-local: the client is an @st.cache_resource singleton shared across
+        # sessions, and searches run in background threads — a plain attribute would
+        # let concurrent searches clobber or leak each other's truncation signal.
+        self._tls = threading.local()
         self._lock = threading.Lock()  # Guards token, last_exchange, and rate-limit state
         self._consecutive_failures = 0
         self._circuit_open_until: float = 0.0
+
+    @property
+    def last_search_truncated(self) -> dict | None:
+        """Per-thread page-cap truncation signal from the most recent search sweep."""
+        return getattr(self._tls, "search_truncated", None)
+
+    @last_search_truncated.setter
+    def last_search_truncated(self, value: dict | None) -> None:
+        self._tls.search_truncated = value
 
     def _get_token(self) -> str:
         """Get valid access token, refreshing if needed. Thread-safe."""
@@ -690,12 +734,15 @@ class ZoomInfoClient:
         current_page = 1
         raw_keys = []
         raw_sample = {}
+        last_total_pages = 0
         params = replace(params)  # Local copy to avoid mutating caller's params
+        self.last_search_truncated = None  # per-call reset (thread-local)
 
         while current_page <= max_pages:
             params.page = current_page
             result = self.search_intent(params)
             all_leads.extend(result["data"])
+            last_total_pages = result["pagination"]["totalPages"]
 
             # Capture raw API keys from first page for debugging
             if current_page == 1:
@@ -709,6 +756,23 @@ class ZoomInfoClient:
                 break
 
             current_page += 1
+
+        # Fail loud on a silent coverage cap — the sibling of the HADES-4u2
+        # contact-search bug: the page limit stopped the sweep before the real
+        # last page, so callers are seeing a partial company set (HADES-mms).
+        pages_fetched = min(current_page, max_pages)
+        if _search_was_truncated(pages_fetched, max_pages, last_total_pages):
+            self.last_search_truncated = {
+                "pages_fetched": pages_fetched,
+                "total_pages": last_total_pages,
+                "max_pages": max_pages,
+                "fetched": len(all_leads),
+            }
+            logger.warning(
+                "Intent Search TRUNCATED at page cap: fetched %d pages of %d "
+                "(max_pages=%d) — partial set of %d companies",
+                pages_fetched, last_total_pages, max_pages, len(all_leads),
+            )
 
         logger.info(f"Intent Search (all pages) complete: {len(all_leads)} total leads from {current_page} pages")
         # Attach debug info to help diagnose field mapping issues
@@ -921,6 +985,7 @@ class ZoomInfoClient:
             # Split into batches and search each
             logger.info(f"Contact Search (all pages): {len(zip_codes)} ZIPs exceeds {MAX_ZIPS_PER_BATCH}, splitting into batches")
             all_contacts_by_id = {}  # Dedupe across batches
+            truncation_signal = None  # Preserve truncation from ANY batch (single_batch resets per call)
 
             for batch_start in range(0, len(zip_codes), MAX_ZIPS_PER_BATCH):
                 batch_zips = zip_codes[batch_start:batch_start + MAX_ZIPS_PER_BATCH]
@@ -933,6 +998,8 @@ class ZoomInfoClient:
                 batch_params = replace(params, zip_codes=batch_zips)
 
                 batch_contacts = self._search_contacts_single_batch(batch_params, max_pages, progress_callback)
+                if self.last_search_truncated:
+                    truncation_signal = self.last_search_truncated
 
                 # Dedupe by contact id
                 for contact in batch_contacts:
@@ -940,6 +1007,7 @@ class ZoomInfoClient:
                     if contact_id and contact_id not in all_contacts_by_id:
                         all_contacts_by_id[contact_id] = contact
 
+            self.last_search_truncated = truncation_signal
             all_contacts = list(all_contacts_by_id.values())
             logger.info(f"Contact Search (all pages) complete: {len(all_contacts)} unique contacts from {total_batches} batches")
             return all_contacts
@@ -967,13 +1035,18 @@ class ZoomInfoClient:
         seen_person_ids = set()
         dupes_removed = 0
         current_page = 1
+        pages_fetched = 0
+        last_total_pages = 0
         params = replace(params)  # Local copy to avoid mutating caller's params
+        # Fresh sweep — clear any truncation signal from a prior search.
+        self.last_search_truncated = None
 
         while current_page <= max_pages:
             params.page = current_page
             result = self.search_contacts(params)
             page_results = result["data"]
             results_count = len(page_results)
+            pages_fetched += 1
 
             for contact in page_results:
                 pid = contact.get("personId") or contact.get("id")
@@ -985,6 +1058,7 @@ class ZoomInfoClient:
                 all_contacts.append(contact)
 
             total_pages = result["pagination"]["totalPages"]
+            last_total_pages = total_pages
 
             if progress_callback:
                 progress_callback(current_page, total_pages)
@@ -1000,6 +1074,21 @@ class ZoomInfoClient:
                 break
 
             current_page += 1
+
+        # Fail loud on a silent coverage cap: the page limit stopped us before the
+        # real last page, so the operator is seeing a partial result set.
+        if _search_was_truncated(pages_fetched, max_pages, last_total_pages):
+            self.last_search_truncated = {
+                "pages_fetched": pages_fetched,
+                "total_pages": last_total_pages,
+                "max_pages": max_pages,
+                "fetched": len(all_contacts),
+            }
+            logger.warning(
+                "Contact Search TRUNCATED at page cap: fetched %d pages of %d "
+                "(max_pages=%d) — operator is seeing a partial result set of %d contacts",
+                pages_fetched, last_total_pages, max_pages, len(all_contacts),
+            )
 
         logger.info(f"Contact Search (batch) complete: {len(all_contacts)} unique contacts ({dupes_removed} duplicates removed) from {current_page} pages")
         return all_contacts
@@ -1024,6 +1113,7 @@ class ZoomInfoClient:
 
         logger.info(f"Contact Search (by company): {len(company_ids)} IDs exceeds {MAX_COMPANY_IDS_PER_BATCH}, splitting into batches")
         all_contacts_by_id = {}
+        truncation_signal = None  # Preserve truncation from ANY batch (single_batch resets per call)
 
         for batch_start in range(0, len(company_ids), MAX_COMPANY_IDS_PER_BATCH):
             batch_ids = company_ids[batch_start:batch_start + MAX_COMPANY_IDS_PER_BATCH]
@@ -1035,12 +1125,15 @@ class ZoomInfoClient:
             batch_params = replace(params, company_ids=batch_ids)
 
             batch_contacts = self._search_contacts_single_batch(batch_params, max_pages, progress_callback)
+            if self.last_search_truncated:
+                truncation_signal = self.last_search_truncated
 
             for contact in batch_contacts:
                 contact_id = contact.get("id") or contact.get("personId")
                 if contact_id and contact_id not in all_contacts_by_id:
                     all_contacts_by_id[contact_id] = contact
 
+        self.last_search_truncated = truncation_signal
         all_contacts = list(all_contacts_by_id.values())
         logger.info(f"Contact Search (by company) complete: {len(all_contacts)} unique contacts from {total_batches} batches")
         return all_contacts
@@ -1160,7 +1253,7 @@ class ZoomInfoClient:
                 if isinstance(item, dict):
                     # Extract contact from item["data"][0] structure
                     if "data" in item and isinstance(item["data"], list) and item["data"]:
-                        contact = item["data"][0]
+                        contact = _stamp_requested_pid(item["data"][0], item)
                         contacts.append(contact)
                         logger.debug(f"Extracted contact: personId={contact.get('personId', 'N/A')}")
                     elif "firstName" in item or "lastName" in item:
@@ -1181,7 +1274,7 @@ class ZoomInfoClient:
                             # Each result item has {input, data, matchStatus}
                             # The actual contact is in item["data"][0]
                             if "data" in item and isinstance(item["data"], list) and item["data"]:
-                                contact = item["data"][0]
+                                contact = _stamp_requested_pid(item["data"][0], item)
                                 contacts.append(contact)
                                 logger.debug(f"Extracted contact from result: personId={contact.get('personId', 'N/A')}")
                             elif "firstName" in item or "lastName" in item:

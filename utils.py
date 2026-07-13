@@ -82,6 +82,65 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
+def intent_cache_key(topics: list[str], signal_strengths: list[str],
+                     sic_codes: list[str], employee_min) -> str:
+    """Deterministic cache key covering EVERY parameter the intent API call sends.
+
+    The old key hashed only topics+signals, so an icp.yaml change (SIC list,
+    employee minimum — routinely tuned) replayed week-old results filtered by
+    the OLD criteria as fresh cache hits for the 7-day TTL (HADES-h83).
+    """
+    import hashlib
+    import json as _json
+
+    normalized = _json.dumps(
+        {
+            "topics": sorted(topics),
+            "signals": sorted(signal_strengths),
+            "sic_codes": sorted(str(s) for s in (sic_codes or [])),
+            "employee_min": employee_min,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+
+def parse_db_timestamp(ts):
+    """Parse a DB timestamp string into an AWARE UTC datetime, or None.
+
+    Every naive timestamp this app stores (SQLite CURRENT_TIMESTAMP
+    'YYYY-MM-DD HH:MM:SS', naive ISO) is UTC on the production runtimes, but
+    `datetime.now(timezone.utc) - naive` raises TypeError — which the home
+    page swallowed into a permanent 'Unknown' freshness badge (HADES-eke).
+    """
+    from datetime import datetime as _dt, timezone as _tz
+
+    if not ts or not isinstance(ts, str):
+        return None
+    try:
+        dt = _dt.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_tz.utc)
+    return dt
+
+
+def clear_config_caches() -> None:
+    """Drop every process-lifetime cache derived from icp.yaml.
+
+    Must be called after anything rewrites the config file (Score Calibration
+    "Apply", HADES-zw1) — otherwise scoring keeps using the superseded values
+    until the next app reboot while the UI claims the update took effect.
+    Cascades to consumers that hold their own lru_cache over config values.
+    """
+    load_config.cache_clear()
+    import dedup  # local import — dedup imports utils at module level
+
+    dedup._get_fuzzy_threshold.cache_clear()
+    dedup.get_dedup_days_back.cache_clear()
+
+
 def get_hard_filters() -> dict:
     """Get hard ICP filters for API queries."""
     config = load_config()
@@ -385,8 +444,18 @@ ZIP_PREFIX_TO_STATE = {
     **{str(i): "WI" for i in range(530, 550)},
     # Wyoming (820-831)
     **{str(i): "WY" for i in range(820, 832)},
-    # DC (200-205)
-    **{str(i): "DC" for i in range(200, 206)},
+    # DC (200, 202-205) — 201xx is Northern Virginia, NOT DC (HADES-1b8:
+    # the mislabel sent state=DC for Ashburn/Manassas searches → zero results)
+    "200": "DC",
+    "201": "VA",
+    **{str(i): "DC" for i in range(202, 206)},
+    # Single-prefix corrections (later keys override the ranges above)
+    "733": "TX",  # Austin TX (73301/73344), not Oklahoma
+}
+
+# Whole-prefix maps can't express single-ZIP exceptions:
+ZIP_EXCEPTIONS_TO_STATE = {
+    "06390": "NY",  # Fishers Island NY — the only non-CT ZIP in 063xx
 }
 
 
@@ -441,6 +510,8 @@ def get_state_from_zip(zip_code: str) -> str | None:
     cleaned = normalize_zip(zip_code)
     if not cleaned:
         return None
+    if cleaned in ZIP_EXCEPTIONS_TO_STATE:
+        return ZIP_EXCEPTIONS_TO_STATE[cleaned]
     prefix = cleaned[:3]
     return ZIP_PREFIX_TO_STATE.get(prefix)
 

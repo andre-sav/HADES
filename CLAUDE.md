@@ -9,7 +9,7 @@ Streamlit UI → ZoomInfo API → Scoring Engine → Turso DB → VanillaSoft Pu
 ```
 
 **Key Components:**
-- **Turso (libsql)** - Cloud SQLite for persistence (11 tables: operators, cache, usage, templates, queries, company IDs, sync metadata, historical/lead outcomes, staged exports, pipeline runs)
+- **Turso (libsql)** - Cloud SQLite for persistence (14 tables: operators, cache, usage, templates, queries, company IDs, sync metadata, historical/lead outcomes, staged exports, pipeline runs, error log, title preferences, VanillaSoft lead history)
 - **ZoomInfo API** - OAuth client with retry logic, rate limiting, Contact Search, Intent Search (v2 JSON:API)
 - **Scoring Engine** - Weighted scoring based on signal strength, proximity, on-site likelihood
 - **Cost Tracker** - Budget controls with weekly caps and alerts
@@ -43,6 +43,7 @@ HADES/
 ├── errors.py             # PipelineError base class and exception hierarchy
 ├── export.py             # VanillaSoft CSV generation
 ├── vanillasoft_client.py # VanillaSoft Incoming Web Leads push client
+├── vs_leads.py           # VanillaSoft contact-export parsing (dedup source)
 ├── utils.py              # Config loading, phone formatting, ZIP-to-state mapping
 ├── geo.py                # ZIP radius calculations, haversine distance
 ├── db/                   # Database package (mixin-based)
@@ -59,7 +60,8 @@ HADES/
 │   ├── _staged.py        # Staged exports
 │   ├── _pipeline.py      # Pipeline run history
 │   ├── _metadata.py      # Sync metadata key-value store
-│   └── _error_log.py     # Persistent error logging
+│   ├── _error_log.py     # Persistent error logging
+│   └── _vs_leads.py      # VanillaSoft lead history (export dedup source)
 ├── config/
 │   └── icp.yaml          # ICP filters, scoring weights, SIC codes
 ├── data/
@@ -78,6 +80,7 @@ HADES/
 │   └── 11_Pipeline_Health.py    # System health indicators + diagnostics
 ├── scripts/
 │   ├── run_intent_pipeline.py    # Headless intent pipeline (cron/manual)
+│   ├── import_vs_leads.py        # Bulk-import VS contact export for dedup
 │   └── _credentials.py           # Credential loader (env → toml → st.secrets)
 ├── .github/workflows/
 │   └── intent-poll.yml           # Daily intent poll (Mon-Fri 7AM ET)
@@ -299,7 +302,8 @@ states = get_states_from_zips(zips)
 
 ## Status
 
-- **761 tests passing** (all tests green)
+- **953 tests passing** (all tests green)
+- ✅ **VanillaSoft lead-history dedup** (HADES-dio) — `vs_leads.py` parses the VS contact export into `vanillasoft_leads`; export dedup consults it as a third source (phone match, or name+ZIP — never name alone, franchise safety). Bulk import: `python scripts/import_vs_leads.py <export.csv>`; incremental: CSV Export page → VanillaSoft Lead History.
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
 - ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).
 - ✅ **Target Contacts Expansion** - Implemented 2026-02-03

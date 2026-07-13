@@ -953,3 +953,71 @@ class TestStaleSummary:
         guidance = build_stale_guidance(summary, ["Vending Machines", "Breakroom Solutions"], ["High", "Medium"])
         assert any("re-check" in g for g in guidance)
         assert any("barely stale" in g for g in guidance)
+
+
+class TestMergeNumericCompanyKeys:
+    """R-02 (HADES-hec): company_scores is keyed by hashed intent IDs while
+    contacts carry resolved numeric companyIds — the lookup must work by both."""
+
+    def test_adds_numeric_aliases(self):
+        from scoring import merge_numeric_company_keys
+        company_scores = {"hashed-1": {"_score": 88}, "hashed-2": {"_score": 72}}
+        numeric_map = {"hashed-1": 100, "hashed-2": 200}
+        merged = merge_numeric_company_keys(company_scores, numeric_map)
+        assert merged["100"] is company_scores["hashed-1"]
+        assert merged["200"] is company_scores["hashed-2"]
+        # hashed keys retained
+        assert merged["hashed-1"]["_score"] == 88
+
+    def test_unresolved_hashed_ids_ignored(self):
+        from scoring import merge_numeric_company_keys
+        company_scores = {"hashed-1": {"_score": 88}}
+        numeric_map = {"hashed-1": 100, "hashed-gone": 300}  # not in scores
+        merged = merge_numeric_company_keys(company_scores, numeric_map)
+        assert "100" in merged
+        assert "300" not in merged
+
+    def test_original_dict_not_mutated(self):
+        from scoring import merge_numeric_company_keys
+        company_scores = {"hashed-1": {"_score": 88}}
+        merge_numeric_company_keys(company_scores, {"hashed-1": 100})
+        assert list(company_scores.keys()) == ["hashed-1"]
+
+
+class TestEmployeeScoreDefensiveParsing:
+    """R-07 (HADES-tow): missing/messy employee counts silently scored 100
+    (the post-calibration TOP bucket) because the fallback constant 50 lands
+    in the 50-100 bucket. Unknown must be neutral; messy must parse."""
+
+    def test_missing_employee_count_is_neutral(self):
+        from scoring import calculate_geography_score
+        lead = {"firstName": "A", "companyName": "Acme"}
+        result = calculate_geography_score(lead)
+        assert result["employee_score"] == 50  # neutral, NOT the 100 top bucket
+
+    def test_zero_employees_is_neutral(self):
+        from scoring import calculate_geography_score
+        result = calculate_geography_score({"employees": 0})
+        assert result["employee_score"] == 50
+
+    def test_comma_string_parses(self):
+        from scoring import calculate_geography_score
+        # "1,200" employees → 501+ bucket → score 20 per calibrated config
+        result = calculate_geography_score({"employees": "1,200"})
+        assert result["employee_score"] == 20
+
+    def test_plus_string_parses(self):
+        from scoring import calculate_geography_score
+        # "500+" → 500 → 101-500 bucket → 80
+        result = calculate_geography_score({"employees": "500+"})
+        assert result["employee_score"] == 80
+
+    def test_int_in_top_bucket_still_scores_100(self):
+        from scoring import calculate_geography_score
+        result = calculate_geography_score({"employees": 75})
+        assert result["employee_score"] == 100
+
+    def test_unparseable_is_neutral(self):
+        from scoring import calculate_geography_score
+        result = calculate_geography_score({"employees": "unknown"})
+        assert result["employee_score"] == 50

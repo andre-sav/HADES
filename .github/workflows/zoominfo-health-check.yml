@@ -1,0 +1,52 @@
+name: ZoomInfo Health Check
+
+# Proactive credit/entitlement monitoring (HADES-1d3) so the SYSTEM detects
+# exhaustion before the operator sees blank leads (2026-06-15 incident).
+
+on:
+  schedule:
+    # 12:00 UTC = 8:00 AM ET — runs each morning before business hours so a
+    # credit/entitlement problem is flagged before the team pulls lists.
+    - cron: '0 12 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: zoominfo-health-check
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements-lock.txt
+
+      - name: Check ZoomInfo health (alerts on its own when degraded)
+        env:
+          ZOOMINFO_CLIENT_ID: ${{ secrets.ZOOMINFO_CLIENT_ID }}
+          ZOOMINFO_CLIENT_SECRET: ${{ secrets.ZOOMINFO_CLIENT_SECRET }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: python scripts/check_zoominfo_health.py
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: python scripts/notify_failure.py --workflow "ZoomInfo Health Check"

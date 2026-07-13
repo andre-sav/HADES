@@ -1094,3 +1094,206 @@ class TestMigrations:
         all_queries = [str(c) for c in mock_conn.execute.call_args_list]
         alter_calls = [q for q in all_queries if "ALTER" in q]
         assert len(alter_calls) == 0
+
+
+class TestExcludeBatchId:
+    """HADES-guz: a loaded staged batch must not be blocked by its own outcome rows."""
+
+    def _db(self):
+        from turso_db import TursoDatabase
+        from unittest.mock import MagicMock, patch
+        with patch.object(TursoDatabase, "__init__", lambda self: None):
+            db = TursoDatabase()
+        db._conn = MagicMock()
+        return db
+
+    def test_exclude_batch_id_added_to_query(self):
+        from unittest.mock import MagicMock
+        db = self._db()
+        captured = {}
+        def fake_execute(query, params=()):
+            captured["query"] = query
+            captured["params"] = params
+            return []
+        db.execute = fake_execute
+        db.get_exported_company_ids(days_back=365, exclude_batch_id="HADES-20260711-001")
+        assert "batch_id != ?" in captured["query"]
+        assert "HADES-20260711-001" in captured["params"]
+
+    def test_no_exclude_means_no_batch_condition(self):
+        db = self._db()
+        captured = {}
+        def fake_execute(query, params=()):
+            captured["query"] = query
+            captured["params"] = params
+            return []
+        db.execute = fake_execute
+        db.get_exported_company_ids(days_back=365)
+        assert "batch_id" not in captured["query"]
+
+
+class TestCacheExpiryFormat:
+    """R-17 (HADES-8s5): expires_at was written as local 'T'-ISO but compared
+    lexicographically against CURRENT_TIMESTAMP (UTC, space) — 'T' > ' ' kept
+    entries 'fresh' through their whole expiry date."""
+
+    def _db(self):
+        from turso_db import TursoDatabase
+        from unittest.mock import MagicMock, patch
+        with patch.object(TursoDatabase, "__init__", lambda self: None):
+            db = TursoDatabase()
+        db._conn = MagicMock()
+        return db
+
+    def test_expires_at_written_in_sqlite_utc_format(self):
+        import re
+        from datetime import datetime, timezone
+        db = self._db()
+        captured = {}
+        db.execute_write = lambda q, p=(): captured.update({"q": q, "p": p})
+        db.cache_results("cid", "intent", {}, [], ttl_days=7)
+        expires_at = captured["p"][4]
+        # SQLite-native: 'YYYY-MM-DD HH:MM:SS' — no 'T', no microseconds, no offset
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", expires_at), expires_at
+        # and it is UTC-based: within a minute of now(UTC)+7d
+        dt = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        drift = abs((dt - datetime.now(timezone.utc)).total_seconds() - 7 * 86400)
+        assert drift < 60
+
+    def test_reads_normalize_legacy_t_format(self):
+        """The read/purge/stats SQL must compare via datetime(expires_at) so
+        legacy 'T'-format rows expire correctly. Verified against real SQLite."""
+        import sqlite3
+        from datetime import datetime, timedelta, timezone
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE zoominfo_cache (id TEXT, expires_at TEXT)")
+        now_utc = datetime.now(timezone.utc)
+        expired_dt = now_utc - timedelta(seconds=5)
+        expired_t = expired_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
+        fresh_t = (now_utc + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.%f")
+        conn.execute("INSERT INTO zoominfo_cache VALUES ('old', ?)", (expired_t,))
+        conn.execute("INSERT INTO zoominfo_cache VALUES ('new', ?)", (fresh_t,))
+        # the buggy raw compare keeps the expired row "fresh" whenever the
+        # expiry DATE equals today's UTC date ('T' > ' ' at position 10)
+        buggy = conn.execute(
+            "SELECT id FROM zoominfo_cache WHERE expires_at > CURRENT_TIMESTAMP").fetchall()
+        if expired_dt.date() == now_utc.date():  # skip only across UTC midnight
+            assert ("old",) in buggy  # documents the bug this fix removes
+        # the fixed compare expires it
+        fixed = conn.execute(
+            "SELECT id FROM zoominfo_cache WHERE datetime(expires_at) > datetime('now')").fetchall()
+        assert fixed == [("new",)]
+
+    def test_mixin_sql_uses_datetime_normalization(self):
+        import inspect
+        from db._cache import CacheMixin
+        src = inspect.getsource(CacheMixin)
+        assert "datetime(expires_at)" in src
+        assert "expires_at > CURRENT_TIMESTAMP" not in src
+        assert "expires_at <= CURRENT_TIMESTAMP" not in src
+
+
+class TestConnectionThreadSafety:
+    """R-19 (HADES-638): one cached connection is shared by every Streamlit
+    session/thread with no lock, and a stale-stream reconnect inside an open
+    transaction silently replayed only the failing statement — committing a
+    partial transaction."""
+
+    def _db(self):
+        from turso_db import TursoDatabase
+        from unittest.mock import MagicMock, patch
+        with patch.object(TursoDatabase, "__init__", lambda self: None):
+            db = TursoDatabase()
+        db._conn = MagicMock()
+        db._in_transaction = False
+        return db
+
+    def test_stale_stream_inside_transaction_raises(self):
+        """No single-statement replay inside a transaction: earlier uncommitted
+        statements died with the old stream — replaying just this one and then
+        committing would persist a partial transaction."""
+        import pytest
+        db = self._db()
+        stale = Exception("Hrana: api error: status=404, `stream not found`")
+        db._conn.execute.side_effect = stale
+        reconnected = MagicMock()
+        db._reconnect = MagicMock(return_value=reconnected)
+        with pytest.raises(Exception, match="stream not found"):
+            with db.transaction():
+                db.execute_write("INSERT INTO t VALUES (?)", ("x",))
+        db._reconnect.assert_not_called()
+        reconnected.execute.assert_not_called()
+
+    def test_stale_stream_outside_transaction_still_replays(self):
+        db = self._db()
+        stale = Exception("Hrana: api error: status=404, `stream not found`")
+        db._conn.execute.side_effect = stale
+        reconnected = MagicMock()
+        cursor = MagicMock()
+        cursor.lastrowid = 7
+        reconnected.execute.return_value = cursor
+        db._reconnect = MagicMock(return_value=reconnected)
+        assert db.execute_write("INSERT INTO t VALUES (?)", ("x",)) == 7
+        reconnected.commit.assert_called_once()
+
+    def test_transaction_holds_the_lock(self):
+        """While one thread is inside transaction(), another thread must not
+        be able to acquire the connection lock (serialized access)."""
+        import threading
+        db = self._db()
+        acquired_during_txn = []
+        with db.transaction():
+            def _try():
+                acquired_during_txn.append(db.lock.acquire(blocking=False))
+            t = threading.Thread(target=_try)
+            t.start()
+            t.join()
+        assert acquired_during_txn == [False]
+        # and it is released afterwards
+        assert db.lock.acquire(blocking=False) is True
+        db.lock.release()
+
+    def test_execute_serialized_under_lock(self):
+        """execute() must run under the shared lock."""
+        db = self._db()
+        db._conn.execute.return_value.fetchall.return_value = []
+        seen = []
+        real_lock = db.lock
+
+        class SpyLock:
+            def __enter__(self):
+                seen.append("acquired")
+                return real_lock.__enter__()
+            def __exit__(self, *a):
+                return real_lock.__exit__(*a)
+
+        db._lock = SpyLock()
+        db.execute("SELECT 1")
+        assert seen == ["acquired"]
+
+
+class TestP3QuickWins:
+    """Grouped P3 fixes from the 2026-07-11 review (HADES-7qi)."""
+
+    def test_init_schema_wires_cache_and_error_log_purges(self):
+        """clear_expired_cache and purge_old_error_logs had ZERO callers —
+        unbounded Turso growth. They belong next to the staged purge."""
+        import inspect
+        from db._schema import SchemaMixin
+        src = inspect.getsource(SchemaMixin.init_schema)
+        assert "clear_expired_cache" in src
+        assert "purge_old_error_logs" in src
+
+    def test_recent_operator_ids_orders_by_max_created(self):
+        """DISTINCT + ORDER BY created_at returns an arbitrary row's timestamp
+        per operator (observed: the oldest) — wrong recent-operators order."""
+        from turso_db import TursoDatabase
+        from unittest.mock import MagicMock, patch
+        with patch.object(TursoDatabase, "__init__", lambda self: None):
+            db = TursoDatabase()
+        captured = {}
+        db.execute = lambda q, p=(): captured.update({"q": q}) or []
+        db.get_recent_operator_ids(limit=5)
+        q = captured["q"].upper()
+        assert "GROUP BY" in q
+        assert "MAX(CREATED_AT)" in q

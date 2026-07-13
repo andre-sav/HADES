@@ -33,8 +33,9 @@ from zoominfo_client import (
 )
 from scoring import score_geography_leads, get_priority_label, get_priority_action
 from db._title_prefs import normalize_title
+from dedup import get_dedup_days_back
 from export_dedup import apply_export_dedup
-from export import merge_contact, merge_company_data
+from export import merge_contact, merge_company_data, contact_has_core_data
 from cost_tracker import CostTracker
 from utils import (
     get_sic_codes,
@@ -48,7 +49,7 @@ from utils import (
     get_default_radius,
     get_default_target_contacts,
 )
-from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, haversine_distance
+from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, haversine_distance, distance_between_zips
 from expand_search import (
     expand_search,
     build_contacts_by_company,
@@ -210,6 +211,8 @@ def _reset_geo_search_state():
     st.session_state.geo_dedup_result = None
     st.session_state.geo_last_search_params = {}
     st.session_state.pop("geo_export_leads", None)
+    st.session_state.pop("geo_enrich_error", None)
+    st.session_state.pop("geo_search_error", None)
     # Complete any in-flight pipeline run as cancelled
     _reset_run_id = st.session_state.get("geo_run_id")
     _reset_rl = st.session_state.get("geo_run_logger")
@@ -776,7 +779,7 @@ if has_operator:
             current_only = st.toggle("Current Employees Only", value=last_filters.get("current_only", True), key="geo_current_emp_switch")
 
         with qf_col4:
-            st.caption("Previously exported companies are filtered in search results (last 180 days).")
+            st.caption(f"Previously exported companies are filtered in search results (last {get_dedup_days_back()} days).")
 
         # Required phone fields (second row)
         st.markdown("---")
@@ -1020,6 +1023,13 @@ if has_operator:
             st.error("No search parameters found. Please preview the request first.")
             st.stop()
 
+        # Invalidate ALL downstream state from any previous search (HADES-aoe):
+        # without this, enrichment/staging flags survive and the Results section
+        # re-renders the OLD enriched contacts relabeled with the NEW search's
+        # metadata — the operator exports search A believing it's search B.
+        # (sp is captured above; the reset clears geo_pending_search_params.)
+        _reset_geo_search_state()
+
         search_zip_codes = sp["zip_codes"]
         search_states = sp["states"]
         search_location_type = sp["location_type"]
@@ -1146,6 +1156,22 @@ if has_operator:
                 if _rl:
                     _rl.warn(f"Search stopped early: {result['found']} companies")
 
+            # Fail loud on a silent coverage cap: ZoomInfo had more results than
+            # the page limit fetched, so this preview is only a partial slice.
+            _trunc = result.get("truncated")
+            if _trunc:
+                st.warning(
+                    f"⚠️ Showing a **partial** result set — ZoomInfo had more than the "
+                    f"{_trunc.get('fetched', 'shown')} contacts fetched (reached the "
+                    f"{_trunc.get('max_pages')}-page limit of ~{_trunc.get('total_pages')} pages). "
+                    "Narrow the radius/filters to see all matches, or treat this as a sample."
+                )
+                if _rl:
+                    _rl.warn(
+                        f"Search truncated at page cap: fetched {_trunc.get('fetched')} of "
+                        f"~{_trunc.get('total_pages')} pages"
+                    )
+
             st.session_state.geo_preview_contacts = result["contacts"]
             st.session_state.geo_search_executed = True
 
@@ -1160,7 +1186,8 @@ if has_operator:
             # Cross-session export dedup: filter previously exported companies
             include_exported = st.session_state.get("geo_include_exported", False)
             dedup_result = apply_export_dedup(
-                result["contacts"], db, days_back=180, include_exported=include_exported,
+                result["contacts"], db, days_back=get_dedup_days_back(),
+                include_exported=include_exported,
             )
             st.session_state.geo_dedup_result = dedup_result
 
@@ -1240,6 +1267,10 @@ if has_operator:
                 try:
                     if job.error:
                         st.error(f"Search failed: {job.error}")
+                        # Persist: the st.rerun() below redraws the whole page
+                        # immediately, so an inline-only error simply vanished
+                        # and the search looked like it never happened (HADES-709)
+                        st.session_state["geo_search_error"] = job.error
                         # Log search failure to pipeline run
                         _rl = st.session_state.get("geo_run_logger")
                         _run_id = st.session_state.get("geo_run_id")
@@ -1254,6 +1285,7 @@ if has_operator:
                             st.session_state.geo_run_logger = None
                             st.session_state.geo_run_id = None
                     elif job.result:
+                        st.session_state.pop("geo_search_error", None)
                         _store_geo_results(job.result, sp)
                 finally:
                     # Clean up job state even if _store_geo_results fails
@@ -1276,6 +1308,14 @@ if has_operator:
                 st.toast("Stopping after current API call...")
 
         _geo_search_monitor()
+
+    # Persisted failure from the background search (survives the post-job rerun)
+    _search_err = st.session_state.get("geo_search_error")
+    if _search_err and not st.session_state.get("geo_search_job"):
+        st.error(f"Search failed: {_search_err} — adjust parameters and search again.")
+        if st.button("Dismiss", key="geo_search_err_dismiss"):
+            st.session_state.pop("geo_search_error", None)
+            st.rerun()
 
 
 # =============================================================================
@@ -1320,7 +1360,7 @@ if (
                 "Include previously exported",
                 value=_prev_val,
                 key="geo_include_exported_cb",
-                help="Show contacts exported in the last 180 days. Useful if you want to re-contact previous leads.",
+                help=f"Show contacts exported in the last {get_dedup_days_back()} days. Useful if you want to re-contact previous leads.",
             )
             if _new_val != _prev_val:
                 st.session_state.geo_include_exported = _new_val
@@ -1634,7 +1674,11 @@ def _record_geo_title_preferences():
 # =============================================================================
 # ENRICHMENT STEP - After selection confirmed (both modes)
 # =============================================================================
-if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_contacts and not st.session_state.geo_enrichment_done:
+if (st.session_state.geo_selection_confirmed and st.session_state.geo_selected_contacts
+        and not st.session_state.geo_enrichment_done
+        # A failed attempt must NOT retry automatically on the next rerun —
+        # every retry spends credits (HADES-2xo). Explicit Retry button below.
+        and not st.session_state.get("geo_enrich_error")):
     st.markdown("---")
 
     if st.session_state.geo_mode == "manual":
@@ -1689,6 +1733,7 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                     st.rerun()
                 except PipelineError as e:
                     st.error(f"Enrichment failed: {e.user_message}")
+                    st.session_state.geo_enrich_error = e.user_message
                     _rl = st.session_state.get("geo_run_logger")
                     if _rl:
                         _rl.error(f"Contact Enrich failed: {e.user_message}")
@@ -1705,6 +1750,7 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
                 except Exception:
                     logger.exception("Geography enrichment failed")
                     st.error("Enrichment failed unexpectedly. Check application logs.")
+                    st.session_state.geo_enrich_error = "Unexpected error — check application logs"
                     _rl = st.session_state.get("geo_run_logger")
                     if _rl:
                         _rl.error("Contact Enrich failed unexpectedly")
@@ -1720,6 +1766,16 @@ if st.session_state.geo_selection_confirmed and st.session_state.geo_selected_co
     else:
         st.error("No valid person IDs found in selected contacts")
 
+
+# Persistent enrichment-failure panel (survives reruns; explicit retry only)
+if st.session_state.get("geo_enrich_error") and not st.session_state.geo_enrichment_done:
+    st.error(
+        f"Enrichment failed: {st.session_state.geo_enrich_error}. "
+        "It will not retry automatically (each attempt spends credits)."
+    )
+    if st.button("\U0001f504 Retry Enrichment", key="geo_enrich_retry_btn"):
+        st.session_state.pop("geo_enrich_error", None)
+        st.rerun()
 
 # =============================================================================
 # FINAL RESULTS - After enrichment complete (both modes)
@@ -1757,7 +1813,6 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
     center_zip = st.session_state.geo_query_params.get("center_zip") or (
         st.session_state.geo_query_params.get("zip_codes", [""])[0]
     )
-    centroids = load_zip_centroids()
 
     for i, contact in enumerate(enriched_contacts):
         pid = str(contact.get("id") or contact.get("personId") or "")
@@ -1767,15 +1822,17 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         enriched_contacts[i] = merge_contact(search_data, contact)
         contact = enriched_contacts[i]
 
-        # Compute distance from contact ZIP to center ZIP
+        # Compute distance from contact ZIP to center ZIP. distance_between_zips
+        # normalizes messy ZoomInfo ZIPs (ZIP+4, int, 4-digit) before the
+        # centroid lookup — a raw miss used to silently leave distance unset,
+        # and scoring then fabricated a 15mi default (HADES-1hw).
         contact_zip = (
             contact.get("zipCode")
             or contact.get("companyZipCode", "")
         )
-        if contact_zip and center_zip and contact_zip in centroids and center_zip in centroids:
-            c_lat, c_lng, _ = centroids[contact_zip]
-            t_lat, t_lng, _ = centroids[center_zip]
-            contact["distance"] = round(haversine_distance(c_lat, c_lng, t_lat, t_lng), 2)
+        _dist = distance_between_zips(contact_zip, center_zip)
+        if _dist is not None:
+            contact["distance"] = _dist
 
     # Company Enrich — fills sicCode, industry, employeeCount (free if contact already enriched)
     # Only run once per search (avoid re-calling API on every Streamlit rerun)
@@ -1816,6 +1873,15 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         lead["_priority"] = get_priority_label(lead.get("_score", 0))
         lead["_priority_action"] = get_priority_action(lead.get("_score", 0))
 
+    # P0 fail-loud guard (incident 2026-06-15): ZoomInfo enrichment can return
+    # matched-but-fieldless records when credits/entitlement lapse. Those score at
+    # the empty-lead baseline (uniform 64) and would render as blank "leads".
+    # Detect records that carry no real contact data and surface the problem
+    # instead of presenting an authoritative-looking table of blanks.
+    _empty_count = sum(1 for lead in scored if not contact_has_core_data(lead))
+    # Keep only deliverable leads in the result set consumed by the table,
+    # the export, and the CSV Export page.
+    scored = [lead for lead in scored if contact_has_core_data(lead)]
     st.session_state.geo_results = scored
 
     # Log usage (credits used for enrichment) - skip in test mode
@@ -1823,18 +1889,55 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         if st.session_state.geo_test_mode:
             st.caption("🧪 Test mode: Usage not logged")
         else:
+            # credits_used = what ZoomInfo charged (every enrich call, including
+            # fieldless matches). leads_returned = deliverable leads the operator
+            # actually gets (post-filter) — keep these distinct so the Usage
+            # Dashboard matches what's shown/exported.
             cost_tracker.log_usage(
                 workflow_type="geography",
                 query_params=st.session_state.geo_query_params,
                 credits_used=len(enriched_contacts),
-                leads_returned=len(enriched_contacts),
+                leads_returned=len(scored),
             )
             db.log_query(
                 workflow_type="geography",
                 query_params=st.session_state.geo_query_params,
-                leads_returned=len(enriched_contacts),
+                leads_returned=len(scored),
             )
         st.session_state.geo_usage_logged = True
+
+    # P0 banner: stop on a fully-empty enrichment, warn on a partial one.
+    _total_enriched = len(enriched_contacts)
+    if _empty_count and not scored:
+        st.error(
+            f"🛑 Enrichment returned no contact data for all {_total_enriched} "
+            "records. This usually means ZoomInfo enrichment credits are exhausted or "
+            "the enrichment entitlement has lapsed — search still works, enrichment "
+            "does not. Check the **Usage Dashboard** / ZoomInfo admin console before "
+            "retrying. No leads to display or export."
+        )
+        # Close out the pipeline run before halting — otherwise st.stop() leaves it
+        # in a non-terminal "running" state forever (the success completion lives
+        # in the export block below, which never renders).
+        _rl = st.session_state.get("geo_run_logger")
+        _run_id = st.session_state.get("geo_run_id")
+        if _rl and _run_id:
+            _rl.error(f"Enrichment returned no contact data for all {_total_enriched} records")
+            db.complete_pipeline_run(
+                _run_id, "failed", _rl.to_summary(),
+                batch_id=None, credits_used=len(enriched_contacts),
+                leads_exported=0, error="Enrichment returned no contact data (credit/entitlement?)",
+            )
+            st.session_state.geo_run_logger = None
+            st.session_state.geo_run_id = None
+        st.stop()
+    elif _empty_count:
+        st.warning(
+            f"⚠️ {_empty_count} of {_total_enriched} enriched records came back "
+            f"with no contact data (likely a ZoomInfo credit/entitlement issue). Showing "
+            f"the {len(scored)} records that returned data — check the "
+            "**Usage Dashboard** if you expected more."
+        )
 
     # Results summary
     preview_count = len(st.session_state.geo_preview_contacts or [])
@@ -1843,7 +1946,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        metric_card("Contacts Enriched", len(enriched_contacts), help_text="Verified contacts with updated phone and email")
+        metric_card("Contacts Enriched", len(scored), help_text="Verified contacts with real field data (empty matches excluded)")
 
     with col2:
         metric_card("Preview Found", preview_count, help_text="Total from initial search before enrichment")
@@ -2014,4 +2117,8 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             st.session_state.geo_company_enrich_done = False
             st.session_state.geo_enriched_contacts = None
             st.session_state.geo_usage_logged = False
+            # Re-enriched leads must re-stage, or "Load Most Recent"
+            # restores the stale first result set (HADES-aoe)
+            st.session_state.geo_leads_staged = False
+            st.session_state.pop("geo_enrich_error", None)
             st.rerun()

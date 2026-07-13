@@ -5,11 +5,16 @@ Pushes leads one-at-a-time via HTTP POST to VanillaSoft's post.aspx endpoint.
 Uses XML format for per-lead success/failure feedback.
 """
 
+import re
 import time
 from dataclasses import dataclass, field
 from xml.etree.ElementTree import Element, SubElement, tostring, fromstring
 
 import requests
+
+# Control characters that are invalid in XML 1.0 — ElementTree serializes them
+# raw, producing documents no conformant parser (including VanillaSoft's) accepts.
+_XML_INVALID_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 BASE_URL = "https://new.vanillasoft.net/post.aspx"
 REQUEST_TIMEOUT = 10  # seconds
@@ -69,19 +74,23 @@ VANILLASOFT_XML_FIELDS = {
 }
 
 
-def _build_xml(row: dict) -> str:
-    """Serialize a VanillaSoft row dict to XML for the Incoming Web Leads endpoint.
+def _build_xml(row: dict) -> bytes:
+    """Serialize a VanillaSoft row dict to UTF-8 XML bytes for the Incoming Web Leads endpoint.
 
     Only includes fields that have non-empty values and a mapping in VANILLASOFT_XML_FIELDS.
-    Special characters are escaped by ElementTree.
+    Special characters are escaped by ElementTree; XML-invalid control chars are stripped.
+
+    Returns pre-encoded UTF-8 bytes with an XML declaration: a str body would be
+    latin-1-encoded by http.client, raising UnicodeEncodeError on en-dashes/smart
+    quotes mid-batch (HADES-kc0) and sending mojibake for latin-1-encodable text.
     """
     root = Element("Lead")
     for col_name, xml_tag in VANILLASOFT_XML_FIELDS.items():
         value = row.get(col_name)
         if value is not None and str(value).strip():
             child = SubElement(root, xml_tag)
-            child.text = str(value)
-    return tostring(root, encoding="unicode")
+            child.text = _XML_INVALID_CHARS.sub("", str(value))
+    return tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 def _parse_response(text: str) -> tuple[bool, str | None]:
@@ -108,13 +117,17 @@ def push_lead(row: dict, web_lead_id: str) -> PushResult:
     company = row.get("Company", "")
     person_id = row.get("_personId")
 
-    xml_body = _build_xml(row)
+    try:
+        xml_body = _build_xml(row)
+    except Exception as e:
+        return PushResult(success=False, lead_name=lead_name, company=company, error=f"XML build failed: {e}", person_id=person_id)
+
     url = f"{BASE_URL}?id={web_lead_id}&typ=XML"
 
     try:
         resp = requests.post(
             url, data=xml_body,
-            headers={"Content-Type": "text/xml"},
+            headers={"Content-Type": "text/xml; charset=utf-8"},
             timeout=REQUEST_TIMEOUT,
         )
     except requests.exceptions.Timeout:
@@ -123,6 +136,11 @@ def push_lead(row: dict, web_lead_id: str) -> PushResult:
         return PushResult(success=False, lead_name=lead_name, company=company, error=f"Connection error: {e}", person_id=person_id)
     except requests.exceptions.RequestException as e:
         return PushResult(success=False, lead_name=lead_name, company=company, error=str(e), person_id=person_id)
+    except Exception as e:
+        # One bad lead must never kill the batch: an escaping exception here
+        # aborts push_leads before outcome recording, so already-POSTed leads
+        # are recorded nowhere and get re-pushed as CRM duplicates (HADES-kc0).
+        return PushResult(success=False, lead_name=lead_name, company=company, error=f"Unexpected error: {e}", person_id=person_id)
 
     if resp.status_code != 200:
         return PushResult(

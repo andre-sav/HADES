@@ -30,7 +30,7 @@ st.set_page_config(
 # Apply design system styles
 inject_base_styles()
 
-from utils import require_auth
+from utils import require_auth, parse_db_timestamp
 require_auth()
 
 # --- Header ---
@@ -89,8 +89,9 @@ def _freshness_badge(last_query):
     if not last_query:
         return status_badge("neutral", "No runs")
     try:
-        ts = last_query.get("created_at", "")
-        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        dt = parse_db_timestamp(last_query.get("created_at", ""))
+        if dt is None:
+            return status_badge("neutral", "Unknown")
         delta = datetime.now(timezone.utc) - dt
         if delta.days > 0:
             ago = f"{delta.days}d ago"
@@ -136,8 +137,8 @@ def _auto_detail(run):
         parts.append(f"{leads} leads")
     ts = run.get("completed_at") or run.get("started_at") or ""
     if ts:
-        try:
-            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        dt = parse_db_timestamp(ts)
+        if dt is not None:
             delta = datetime.now(timezone.utc) - dt
             if delta.days > 0:
                 parts.append(f"{delta.days}d ago")
@@ -145,8 +146,6 @@ def _auto_detail(run):
                 parts.append(f"{delta.seconds // 3600}h ago")
             else:
                 parts.append("Just now")
-        except (ValueError, TypeError):
-            pass
     return " · ".join(parts)
 
 

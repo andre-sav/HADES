@@ -199,6 +199,25 @@ class SchemaMixin:
                 last_selected TIMESTAMP
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS vanillasoft_leads (
+                contact_id TEXT PRIMARY KEY,
+                company_name TEXT,
+                company_norm TEXT,
+                phone_business TEXT,
+                phone_mobile TEXT,
+                phone_home TEXT,
+                zip TEXT,
+                state TEXT,
+                lead_status TEXT,
+                added_date TEXT,
+                is_hades INTEGER NOT NULL DEFAULT 0,
+                list_source TEXT,
+                imported_at TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_vs_leads_added ON vanillasoft_leads(added_date)",
+            "CREATE INDEX IF NOT EXISTS idx_vs_leads_norm ON vanillasoft_leads(company_norm)",
         ]
 
         for statement in schema_statements:
@@ -208,8 +227,16 @@ class SchemaMixin:
         # Migrations for existing tables (add columns if they don't exist)
         self._run_migrations()
 
-        # PII retention: purge old staged exports on startup
+        # PII retention + growth control: purge old rows on startup.
+        # clear_expired_cache/purge_old_error_logs previously had NO callers —
+        # expired cache blobs and error logs grew unbounded (HADES-7qi).
         self.purge_old_staged_exports(days=90)
+        try:
+            self.clear_expired_cache()
+            self.purge_old_error_logs(days=90)
+        except Exception:  # purge must never block startup
+            import logging
+            logging.getLogger(__name__).warning("Startup purge failed", exc_info=True)
 
     def _run_migrations(self) -> None:
         """Run schema migrations for existing tables."""

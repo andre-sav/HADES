@@ -78,10 +78,14 @@ class StagedExportsMixin:
 
     def get_recent_operator_ids(self, limit: int = 5) -> list[int]:
         """Get operator IDs recently used in exports (most recent first, deduplicated)."""
+        # GROUP BY + MAX: DISTINCT + ORDER BY created_at sorts each operator
+        # by an ARBITRARY retained row (observed: the oldest), pushing recently
+        # re-used operators out of the list (HADES-7qi).
         rows = self.execute(
-            "SELECT DISTINCT operator_id FROM staged_exports "
+            "SELECT operator_id FROM staged_exports "
             "WHERE operator_id IS NOT NULL "
-            "ORDER BY created_at DESC LIMIT ?",
+            "GROUP BY operator_id "
+            "ORDER BY MAX(created_at) DESC LIMIT ?",
             (limit,),
         )
         return [r[0] for r in rows]

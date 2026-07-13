@@ -51,9 +51,10 @@ from scoring import (
     calculate_age_days,
     compute_stale_summary,
     build_stale_guidance,
+    merge_numeric_company_keys,
 )
 from dedup import dedupe_leads
-from export import merge_contact, merge_company_data
+from export import merge_contact, merge_company_data, contact_has_core_data
 from cost_tracker import CostTracker
 from expand_search import build_contacts_by_company
 from db._title_prefs import normalize_title
@@ -62,6 +63,7 @@ from utils import (
     get_sic_codes,
     get_sic_codes_with_descriptions,
     get_employee_minimum,
+    intent_cache_key,
     get_employee_maximum,
     get_default_accuracy,
     get_default_management_levels,
@@ -153,13 +155,38 @@ for key, default in defaults.items():
         st.session_state[key] = default
 
 
+def _reset_intent_downstream():
+    """Invalidate everything derived from a previous search's results.
+
+    Called whenever a NEW search's companies land in session state (HADES-aoe):
+    without this, Step 2's confirmed selection, Step 3's contacts, and Step 4's
+    enriched results all survive a re-search, so search A's contacts get
+    reviewed/enriched/exported under search B's query params.
+    """
+    st.session_state.intent_selected_companies = {}
+    st.session_state.intent_companies_confirmed = False
+    st.session_state.intent_contacts_by_company = None
+    st.session_state.intent_selected_contacts = {}
+    st.session_state.intent_enrich_clicked = False
+    st.session_state.intent_enriched_contacts = None
+    st.session_state.intent_enrichment_done = False
+    st.session_state.intent_company_enrich_done = False
+    st.session_state.intent_usage_logged = False
+    st.session_state.intent_leads_staged = False
+    st.session_state.intent_results = None
+    st.session_state.intent_export_leads = None
+    st.session_state.intent_exported = False
+    st.session_state.pop("intent_numeric_map", None)
+    st.session_state.pop("intent_enrich_error", None)
+
+
 def _intent_cache_key(topics: list[str], signal_strengths: list[str]) -> str:
-    """Generate a deterministic cache key from intent search parameters."""
-    normalized = json.dumps(
-        {"topics": sorted(topics), "signals": sorted(signal_strengths)},
-        sort_keys=True,
-    )
-    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+    """Cache key covering every parameter the API call sends (HADES-h83).
+
+    Includes the config-derived SIC list and employee minimum — an icp.yaml
+    change must miss the cache, not replay results filtered by old criteria.
+    """
+    return intent_cache_key(topics, signal_strengths, get_sic_codes(), get_employee_minimum())
 
 
 # =============================================================================
@@ -486,6 +513,19 @@ if st.session_state.intent_search_pending:
 
     # Pipeline run tracking (skip in test mode)
     if not st.session_state.intent_test_mode:
+        # A prior run still open here would be orphaned as 'running' forever
+        # when its run_id is overwritten below (HADES-mq5)
+        _prev_run_id = st.session_state.get("intent_run_id")
+        if _prev_run_id:
+            _prev_rl = st.session_state.get("intent_run_logger")
+            try:
+                db.complete_pipeline_run(
+                    _prev_run_id, "cancelled",
+                    _prev_rl.to_summary() if _prev_rl else {},
+                    None, 0, 0, "Superseded by a new search",
+                )
+            except Exception:
+                logger.warning("Could not close prior pipeline run", exc_info=True)
         st.session_state.intent_run_logger = RunLogger()
         st.session_state.intent_run_id = db.start_pipeline_run(
             "intent", "manual", {
@@ -533,6 +573,7 @@ if st.session_state.intent_search_pending:
             _rl.info(f"Intent Search (cached): {len(deduped)} companies")
             _rl.set_metric("intent_results", len(deduped))
 
+        _reset_intent_downstream()  # new results invalidate prior selections (HADES-aoe)
         st.session_state.intent_companies = deduped
         st.session_state.intent_search_executed = True
         st.session_state.intent_search_pending = False
@@ -672,6 +713,9 @@ if st.session_state.intent_search_pending:
                         _rl.info(f"Intent Search: {len(deduped)} companies")
                         _rl.set_metric("intent_results", len(deduped))
 
+                    _reset_intent_downstream()  # new results invalidate prior selections (HADES-aoe)
+                    # Partial-coverage signal (HADES-mms): page cap stopped the sweep
+                    st.session_state["_intent_search_truncated"] = client.last_search_truncated
                     st.session_state.intent_companies = deduped
                     st.session_state.intent_search_executed = True
                     st.session_state.intent_search_pending = False
@@ -876,6 +920,13 @@ if _has_debug:
 # CACHE / DEDUP INDICATORS (shown after search, before company list)
 # =============================================================================
 if st.session_state.intent_search_executed and st.session_state.intent_companies:
+    _trunc = st.session_state.get("_intent_search_truncated")
+    if _trunc:
+        st.warning(
+            f"⚠️ Partial results: the page cap stopped the intent sweep at "
+            f"{_trunc['pages_fetched']}/{_trunc['total_pages']} pages — more companies "
+            f"match these topics than are shown ({_trunc['fetched']} fetched)."
+        )
     _indicator_parts = []
     _dedup_removed = st.session_state.get("_intent_dedup_removed", 0)
     if _dedup_removed:
@@ -998,11 +1049,21 @@ if (
                 "Age": st.column_config.TextColumn("Age", width="small"),
             },
             disabled=["Company", "Score", "Priority", "Freshness", "Signal", "Topic", "Age"],
-            key="intent_company_editor",
+            # Key includes the filter state: data_editor keeps edited_rows by ROW
+            # POSITION under a stable key, so a filter change would remap stale
+            # edits onto different companies (HADES-c44)
+            key=f"intent_company_editor_{'_'.join(sorted(priority_filter))}_{'_'.join(sorted(freshness_filter))}",
         )
 
-        # Sync selections
-        selected = {}
+        # Sync selections — MERGE, don't rebuild: only displayed rows can
+        # change state. Rebuilding from displayed rows alone silently dropped
+        # every selection hidden by the current filters (HADES-c44).
+        displayed_cids = {row["_companyId"] for row in display_data}
+        selected = {
+            cid: lead
+            for cid, lead in st.session_state.intent_selected_companies.items()
+            if cid not in displayed_cids
+        }
         for idx, row in edited_df.iterrows():
             if row["Select"]:
                 cid = display_data[idx]["_companyId"]
@@ -1012,6 +1073,14 @@ if (
                         selected[cid] = lead
                         break
         st.session_state.intent_selected_companies = selected
+        _hidden_selected = len(selected) - sum(
+            1 for cid in selected if cid in displayed_cids
+        )
+        if _hidden_selected > 0:
+            st.caption(
+                f"ℹ️ {_hidden_selected} selected compan{'y is' if _hidden_selected == 1 else 'ies are'} "
+                "hidden by the current filters — still selected."
+            )
 
         # Bulk actions
         bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns([1, 1, 1, 1])
@@ -1135,8 +1204,20 @@ if (
                 else:
                     st.write(f"All {len(numeric_map)} company IDs found in cache.")
 
+                # Resolution enriches consume credits — log them (HADES-n7u)
+                _resolution_enriches = len(numeric_map) - len(cached)
+                if _resolution_enriches > 0 and not st.session_state.intent_test_mode:
+                    cost_tracker.log_usage(
+                        workflow_type="intent",
+                        query_params={"source": "id_resolution"},
+                        credits_used=_resolution_enriches,
+                        leads_returned=0,
+                    )
                 st.write(f"Resolved {len(numeric_map)}/{len(company_ids)} company IDs.")
                 logger.info("Company ID resolution complete: %d/%d resolved", len(numeric_map), len(company_ids))
+                # Persist for scoring: enriched contacts carry NUMERIC companyIds,
+                # so company_scores must be aliased by numeric ID too (HADES-hec).
+                st.session_state.intent_numeric_map = numeric_map
 
                 if not numeric_map:
                     search_status.update(label="Could not resolve any company IDs", state="complete")
@@ -1160,6 +1241,15 @@ if (
                         st.write(f"Contact search: page {current_page}/{total_pages}")
 
                     contacts = client.search_contacts_all_pages(params, max_pages=5, progress_callback=_contact_page_progress)
+                    _c_trunc = client.last_search_truncated
+                    if _c_trunc:
+                        st.warning(
+                            f"⚠️ Partial contact set: page cap stopped the sweep at "
+                            f"{_c_trunc['pages_fetched']}/{_c_trunc['total_pages']} pages."
+                        )
+                        _rl = st.session_state.get("intent_run_logger")
+                        if _rl:
+                            _rl.warn(f"Contact Search truncated: {_c_trunc['pages_fetched']}/{_c_trunc['total_pages']} pages")
 
                     if not contacts:
                         logger.info("Contact search returned 0 results")
@@ -1225,6 +1315,17 @@ if (
                 _rl = st.session_state.get("intent_run_logger")
                 if _rl:
                     _rl.error(f"Contact Search failed: {e.user_message}")
+                # Close the run — the generic handler below did this but the
+                # PipelineError path left it 'running' forever (HADES-mq5)
+                _run_id = st.session_state.get("intent_run_id")
+                if _rl and _run_id:
+                    db.complete_pipeline_run(
+                        _run_id, "failed", _rl.to_summary(),
+                        batch_id=None, credits_used=0,
+                        leads_exported=0, error=e.user_message,
+                    )
+                    st.session_state.intent_run_logger = None
+                    st.session_state.intent_run_id = None
                 st.error(e.user_message)
                 try:
                     db.log_error(
@@ -1455,6 +1556,9 @@ if (
         st.session_state.intent_contacts_by_company
         and st.session_state.intent_selected_contacts
         and not st.session_state.intent_enrichment_done
+        # A failed attempt must NOT retry automatically on the next rerun —
+        # every retry spends credits (HADES-2xo). Explicit Retry button below.
+        and not st.session_state.get("intent_enrich_error")
         and (
             st.session_state.intent_mode == "autopilot"
             or st.session_state.intent_enrich_clicked
@@ -1462,6 +1566,19 @@ if (
     )
 
     if should_enrich:
+            # Gate at the point credits are actually spent — the search-time
+            # check ran hours earlier against a stale snapshot (HADES-n7u)
+            _budget_now = cost_tracker.check_budget(
+                "intent", len(st.session_state.intent_selected_contacts))
+            if _budget_now.alert_level == "exceeded":
+                # Route through the persistent enrich-error panel (C6: no
+                # st.stop with an open pipeline run) — Retry re-checks budget
+                st.session_state.intent_enrich_error = (
+                    "Weekly intent budget exceeded — enrichment blocked. "
+                    + (_budget_now.alert_message or "")
+                )
+                st.session_state.intent_enrich_clicked = False
+                st.rerun()
             selected_contacts = list(st.session_state.intent_selected_contacts.values())
             person_ids = [
                 c.get("personId") or c.get("id")
@@ -1522,9 +1639,21 @@ if (
                         except PipelineError as e:
                             logger.error("Enrichment failed: %s", e.user_message)
                             enrich_status.update(label="Enrichment failed", state="error")
+                            st.session_state.intent_enrich_error = e.user_message
+                            st.session_state.intent_enrich_clicked = False
                             _rl = st.session_state.get("intent_run_logger")
                             if _rl:
                                 _rl.error(f"Contact Enrich failed: {e.user_message}")
+                            # Close the run (was left 'running' forever, HADES-mq5)
+                            _run_id = st.session_state.get("intent_run_id")
+                            if _rl and _run_id:
+                                db.complete_pipeline_run(
+                                    _run_id, "failed", _rl.to_summary(),
+                                    batch_id=None, credits_used=0,
+                                    leads_exported=0, error=e.user_message,
+                                )
+                                st.session_state.intent_run_logger = None
+                                st.session_state.intent_run_id = None
                             st.error(f"Enrichment failed: {e.user_message}")
                             try:
                                 db.log_error(
@@ -1539,6 +1668,8 @@ if (
                         except Exception:
                             logger.exception("Enrichment failed")
                             enrich_status.update(label="Enrichment failed", state="error")
+                            st.session_state.intent_enrich_error = "Unexpected error — check application logs"
+                            st.session_state.intent_enrich_clicked = False
                             _rl = st.session_state.get("intent_run_logger")
                             if _rl:
                                 _rl.error("Contact Enrich failed unexpectedly")
@@ -1553,6 +1684,17 @@ if (
                                 st.session_state.intent_run_id = None
                             st.error("Enrichment failed unexpectedly. Check application logs.")
 
+
+# Persistent enrichment-failure panel (survives reruns; explicit retry only)
+if st.session_state.get("intent_enrich_error") and not st.session_state.intent_enrichment_done:
+    st.error(
+        f"Enrichment failed: {st.session_state.intent_enrich_error}. "
+        "It will not retry automatically (each attempt spends credits)."
+    )
+    if st.button("\U0001f504 Retry Enrichment", key="intent_enrich_retry_btn"):
+        st.session_state.pop("intent_enrich_error", None)
+        st.session_state.intent_enrich_clicked = True
+        st.rerun()
 
 # =============================================================================
 # STEP 4: RESULTS & EXPORT
@@ -1614,6 +1756,12 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
     for cid, company_data in st.session_state.intent_selected_companies.items():
         company_scores[str(cid)] = company_data
 
+    # Alias by resolved numeric ID — enriched contacts carry numeric companyIds,
+    # so the hashed-keyed dict alone can never match (HADES-hec).
+    company_scores = merge_numeric_company_keys(
+        company_scores, st.session_state.get("intent_numeric_map") or {}
+    )
+
     # Score contacts
     scored = score_intent_contacts(enriched_contacts, company_scores)
 
@@ -1628,6 +1776,19 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
         lead["_lead_source"] = f"ZoomInfo Intent - {topic} - {score} - {age}d"
         lead["_priority"] = get_priority_label(score)
         lead["_priority_action"] = get_priority_action(score)
+
+    # C1 fail-loud guard (incident 2026-06-15) — mirror of the Geography path:
+    # enrichment can return matched-but-fieldless records when ZoomInfo
+    # credits/entitlement lapse. Surface the problem instead of rendering an
+    # authoritative-looking table of blanks (HADES-wr2).
+    _empty_count = sum(1 for lead in scored if not contact_has_core_data(lead))
+    if _empty_count:
+        st.warning(
+            f"⚠️ {_empty_count} enriched contact(s) came back without usable "
+            "contact data (possible ZoomInfo credit/entitlement issue) and were "
+            "excluded from results and export."
+        )
+        scored = [lead for lead in scored if contact_has_core_data(lead)]
 
     st.session_state.intent_results = scored
 
@@ -1781,6 +1942,10 @@ if st.session_state.intent_enrichment_done and st.session_state.intent_enriched_
                     st.session_state.intent_enriched_contacts = None
                     st.session_state.intent_enrich_clicked = False
                     st.session_state.intent_usage_logged = False
+                    # Re-enriched leads must re-stage, or "Load Most Recent"
+                    # restores the stale first result set (HADES-aoe)
+                    st.session_state.intent_leads_staged = False
+                    st.session_state.pop("intent_enrich_error", None)
                     st.rerun()
 
         with col2:

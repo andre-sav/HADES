@@ -139,20 +139,28 @@ class OutcomesMixin:
             for r in rows
         ]
 
-    def get_exported_company_ids(self, days_back: int = 180) -> dict[str, dict]:
+    def get_exported_company_ids(self, days_back: int = 365,
+                                 exclude_batch_id: str | None = None) -> dict[str, dict]:
         """Get companies exported within the last N days.
 
         Returns dict mapping company_id -> {company_name, exported_at, workflow_type}.
         Only includes rows where company_id is not NULL/empty.
+
+        exclude_batch_id: omit rows from this batch — re-delivering a loaded
+        staged export must not be blocked by that batch's own outcome rows
+        (HADES-guz: the automation's staged backup self-dedup-blocked on the
+        Export page).
         """
-        rows = self.execute(
-            """SELECT company_id, company_name, exported_at, workflow_type
+        query = """SELECT company_id, company_name, exported_at, workflow_type
                FROM lead_outcomes
                WHERE exported_at >= date('now', ?)
-                 AND company_id IS NOT NULL AND company_id != ''
-               ORDER BY exported_at DESC""",
-            (f"-{days_back} days",),
-        )
+                 AND company_id IS NOT NULL AND company_id != ''"""
+        params: tuple = (f"-{days_back} days",)
+        if exclude_batch_id:
+            query += " AND batch_id != ?"
+            params = params + (exclude_batch_id,)
+        query += " ORDER BY exported_at DESC"
+        rows = self.execute(query, params)
         result = {}
         for r in rows:
             cid = r[0]

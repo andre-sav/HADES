@@ -12,6 +12,38 @@ logger = logging.getLogger(__name__)
 from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT, format_phone
 
 
+def contact_has_core_data(contact: dict) -> bool:
+    """Return True if a contact carries real, usable field data.
+
+    Guards the 2026-06-15 incident: ZoomInfo enrichment returned matched-but-
+    fieldless records, which the pipeline scored at the empty-lead baseline and
+    rendered as blank "leads". A record stamped with only an id/personId (the
+    requested key carried through for backfill) is NOT real data and must not
+    count as an enriched lead.
+
+    Core data = at least one of: a name, a company name, an email, or a phone
+    number. Phone counts because HADES feeds a phone-dialing workflow
+    (VanillaSoft) — a matched record with a working number but a name suppressed
+    by the entitlement tier is still a deliverable lead, not an empty match.
+    """
+    if not isinstance(contact, dict):
+        return False
+
+    name = f"{contact.get('firstName', '') or ''} {contact.get('lastName', '') or ''}".strip()
+    company = (contact.get("companyName") or "")
+    if isinstance(contact.get("company"), dict) and not company:
+        company = contact["company"].get("name", "") or ""
+    email = contact.get("email") or ""
+    phone = (
+        contact.get("directPhone")
+        or contact.get("phone")
+        or contact.get("mobilePhone")
+        or ""
+    )
+
+    return bool(name or str(company).strip() or str(email).strip() or str(phone).strip())
+
+
 def generate_batch_id(db) -> str:
     """Generate a sequential batch ID for this export: HADES-YYYYMMDD-NNN.
 
@@ -262,7 +294,10 @@ def export_leads_to_csv(
         )
         writer.writerow(row)
 
-    csv_content = output.getvalue()
+    # utf-8-sig BOM: the sales floor opens these in Excel, which renders
+    # BOM-less UTF-8 as mojibake (the import side reads utf-8-sig for the
+    # same reason) — HADES-7qi.
+    csv_content = "\ufeff" + output.getvalue()
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = f"HADES-{workflow_type}-{timestamp}.csv"
 
@@ -303,3 +338,33 @@ def get_export_summary(leads: list[dict]) -> dict:
         "by_priority": by_priority,
         "by_state": dict(sorted(by_state.items(), key=lambda x: -x[1])[:5]),
     }
+
+
+def record_csv_export(db, leads: list[dict], batch_id: str | None,
+                      workflow_type: str) -> int:
+    """Record lead_outcomes rows for a downloaded CSV batch.
+
+    The download path previously recorded nothing (HADES-rkr), so companies
+    exported via CSV re-surfaced in every future search inside the 1-year
+    re-contact window. Idempotent per (batch_id, person_id) via the DB's
+    INSERT OR IGNORE + unique index, so a repeated click cannot double-record.
+
+    Returns the number of rows submitted.
+    """
+    import json
+    from datetime import timezone
+
+    if not batch_id or not leads:
+        return 0
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for lead in leads:
+        features = {k: v for k, v in lead.items() if k.startswith("_") and v is not None}
+        rows.append(db.build_outcome_row(
+            lead, batch_id, workflow_type, now_iso,
+            json.dumps(features) if features else None,
+        ))
+    db.record_lead_outcomes_batch(rows)
+    logger.info("CSV export recorded: %d leads, batch %s (%s)", len(rows), batch_id, workflow_type)
+    return len(rows)

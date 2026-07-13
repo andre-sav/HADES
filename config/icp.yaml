@@ -206,8 +206,11 @@ automation:
     management_levels: ["Manager", "Director", "VP Level Exec"]
     accuracy_min: 95
     phone_fields: ["mobilePhone", "directPhone", "phone"]
-    dedup_days_back: 180
+    dedup_days_back: 365  # 1-year re-contact rule (HADES-fqw)
 
 # Cross-workflow dedup settings
 dedup:
   fuzzy_threshold: 85
+  # Cross-session export dedup window. 365 = sales team's 1-year re-contact rule.
+  # Single source of truth — read via dedup.get_dedup_days_back(). See HADES-fqw.
+  days_back: 365

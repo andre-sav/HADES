@@ -11,7 +11,7 @@ from pathlib import Path
 
 from turso_db import get_database
 from calibration import compute_conversion_rates, compare_to_current, apply_calibration
-from utils import SIC_CODE_DESCRIPTIONS
+from utils import SIC_CODE_DESCRIPTIONS, clear_config_caches
 from ui_components import (
     inject_base_styles,
     page_header,
@@ -31,6 +31,18 @@ inject_base_styles()
 
 from utils import require_auth
 require_auth()
+
+# Post-apply notice — persisted across the rerun that follows Apply (the old
+# inline st.success was wiped instantly by st.rerun; HADES-zw1).
+_applied = st.session_state.pop("_cal_applied_notice", None)
+if _applied:
+    st.success(f"Applied {_applied} score update(s) to icp.yaml — scoring uses them immediately.")
+    st.warning(
+        "On Streamlit Community Cloud this write lands on an ephemeral "
+        "filesystem: the calibration is live now but reverts on the next "
+        "redeploy/reboot. Commit the updated config/icp.yaml to git to make "
+        "it permanent. Note: applying rewrites the file without its comments."
+    )
 
 
 @st.cache_resource
@@ -237,8 +249,12 @@ with tab_calibration:
 
                     try:
                         apply_calibration(selected_updates, str(CONFIG_PATH), db=db)
+                        # Drop the process-lifetime config caches or scoring
+                        # keeps using the OLD values until reboot while this
+                        # page displays the new ones (HADES-zw1).
+                        clear_config_caches()
                         st.session_state.cal_selected = set()
-                        st.success(f"Applied {len(selected_updates)} score update(s) to icp.yaml")
+                        st.session_state["_cal_applied_notice"] = len(selected_updates)
                         st.rerun()
                     except Exception as e:
                         logger.error(f"Failed to apply calibration: {e}")

@@ -226,3 +226,50 @@ class TestGetStateCountsFromZips:
         assert counts["TX"] > 0
         assert counts["AR"] > 0
         assert sum(counts.values()) == len(zips)
+
+
+class TestDistanceBetweenZips:
+    """R-04 (HADES-1hw): messy ZoomInfo ZIPs (ZIP+4, int, 4-digit) must be
+    normalized before the centroid lookup — a silent miss fabricated a 15mi
+    default for 40% of the geography score."""
+
+    def test_clean_zips(self):
+        from geo import distance_between_zips
+        d = distance_between_zips("75201", "75201")
+        assert d == 0.0
+
+    def test_zip_plus_four_normalized(self):
+        from geo import distance_between_zips
+        assert distance_between_zips("75201-1234", "75201") == 0.0
+        assert distance_between_zips("75201 1234", "75201") == 0.0
+
+    def test_int_zip_normalized(self):
+        from geo import distance_between_zips
+        assert distance_between_zips(75201, "75201") == 0.0
+
+    def test_dropped_leading_zero_normalized(self):
+        from geo import distance_between_zips
+        # 4-digit Excel-mangled MA ZIP (01001 Agawam → 1001)
+        assert distance_between_zips("1001", "01001") == 0.0
+
+    def test_unknown_zip_returns_none(self):
+        from geo import distance_between_zips
+        assert distance_between_zips("00000", "75201") is None
+        assert distance_between_zips("", "75201") is None
+        assert distance_between_zips(None, "75201") is None
+
+    def test_real_distance_positive(self):
+        from geo import distance_between_zips
+        d = distance_between_zips("75201", "76102")  # Dallas → Fort Worth
+        assert d is not None and 25 < d < 40
+
+
+class TestNorthernVirginiaStates:
+    """R-05: small-radius NoVA searches must derive VA, not DC."""
+
+    def test_ashburn_radius_derives_va(self):
+        from geo import get_zips_in_radius, get_states_from_zips
+        zips = get_zips_in_radius("20147", 5.0)  # Ashburn VA
+        states = get_states_from_zips(zips)
+        assert "VA" in states
+        assert "DC" not in states

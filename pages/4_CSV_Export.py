@@ -9,10 +9,11 @@ import streamlit as st
 from datetime import datetime
 
 from turso_db import get_database
-from export import export_leads_to_csv, get_export_summary, build_vanillasoft_row
+from export import export_leads_to_csv, get_export_summary, build_vanillasoft_row, record_csv_export
 from vanillasoft_client import push_leads
-from dedup import find_duplicates, flag_duplicates_in_list
+from dedup import find_duplicates, flag_duplicates_in_list, get_dedup_days_back
 from export_dedup import apply_export_dedup
+from vs_leads import parse_vs_export
 from utils import get_call_center_agents
 from ui_components import (
     inject_base_styles,
@@ -54,6 +55,72 @@ except Exception as e:
 # HEADER
 # =============================================================================
 page_header("Export", "Push leads to VanillaSoft or download CSV")
+
+
+def render_vs_history_section():
+    """VanillaSoft lead-history import + status (HADES-dio).
+
+    The vanillasoft_leads table is the third dedup source — leads created
+    outside HADES (other reps, pre-HADES records) are invisible to
+    lead_outcomes and would be re-pushed without it.
+    """
+    labeled_divider("VanillaSoft Lead History")
+    try:
+        stats = db.get_vs_leads_stats()
+    except Exception:
+        logger.warning("VS lead history stats unavailable", exc_info=True)
+        stats = {"total": 0, "hades": 0, "latest_added": None}
+
+    if stats["total"]:
+        st.caption(
+            f"{stats['total']:,} VanillaSoft leads on file for dedup "
+            f"({stats['hades']:,} HADES-pushed) · latest Added Date "
+            f"{str(stats['latest_added'] or '')[:10]}"
+        )
+    else:
+        st.warning(
+            "No VanillaSoft lead history imported — dedup cannot see leads created "
+            "outside HADES (other reps, pre-HADES records) and may re-push them. "
+            "Import a VanillaSoft contact export below."
+        )
+
+    with st.expander("Import VanillaSoft contact export", expanded=not stats["total"]):
+        st.caption(
+            "Upload a VanillaSoft contact export (.csv). Re-imports are safe — rows are "
+            "keyed on ContactID and updated in place. For files over the upload limit "
+            "(~200MB), run `python scripts/import_vs_leads.py <file>` locally instead."
+        )
+        uploaded = st.file_uploader(
+            "VS contact export (.csv)", type=["csv"], key="vs_history_upload",
+        )
+        if uploaded is None:
+            return
+        parsed = parse_vs_export(uploaded, uploaded.name)
+        if not parsed.total_rows:
+            st.error("Could not parse any rows — is this a VanillaSoft contact export?")
+            return
+        st.caption(
+            f"{parsed.total_rows:,} rows · {len(parsed.rows):,} importable · "
+            f"{parsed.hades_count:,} HADES-pushed · "
+            f"{parsed.skipped_unmatchable:,} skipped (no company or phone)"
+        )
+        # Rerun guard: the upload widget re-delivers the same file every rerun.
+        file_sig = f"{uploaded.name}:{uploaded.size}"
+        if st.session_state.get("_vs_import_done") == file_sig:
+            st.success("Imported — dedup now sees this history.")
+            return
+        if st.button(f"Import {len(parsed.rows):,} leads", key="vs_import_btn"):
+            progress = st.progress(0.0, text="Importing…")
+            rows = parsed.rows
+            chunk = 500
+            for i in range(0, len(rows), chunk):
+                db.upsert_vs_leads_batch(rows[i:i + chunk])
+                done = min(i + chunk, len(rows))
+                progress.progress(done / len(rows),
+                                  text=f"Importing… {done:,}/{len(rows):,}")
+            progress.empty()
+            st.session_state["_vs_import_done"] = file_sig
+            st.rerun()
 
 
 # =============================================================================
@@ -108,6 +175,10 @@ if not intent_leads and not geo_leads:
                 ss_key = "intent_export_leads" if export_row["workflow_type"] == "intent" else "geo_export_leads"
                 st.session_state[ss_key] = export_row["leads"]
                 st.session_state["_loaded_staged_id"] = export_row["id"]
+                # Remember this batch's id: its own outcome rows (recorded when
+                # the automation generated it) must not dedup-block re-delivery
+                # of the very same batch (HADES-guz).
+                st.session_state["_loaded_staged_batch_id"] = export_row.get("batch_id")
                 # Restore operator if available
                 if export_row.get("operator_id"):
                     op = db.get_operator(export_row["operator_id"])
@@ -159,6 +230,7 @@ if not intent_leads and not geo_leads:
                 ],
             )
 
+    render_vs_history_section()
     st.stop()
 
 
@@ -268,15 +340,17 @@ if intent_leads and geo_leads:
 # =============================================================================
 # CROSS-SESSION EXPORT DEDUP (previously exported companies)
 # =============================================================================
+_dedup_days = get_dedup_days_back()
 include_exported = st.checkbox(
     "Include previously exported companies",
     value=False,
     key="export_include_prev_exported",
-    help="When unchecked, leads from companies already exported in the last 180 days are removed.",
+    help=f"When unchecked, leads from companies already exported in the last {_dedup_days} days are removed.",
 )
 
 dedup_result = apply_export_dedup(
-    leads_to_export, db, days_back=180, include_exported=include_exported,
+    leads_to_export, db, days_back=_dedup_days, include_exported=include_exported,
+    exclude_batch_id=st.session_state.get("_loaded_staged_batch_id"),
 )
 
 if dedup_result["filtered_count"] > 0:
@@ -293,9 +367,36 @@ if dedup_result["filtered_count"] > 0:
         )
         leads_to_export = dedup_result["contacts"]
 
-        if not leads_to_export:
-            st.warning("All leads have been previously exported. Check the box above to re-export anyway.")
-            st.stop()
+    # Flag-first visibility (HADES-dio): companies matched against imported
+    # VanillaSoft history came from OTHER reps/channels — show the operator
+    # what they matched so the drop is a confirmed decision, not a silent one.
+    _vs_filtered = [c for c in dedup_result["filtered_contacts"]
+                    if c.get("_dedup_source") == "vanillasoft"]
+    if _vs_filtered:
+        with st.expander(
+            f"Already in VanillaSoft from non-HADES sources ({len(_vs_filtered)})",
+            expanded=False,
+        ):
+            st.caption(
+                "Existing VanillaSoft leads (any rep or channel) added within the "
+                "dedup window. Use the checkbox above to include them anyway."
+            )
+            styled_table(
+                rows=[{
+                    "company": c.get("companyName", ""),
+                    "status": c.get("_vs_lead_status") or "—",
+                    "added": (c.get("_vs_added_date") or "")[:10],
+                } for c in _vs_filtered],
+                columns=[
+                    {"key": "company", "label": "Company"},
+                    {"key": "status", "label": "VS Status"},
+                    {"key": "added", "label": "Added Date", "mono": True},
+                ],
+            )
+
+    if not include_exported and not leads_to_export:
+        st.warning("All leads have been previously exported. Check the box above to re-export anyway.")
+        st.stop()
 
 
 # =============================================================================
@@ -455,6 +556,38 @@ def confirm_push_dialog(lead_count, operator_name):
         if st.button("Cancel", use_container_width=True):
             st.rerun()
 
+def _on_csv_download():
+    """Record the download as an export (HADES-rkr).
+
+    Runs once per click via on_click, before the rerun. Session-guarded per
+    lead set so repeated clicks on the same batch don't re-record (the DB's
+    INSERT OR IGNORE unique index is the second line of defense).
+    """
+    if st.session_state.get("_csv_download_recorded") == _export_cache_key:
+        return
+    recorded = record_csv_export(db, leads_to_export, batch_id, workflow_type)
+    if not recorded:
+        return
+    st.session_state["_csv_download_recorded"] = _export_cache_key
+    last_query = db.get_last_query(workflow_type)
+    if last_query:
+        db.update_query_exported(last_query["id"], recorded)
+    staged_id = st.session_state.get("_loaded_staged_id")
+    if staged_id and batch_id:
+        db.mark_staged_exported(staged_id, batch_id)
+    st.session_state.last_export_metadata = {
+        "count": recorded,
+        "timestamp": datetime.now().isoformat(),
+        "operator": selected_operator.get("operator_name") if selected_operator else None,
+        "batch_id": batch_id,
+        "method": "CSV downloaded",
+    }
+    if workflow_type == "intent":
+        st.session_state["intent_exported"] = True
+    else:
+        st.session_state["geo_exported"] = True
+
+
 # Buttons
 col1, col2, col3 = st.columns([2, 1, 1])
 
@@ -479,7 +612,9 @@ with col3:
         file_name=filename,
         mime="text/csv",
         use_container_width=True,
-        help="Download a CSV file formatted for VanillaSoft import (31 columns).",
+        help="Download a CSV file formatted for VanillaSoft import (31 columns). "
+             "Downloading marks these companies as exported for dedup purposes.",
+        on_click=_on_csv_download,
     )
 
 # Open confirmation dialog on button click
@@ -487,8 +622,12 @@ if push_clicked and _vs_push_available:
     _op_name = selected_operator.get("operator_name") if selected_operator else None
     confirm_push_dialog(len(leads_to_export), _op_name)
 
-# Push flow — only fires after dialog confirmation (pop ensures single execution)
-if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
+# Push flow — fires after dialog confirmation (pop ensures single execution),
+# or when the user requested a retry of previously failed leads (HADES-1ue).
+_retry_rows = st.session_state.pop("_vs_retry_rows", None)
+_push_confirmed = st.session_state.pop("vs_push_confirmed", False)
+if (_push_confirmed or _retry_rows) and _vs_push_available:
+    rows_to_push = _retry_rows if _retry_rows else vs_rows
     progress_bar = st.progress(0, text="Pushing to VanillaSoft...")
     log_container = st.container()
 
@@ -498,9 +637,16 @@ if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
         err = f" ({result.error})" if result.error else ""
         log_container.caption(f"{icon} {result.lead_name} \u2014 {result.company}{err}")
 
-    summary = push_leads(vs_rows, web_lead_id=_vs_web_lead_id, progress_callback=_on_progress)
+    summary = push_leads(rows_to_push, web_lead_id=_vs_web_lead_id, progress_callback=_on_progress)
 
     progress_bar.empty()
+
+    # Cumulative succeeded count across the initial push + retries (a retry
+    # pushes exactly the previously-failed rows, so the new failure set fully
+    # replaces the old one).
+    _prior_succeeded = st.session_state.get("_vs_push_succeeded_total", 0) if _retry_rows else 0
+    _total_succeeded = _prior_succeeded + len(summary.succeeded)
+    st.session_state["_vs_push_succeeded_total"] = _total_succeeded
 
     # Summary banner
     if summary.failed:
@@ -533,10 +679,38 @@ if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
         if outcome_rows:
             db.record_lead_outcomes_batch(outcome_rows)
 
-    # Update query log
+    # Update query log (cumulative across retries)
     last_query = db.get_last_query(workflow_type)
     if last_query:
-        db.update_query_exported(last_query["id"], len(summary.succeeded))
+        db.update_query_exported(last_query["id"], _total_succeeded)
+
+    # Persist failed-lead state OUTSIDE the single-fire block so the panel
+    # survives reruns and Retry can actually be observed (HADES-1ue: the old
+    # in-block button was never executed on its own click's rerun, and
+    # _vs_retry_rows had no consumer).
+    failed_pids = {r.person_id for r in summary.failed if r.person_id}
+    failed_names = {(r.lead_name, r.company) for r in summary.failed if not r.person_id}
+
+    def _is_failed_row(r):
+        pid = r.get("_personId")
+        if pid and pid in failed_pids:
+            return True
+        if not pid:
+            key = (f"{r.get('First Name', '')} {r.get('Last Name', '')}".strip(), r.get("Company", ""))
+            return key in failed_names
+        return False
+
+    if summary.failed:
+        st.session_state["vs_push_failed_state"] = {
+            "results": [
+                {"name": r.lead_name, "company": r.company, "error": r.error, "person_id": r.person_id}
+                for r in summary.failed
+            ],
+            "rows": [r for r in rows_to_push if _is_failed_row(r)],
+            "cache_key": _export_cache_key,
+        }
+    else:
+        st.session_state.pop("vs_push_failed_state", None)
 
     # Mark staged export
     staged_id = st.session_state.get("_loaded_staged_id")
@@ -551,7 +725,7 @@ if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
 
     # Store metadata
     st.session_state.last_export_metadata = {
-        "count": len(summary.succeeded),
+        "count": _total_succeeded,
         "timestamp": datetime.now().isoformat(),
         "operator": selected_operator.get("operator_name") if selected_operator else None,
         "batch_id": batch_id,
@@ -562,47 +736,36 @@ if st.session_state.pop("vs_push_confirmed", False) and _vs_push_available:
     else:
         st.session_state["geo_exported"] = True
 
-    # Failed leads — retry + CSV fallback
-    if summary.failed:
-        st.markdown("---")
-        st.markdown(f"**Failed ({len(summary.failed)}):**")
-        for r in summary.failed:
-            st.caption(f"\u2716 {r.lead_name} \u2014 {r.company} ({r.error})")
+# Failed leads — rendered from persisted state so the panel (and the Retry
+# button) survives the rerun that follows the push (HADES-1ue).
+_failed_state = st.session_state.get("vs_push_failed_state")
+if _failed_state and _failed_state.get("cache_key") == _export_cache_key and _failed_state.get("rows"):
+    st.markdown("---")
+    st.markdown(f"**Failed ({len(_failed_state['results'])}):**")
+    for r in _failed_state["results"]:
+        st.caption(f"\u2716 {r['name']} \u2014 {r['company']} ({r['error']})")
 
-        # Match failed rows by personId, fallback to name+company
-        failed_pids = {r.person_id for r in summary.failed if r.person_id}
-        failed_names = {(r.lead_name, r.company) for r in summary.failed if not r.person_id}
+    fcol1, fcol2 = st.columns(2)
+    with fcol1:
+        if st.button("\U0001f504 Retry Failed", use_container_width=True,
+                     disabled=not _vs_push_available):
+            st.session_state["_vs_retry_rows"] = _failed_state["rows"]
+            st.rerun()
+    with fcol2:
+        import csv as csv_mod
+        import io
+        from utils import VANILLASOFT_COLUMNS
+        out = io.StringIO()
+        writer = csv_mod.DictWriter(out, fieldnames=VANILLASOFT_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for r in _failed_state["rows"]:
+            writer.writerow(r)
+        st.download_button(
+            "\U0001f4be Download Failed as CSV",
+            data=out.getvalue(),
+            file_name=f"HADES-failed-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
-        def _is_failed_row(r):
-            pid = r.get("_personId")
-            if pid and pid in failed_pids:
-                return True
-            if not pid:
-                key = (f"{r.get('First Name', '')} {r.get('Last Name', '')}".strip(), r.get("Company", ""))
-                return key in failed_names
-            return False
-
-        fcol1, fcol2 = st.columns(2)
-        with fcol1:
-            if st.button("\U0001f504 Retry Failed", use_container_width=True):
-                retry_rows = [r for r in vs_rows if _is_failed_row(r)]
-                st.session_state["_vs_retry_rows"] = retry_rows
-                st.rerun()
-        with fcol2:
-            failed_csv_rows = [r for r in vs_rows if _is_failed_row(r)]
-            if failed_csv_rows:
-                import csv as csv_mod
-                import io
-                from utils import VANILLASOFT_COLUMNS
-                out = io.StringIO()
-                writer = csv_mod.DictWriter(out, fieldnames=VANILLASOFT_COLUMNS, extrasaction="ignore")
-                writer.writeheader()
-                for r in failed_csv_rows:
-                    writer.writerow(r)
-                st.download_button(
-                    "\U0001f4be Download Failed as CSV",
-                    data=out.getvalue(),
-                    file_name=f"HADES-failed-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
+render_vs_history_section()

@@ -1,11 +1,16 @@
 """Connection management and query execution core."""
 
 import logging
+import threading
 from contextlib import contextmanager
 
 import libsql_experimental as libsql
 
 logger = logging.getLogger(__name__)
+
+# Guards lazy creation of per-instance locks (the instance may be built via
+# @st.cache_resource and first touched by several session threads at once).
+_LOCK_INIT = threading.Lock()
 
 
 class ConnectionMixin:
@@ -16,6 +21,26 @@ class ConnectionMixin:
         self.auth_token = auth_token
         self._conn = None
         self._in_transaction = False
+        self._lock = threading.RLock()
+
+    @property
+    def lock(self):
+        """Reentrant lock serializing all access to the shared connection.
+
+        The instance is an @st.cache_resource singleton shared by every
+        Streamlit session thread; without this, one user's transaction()
+        toggled _in_transaction for everyone (skipped commits, interleaved
+        partial state) — HADES-638. Lazily created so instances constructed
+        through non-standard paths (tests) still get one.
+        """
+        lk = getattr(self, "_lock", None)
+        if lk is None:
+            with _LOCK_INIT:
+                lk = getattr(self, "_lock", None)
+                if lk is None:
+                    lk = threading.RLock()
+                    self._lock = lk
+        return lk
 
     @property
     def connection(self):
@@ -45,27 +70,39 @@ class ConnectionMixin:
                 db.execute_write("UPDATE ...")
             # committed here (or rolled back on exception)
         """
-        self._in_transaction = True
-        try:
-            yield
-            self.connection.commit()
-        except Exception:
-            self.connection.rollback()
-            raise
-        finally:
-            self._in_transaction = False
+        with self.lock:
+            self._in_transaction = True
+            try:
+                yield
+                self.connection.commit()
+            except Exception:
+                try:
+                    self.connection.rollback()
+                except Exception:
+                    # rollback on a dead stream fails too — don't mask the
+                    # original error
+                    logger.warning("Rollback failed after transaction error", exc_info=True)
+                raise
+            finally:
+                self._in_transaction = False
 
     def execute(self, query: str, params: tuple = ()) -> list:
         """Execute query and return results. Reconnects on stale stream."""
-        try:
-            cursor = self.connection.execute(query, params)
-            return cursor.fetchall()
-        except Exception as e:
-            if self._is_stale_stream_error(e):
-                logger.warning("Stale Hrana stream detected, reconnecting...")
-                cursor = self._reconnect().execute(query, params)
+        with self.lock:
+            try:
+                cursor = self.connection.execute(query, params)
                 return cursor.fetchall()
-            raise
+            except Exception as e:
+                if self._is_stale_stream_error(e):
+                    if getattr(self, "_in_transaction", False):
+                        # Earlier uncommitted statements died with the stream;
+                        # replaying just this one would let transaction() commit
+                        # a PARTIAL transaction (HADES-638).
+                        raise
+                    logger.warning("Stale Hrana stream detected, reconnecting...")
+                    cursor = self._reconnect().execute(query, params)
+                    return cursor.fetchall()
+                raise
 
     def execute_write(self, query: str, params: tuple = ()) -> int:
         """Execute insert/update/delete and return lastrowid. Reconnects on stale stream.
@@ -73,20 +110,25 @@ class ConnectionMixin:
         When called inside a ``transaction()`` context manager, the commit is
         deferred until the context exits.
         """
-        try:
-            cursor = self.connection.execute(query, params)
-            if not self._in_transaction:
-                self.connection.commit()
-            return cursor.lastrowid
-        except Exception as e:
-            if self._is_stale_stream_error(e):
-                logger.warning("Stale Hrana stream detected, reconnecting...")
-                conn = self._reconnect()
-                cursor = conn.execute(query, params)
+        with self.lock:
+            try:
+                cursor = self.connection.execute(query, params)
                 if not self._in_transaction:
-                    conn.commit()
+                    self.connection.commit()
                 return cursor.lastrowid
-            raise
+            except Exception as e:
+                if self._is_stale_stream_error(e):
+                    if getattr(self, "_in_transaction", False):
+                        # See execute(): no single-statement replay inside an
+                        # open transaction (HADES-638).
+                        raise
+                    logger.warning("Stale Hrana stream detected, reconnecting...")
+                    conn = self._reconnect()
+                    cursor = conn.execute(query, params)
+                    if not self._in_transaction:
+                        conn.commit()
+                    return cursor.lastrowid
+                raise
 
     def execute_many(self, query: str, params_list: list[tuple]) -> None:
         """Execute batch insert/update. Uses multi-row INSERT when possible.
@@ -108,6 +150,10 @@ class ConnectionMixin:
             return
 
         # Non-INSERT: individual statements
+        with self.lock:
+            self._execute_many_fallback(query, params_list)
+
+    def _execute_many_fallback(self, query: str, params_list: list[tuple]) -> None:
         try:
             for params in params_list:
                 self.connection.execute(query, params)
@@ -128,6 +174,10 @@ class ConnectionMixin:
 
     def _execute_multi_row_insert(self, query: str, params_list: list[tuple]) -> None:
         """Build multi-row INSERT VALUES for single round-trip."""
+        with self.lock:
+            self._execute_multi_row_insert_locked(query, params_list)
+
+    def _execute_multi_row_insert_locked(self, query: str, params_list: list[tuple]) -> None:
         cols_per_row = len(params_list[0])
         row_placeholder = f"({', '.join(['?'] * cols_per_row)})"
 

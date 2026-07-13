@@ -31,21 +31,43 @@ SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--workflow", required=True, help="Human-readable workflow name")
-    parser.add_argument("--message", default="", help="Optional extra context")
-    args = parser.parse_args()
+def send_alert(subject: str, body: str) -> bool:
+    """Send a plain-text alert email via the shared SMTP secrets.
 
+    Returns True if sent, False if not configured or the send failed. Never
+    raises — alerting must not chain-fail its caller (a scheduled health check
+    or a workflow that already failed).
+    """
     smtp_user = os.environ.get("SMTP_USER")
     smtp_password = os.environ.get("SMTP_PASSWORD")
     recipients = os.environ.get("EMAIL_RECIPIENTS")
 
     if not (smtp_user and smtp_password and recipients):
-        # No alerting configured — silently no-op. The workflow already failed;
-        # GitHub will email the repo owner via its default mechanism.
         print("notify_failure: SMTP secrets not configured, skipping email", file=sys.stderr)
-        return 0
+        return False
+
+    msg = MIMEText(body, "plain")
+    msg["Subject"] = subject
+    msg["From"] = os.environ.get("EMAIL_FROM") or smtp_user
+    msg["To"] = recipients
+
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        print(f"notify_failure: alert sent to {recipients}", file=sys.stderr)
+        return True
+    except Exception as exc:
+        print(f"notify_failure: send failed ({exc!r}) — log is the source of truth", file=sys.stderr)
+        return False
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--workflow", required=True, help="Human-readable workflow name")
+    parser.add_argument("--message", default="", help="Optional extra context")
+    args = parser.parse_args()
 
     server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
     repo = os.environ.get("GITHUB_REPOSITORY", "")
@@ -75,23 +97,8 @@ def main() -> int:
     ]
     if args.message:
         body_lines.extend(["", "Extra context:", args.message])
-    body = "\n".join(body_lines)
 
-    msg = MIMEText(body, "plain")
-    msg["Subject"] = f"[HADES] Workflow failed: {args.workflow}"
-    msg["From"] = os.environ.get("EMAIL_FROM") or smtp_user
-    msg["To"] = recipients
-
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.send_message(msg)
-        print(f"notify_failure: alert sent to {recipients}", file=sys.stderr)
-    except Exception as exc:
-        # Belt-and-suspenders: don't chain-fail the workflow if alerting itself fails.
-        print(f"notify_failure: send failed ({exc!r}) — workflow log is the source of truth", file=sys.stderr)
-
+    send_alert(f"[HADES] Workflow failed: {args.workflow}", "\n".join(body_lines))
     return 0
 
 

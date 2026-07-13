@@ -1,7 +1,71 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-05-17
+**Date:** 2026-07-12
 **Status:** P0 ZIP centroid corruption + P1 Home/Business phone-column inversion fixed in response to operator field report. 775 tests passing. All prior sessions: 764 tests passing through session 50. See session 51 below for the current change.
+
+
+## Session Summary (2026-07-12, Session close)
+
+### What Was Done
+
+- **HADES-dio UNBLOCKED** — user supplied the full VanillaSoft contact export
+  (~/Downloads/2026-7-12-8-15-VTI-Operators-Jan-18.csv, 227MB, 293,953 records).
+  Every design assumption verified and recorded in the bd notes: Added Date 100%
+  (MM/DD/YYYY h:mm:ss AM), Lead Status 6 clean values (Dead/blank/POC ID/Appt/
+  Warm/Res. Appt), Company 100% / phone 98.9% / ZIP 99.9% (6.5% are 4-digit
+  Excel-stripped — normalize_zip on ingest), ContactID unique (natural PK,
+  idempotent re-import), 2,138 rows carry HADES batch markers in Import Notes.
+  Ready to build: vanillasoft_leads table + upload page + flag-first matching.
+
+### CI Health Check (RED — two P1s filed)
+
+- **HADES-m29 (P1)**: Intent Lead Poll failing since ≥07-08 — ZoomInfo API 403
+  "no permission / contact your Account Manager" = entitlement/subscription
+  lapse. The fail-loud path works; the pipeline is DOWN. Needs ZoomInfo account
+  action, not code.
+- **HADES-jdi (P1)**: Zoho Operator Sync failing daily — ZOHO_CLIENT_ID /
+  ZOHO_CLIENT_SECRET / ZOHO_REFRESH_TOKEN missing from GitHub Actions secrets.
+  Failure alert email IS delivering (SMTP configured in that workflow).
+- No Vercel in this project (Streamlit Community Cloud deploy) — vercel check N/A.
+
+### Next Steps (updated priority)
+
+1. **User: ZoomInfo 403 (HADES-m29)** — restore API entitlement; pipeline down.
+2. **User: add ZOHO_* GitHub secrets (HADES-jdi)**.
+3. **Build HADES-dio** (VS lead-history dedup) — fully specced, fresh session.
+4. HADES-fpd (R-27 caching) — deferred with design notes.
+5. HADES-7qi remaining P3 tail.
+
+## Session Summary (2026-07-11, autonomous session — user away)
+
+### What Was Done
+
+Executed the full recommended attack order from the whole-project accuracy/
+efficiency review (docs/CODE_REVIEW_2026-07-11-accuracy-efficiency.md), then an
+autonomous work order (docs/plans/AUTONOMOUS_WORKPLAN_2026-07-11.md) covering
+the P2 tail. **All review P0s (2), P1s (11), and P2s (9 of 9 — one partial)
+are closed**, plus 5 P3 quick wins. Suite: 840 → **924 tests**, green at every
+commit, every fix TDD'd, every commit pushed.
+
+Highlights: VS push survives non-Latin-1 + working Retry; hashed/numeric
+companyId spaces bridged (intent scoring + dedup); blank-lead guard on all
+paths + alerting made real (red runs when the email channel is down); franchise
+false-drops fixed; ZIP normalization + VA/DC prefix + neutral unknown headcount;
+session-state lifecycle (stale cross-search exports, enrich auto-retry);
+calibration cache; cache TTL/keys; DB connection lock + no partial-transaction
+commit; fuzzy state veto; credit accounting + spend-point budget gate.
+
+### Next Steps
+
+1. **HADES-fpd (R-27)** — per-rerun Turso fan-out caching; deferred for an
+   invalidation design (see bd notes).
+2. **HADES-dio** — dedup vs non-HADES VanillaSoft leads; blocked on a sample
+   VS export from the user (gating question already asked).
+3. **HADES-7qi** — remaining P3 tail (see bd notes for what landed).
+4. Configure SMTP secrets — scheduled runs now go RED when email delivery is
+   missed (intentional forcing function from HADES-guz/2oe).
+5. Intent live test — R-02's fix means intent scoring will behave differently
+   (correctly) from any prior observation.
 
 ## Session Summary (2026-05-17, Session 51)
 

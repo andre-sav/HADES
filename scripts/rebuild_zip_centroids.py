@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from utils import ZIP_PREFIX_TO_STATE  # noqa: E402
+from utils import ZIP_PREFIX_TO_STATE, ZIP_EXCEPTIONS_TO_STATE  # noqa: E402
 
 GAZETTEER_URL = (
     "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/"
@@ -54,7 +54,8 @@ def build_centroids(rows: list[dict]) -> list[dict]:
     skipped_no_state = 0
     for row in rows:
         zcta = row["GEOID"].zfill(5)
-        state = ZIP_PREFIX_TO_STATE.get(zcta[:3])
+        # Single-ZIP exceptions (e.g. 06390 Fishers Island NY) override the prefix map
+        state = ZIP_EXCEPTIONS_TO_STATE.get(zcta) or ZIP_PREFIX_TO_STATE.get(zcta[:3])
         if state is None:
             skipped_no_state += 1
             continue

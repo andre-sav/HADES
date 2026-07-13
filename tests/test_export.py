@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
-from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary, generate_batch_id, merge_contact, merge_company_data
+from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary, generate_batch_id, merge_contact, merge_company_data, contact_has_core_data
 from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT
 
 
@@ -200,7 +200,7 @@ class TestBuildVanillasoftRow:
         """_personId metadata should not appear as a CSV column."""
         leads = [{"companyName": "Acme", "personId": "123456"}]
         csv_content, _, _ = export_leads_to_csv(leads)
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         assert "_personId" not in reader.fieldnames
 
     def test_contact_owner_from_parameter(self):
@@ -468,7 +468,7 @@ class TestExportLeadsToCsv:
         leads = [{"companyName": "Test Corp"}]
         csv_content, filename, _ = export_leads_to_csv(leads)
 
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         headers = reader.fieldnames
 
         assert headers == VANILLASOFT_COLUMNS
@@ -481,7 +481,7 @@ class TestExportLeadsToCsv:
         ]
         csv_content, filename, _ = export_leads_to_csv(leads)
 
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
 
         assert len(rows) == 2
@@ -517,7 +517,7 @@ class TestExportLeadsToCsv:
         }
 
         csv_content, _, _batch = export_leads_to_csv(leads, operator=operator)
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
 
         for row in rows:
@@ -527,7 +527,7 @@ class TestExportLeadsToCsv:
         """Test export with empty leads list."""
         csv_content, filename, _ = export_leads_to_csv([])
 
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
 
         assert len(rows) == 0
@@ -540,7 +540,7 @@ class TestExportLeadsToCsv:
         leads = [{"companyName": "Test Corp"}]
         csv_content, _, _batch = export_leads_to_csv(leads, data_source="ZoomInfo")
 
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
 
         today = datetime.now().strftime("%b %d %Y")
@@ -562,7 +562,7 @@ class TestContactOwnerRoundRobin:
         agents = ["agent1@hlmii.com", "agent2@hlmii.com"]
 
         csv_content, _, _ = export_leads_to_csv(leads, agents=agents)
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
 
         assert rows[0]["Contact Owner"] == "agent1@hlmii.com"
@@ -575,7 +575,7 @@ class TestContactOwnerRoundRobin:
         """Test that Contact Owner is empty when no agents provided."""
         leads = [{"companyName": "A"}]
         csv_content, _, _ = export_leads_to_csv(leads, agents=None)
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
         assert rows[0]["Contact Owner"] == ""
 
@@ -583,7 +583,7 @@ class TestContactOwnerRoundRobin:
         """Test that empty agents list [] doesn't crash with ZeroDivisionError."""
         leads = [{"companyName": "A"}, {"companyName": "B"}]
         csv_content, _, _ = export_leads_to_csv(leads, agents=[])
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
         assert rows[0]["Contact Owner"] == ""
         assert rows[1]["Contact Owner"] == ""
@@ -592,7 +592,7 @@ class TestContactOwnerRoundRobin:
         """Test that single agent gets all rows."""
         leads = [{"companyName": "A"}, {"companyName": "B"}]
         csv_content, _, _ = export_leads_to_csv(leads, agents=["solo@hlmii.com"])
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
         assert all(row["Contact Owner"] == "solo@hlmii.com" for row in rows)
 
@@ -771,7 +771,7 @@ class TestExportWithBatchId:
         leads = [{"companyName": "Test", "_score": 90}]
         csv_content, _, batch_id = export_leads_to_csv(leads, db=mock_db)
 
-        reader = csv.DictReader(io.StringIO(csv_content))
+        reader = csv.DictReader(io.StringIO(csv_content.lstrip("\ufeff")))
         rows = list(reader)
         assert f"Batch: {batch_id}" in rows[0]["Import Notes"]
 
@@ -856,3 +856,139 @@ class TestMergeCompanyData:
         assert result[0]["sicCode"] == "9999"
         assert result[0]["industry"] == "Custom"
         assert result[0]["employeeCount"] == 500
+
+
+class TestContactHasCoreData:
+    """Tests for contact_has_core_data — detects fieldless enrichment payloads.
+
+    Regression guard for the 2026-06-15 incident: ZoomInfo enrichment returned
+    matched-but-fieldless records (empty data[0]); the pipeline scored them all
+    at the empty-lead baseline (64) and rendered blank rows as valid results.
+    """
+
+    def test_true_with_name(self):
+        assert contact_has_core_data({"firstName": "Nancy", "lastName": "Zappolo"}) is True
+
+    def test_true_with_company_only(self):
+        assert contact_has_core_data({"companyName": "BaneCare"}) is True
+
+    def test_true_with_email_only(self):
+        assert contact_has_core_data({"email": "nancy@banecare.com"}) is True
+
+    def test_true_with_phone_only(self):
+        # HADES is a phone-dialing tool (VanillaSoft). A matched record with a
+        # working number but a suppressed name is still a deliverable lead and
+        # must NOT be dropped or counted as a credit-exhaustion empty.
+        assert contact_has_core_data({"phone": "(781) 474-2263"}) is True
+
+    def test_true_with_mobile_or_direct_phone(self):
+        assert contact_has_core_data({"mobilePhone": "(339) 613-7236"}) is True
+        assert contact_has_core_data({"directPhone": "(781) 803-7571"}) is True
+
+    def test_false_when_empty(self):
+        assert contact_has_core_data({}) is False
+
+    def test_false_when_only_ids(self):
+        # An empty enrichment payload stamped with just the requested personId
+        # is NOT real contact data — must not count as an enriched lead.
+        assert contact_has_core_data({"personId": "123", "id": "123"}) is False
+
+    def test_false_when_fields_blank_strings(self):
+        assert contact_has_core_data({"firstName": "", "lastName": "  ", "companyName": "", "email": ""}) is False
+
+
+class TestFieldlessEnrichmentBackfill:
+    """Once enrich stamps the requested personId onto a fieldless payload,
+    the search-phase data must backfill so the operator still sees the lead."""
+
+    def test_search_data_restored_via_stamped_pid(self):
+        # Enrichment came back empty but was stamped with the requested personId.
+        enriched = {"personId": "111", "id": "111"}
+        search = {
+            "personId": "111",
+            "firstName": "Nancy",
+            "lastName": "Zappolo",
+            "jobTitle": "VP",
+            "companyName": "BaneCare",
+            "personCity": "Scituate",
+            "personState": "MA",
+        }
+        search_by_pid = {"111": search}
+
+        pid = str(enriched.get("id") or enriched.get("personId") or "")
+        merged = merge_contact(search_by_pid.get(pid, {}), enriched)
+
+        assert merged["firstName"] == "Nancy"
+        assert merged["companyName"] == "BaneCare"
+        assert contact_has_core_data(merged) is True
+
+
+class TestRecordCsvExport:
+    """R-12 (HADES-rkr): CSV downloads must enter lead_outcomes, or the
+    exported companies re-surface in every future search inside the 1-year
+    re-contact window (the rep audit email's exact complaint)."""
+
+    def _leads(self):
+        return [
+            {"personId": "p1", "companyId": "100", "companyName": "Acme",
+             "firstName": "A", "lastName": "One", "_score": 82, "_priority": "High"},
+            {"personId": "p2", "companyId": "200", "companyName": "Beta",
+             "firstName": "B", "lastName": "Two", "_score": 65},
+        ]
+
+    def test_records_one_outcome_row_per_lead(self):
+        from unittest.mock import MagicMock
+        from export import record_csv_export
+        db = MagicMock()
+        db.build_outcome_row.side_effect = lambda *a, **k: ("row",)
+        count = record_csv_export(db, self._leads(), "HADES-B1", "geography")
+        assert count == 2
+        assert db.build_outcome_row.call_count == 2
+        db.record_lead_outcomes_batch.assert_called_once()
+        # workflow + batch flow through
+        args = db.build_outcome_row.call_args_list[0][0]
+        assert args[1] == "HADES-B1"
+        assert args[2] == "geography"
+
+    def test_features_json_carries_underscore_fields(self):
+        from unittest.mock import MagicMock
+        import json as _json
+        from export import record_csv_export
+        db = MagicMock()
+        db.build_outcome_row.side_effect = lambda *a, **k: ("row",)
+        record_csv_export(db, self._leads(), "B", "intent")
+        features_arg = db.build_outcome_row.call_args_list[0][0][4]
+        features = _json.loads(features_arg)
+        assert features["_score"] == 82
+        assert features["_priority"] == "High"
+
+    def test_no_batch_id_records_nothing(self):
+        from unittest.mock import MagicMock
+        from export import record_csv_export
+        db = MagicMock()
+        assert record_csv_export(db, self._leads(), None, "intent") == 0
+        db.record_lead_outcomes_batch.assert_not_called()
+
+    def test_empty_leads_records_nothing(self):
+        from unittest.mock import MagicMock
+        from export import record_csv_export
+        db = MagicMock()
+        assert record_csv_export(db, [], "B", "intent") == 0
+        db.record_lead_outcomes_batch.assert_not_called()
+
+
+class TestCsvBom:
+    """P3 (HADES-7qi): CSVs open in Excel by default on the sales floor —
+    without a BOM, non-ASCII names render as mojibake and get re-saved
+    corrupted. The project's own import side reads utf-8-sig for this reason."""
+
+    def test_csv_content_starts_with_bom(self):
+        from unittest.mock import MagicMock
+        from export import export_leads_to_csv
+        db = MagicMock()
+        db.execute.return_value = [(1,)]
+        leads = [{"firstName": "José", "lastName": "Muñoz", "companyName": "Peña & Sons"}]
+        csv_content, _, _ = export_leads_to_csv(leads, operator=None,
+                                                workflow_type="geography", db=db)
+        assert csv_content.startswith("﻿")
+        assert "José" in csv_content

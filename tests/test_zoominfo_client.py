@@ -371,6 +371,35 @@ class TestIntentSearch:
             results = client.search_intent_all_pages(params)
 
         assert len(results) == 4
+        assert client.last_search_truncated is None  # complete sweep, no signal
+
+    def test_search_intent_all_pages_truncation_signal(self, client):
+        """R-25 (HADES-mms): a page cap stopping the sweep before the real
+        last page must set last_search_truncated — the fixed contact-search
+        bug (HADES-4u2) had this silent sibling on the intent endpoint."""
+        def _page(n, total_pages):
+            return {"data": [{"id": n}], "pagination": {"totalResults": total_pages, "pageSize": 1, "currentPage": n, "totalPages": total_pages}}
+
+        with patch.object(client, "search_intent", side_effect=[_page(1, 5), _page(2, 5)]):
+            params = IntentQueryParams(topics=["Vending"], page_size=1)
+            results = client.search_intent_all_pages(params, max_pages=2)
+
+        assert len(results) == 2
+        sig = client.last_search_truncated
+        assert sig is not None
+        assert sig["pages_fetched"] == 2
+        assert sig["total_pages"] == 5
+        assert sig["max_pages"] == 2
+
+    def test_search_intent_all_pages_resets_stale_signal(self, client):
+        """A prior truncation signal must not leak into a complete sweep."""
+        client.last_search_truncated = {"stale": True}
+        with patch.object(client, "search_intent", return_value={
+            "data": [{"id": 1}],
+            "pagination": {"totalResults": 1, "pageSize": 1, "currentPage": 1, "totalPages": 1},
+        }):
+            client.search_intent_all_pages(IntentQueryParams(topics=["V"], page_size=1))
+        assert client.last_search_truncated is None
 
 
 class TestCompanySearch:
@@ -1161,6 +1190,58 @@ class TestContactEnrich:
         assert len(result["data"]) == 1
         assert result["data"][0]["firstName"] == "TopLevel"
 
+    def test_enrich_stamps_requested_person_id_on_fieldless_payload(self, client):
+        """Incident 2026-06-15: when enrichment matches but returns a fieldless
+        data[0] (credit/entitlement exhaustion), the requested personId must be
+        stamped onto the extracted contact so search-phase backfill can match it.
+
+        Without this, the empty payload has no id, the geo-page backfill lookup
+        misses, and the row renders fully blank at the baseline score.
+        """
+        mock_response = {
+            "success": [{"personId": "123"}],
+            "data": {
+                "outputFields": ["firstName", "lastName"],
+                "result": [
+                    {
+                        "input": {"personId": "123"},
+                        "data": [{}],  # matched but no field data
+                        "matchStatus": "FULL_MATCH",
+                    }
+                ],
+                "requiredFields": [],
+            },
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            params = ContactEnrichParams(person_ids=["123"])
+            result = client.enrich_contacts(params)
+
+        assert len(result["data"]) == 1
+        contact = result["data"][0]
+        assert str(contact.get("id") or contact.get("personId")) == "123"
+
+    def test_enrich_does_not_overwrite_real_id_with_input(self, client):
+        """When enrichment returns a real contact, its own id must win over input."""
+        mock_response = {
+            "success": [{"personId": "123"}],
+            "data": {
+                "result": [
+                    {
+                        "input": {"personId": "123"},
+                        "data": [{"id": 999, "firstName": "Real", "lastName": "Person"}],
+                        "matchStatus": "FULL_MATCH",
+                    }
+                ],
+            },
+        }
+
+        with patch.object(client, "_request", return_value=mock_response):
+            result = client.enrich_contacts(ContactEnrichParams(person_ids=["123"]))
+
+        assert result["data"][0]["id"] == 999
+        assert result["data"][0]["firstName"] == "Real"
+
 
 class TestCompanyEnrich:
     """Tests for Company Enrich API response parsing."""
@@ -1934,3 +2015,36 @@ class TestPaginationFix:
 
         # Should stop at max_pages=5 even though totalPages=100
         assert len(results) == 5
+
+    def test_truncation_at_max_pages_is_surfaced(self, client):
+        """Incident-class (silent coverage cap): when a page cap stops the sweep
+        before the real last page, that truncation must be surfaced — not
+        silently dropped — so the operator knows the result set is incomplete."""
+        pages = [
+            {"data": [{"personId": str(i)}], "pagination": {"totalResults": 100, "pageSize": 1, "currentPage": i + 1, "totalPages": 100}}
+            for i in range(3)
+        ]
+        with patch.object(client, "search_contacts", side_effect=pages):
+            results = client._search_contacts_single_batch(
+                ContactQueryParams(zip_codes=["75201"], radius_miles=25, states=["TX"]),
+                max_pages=3,
+            )
+
+        assert len(results) == 3
+        assert client.last_search_truncated is not None
+        assert client.last_search_truncated["pages_fetched"] == 3
+        assert client.last_search_truncated["total_pages"] == 100
+
+    def test_no_truncation_flag_when_all_pages_fetched(self, client):
+        """Reaching the real last page must NOT report truncation."""
+        with patch.object(client, "search_contacts", side_effect=[
+            {"data": [{"personId": "1"}], "pagination": {"totalResults": 2, "pageSize": 1, "currentPage": 1, "totalPages": 2}},
+            {"data": [{"personId": "2"}], "pagination": {"totalResults": 2, "pageSize": 1, "currentPage": 2, "totalPages": 2}},
+        ]):
+            results = client._search_contacts_single_batch(
+                ContactQueryParams(zip_codes=["75201"], radius_miles=25, states=["TX"]),
+                max_pages=5,
+            )
+
+        assert len(results) == 2
+        assert client.last_search_truncated is None
