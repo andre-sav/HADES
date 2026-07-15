@@ -431,11 +431,26 @@ if st.session_state.pop("auto_run_confirmed", False) and not st.session_state.ge
             result = run_pipeline(auto_config, creds, trigger="manual", db=db)
 
             if result["success"]:
-                exported = result.get("summary", {}).get("contacts_exported", 0)
-                _note = f"Pipeline complete — {exported} leads exported."
-                if result.get("batch_id"):
-                    _note += f" Batch {result['batch_id']}."
-                st.session_state["_auto_run_outcome"] = ("success", _note)
+                _summary = result.get("summary", {})
+                exported = _summary.get("contacts_exported", 0)
+                # run_pipeline returns success=True for soft outcomes too
+                # (budget-exceeded skip, "no company IDs resolved") — each with
+                # a populated error. Surface it as a warning, not a green
+                # "complete", so the operator isn't misled (review N-08).
+                if _summary.get("budget_exceeded"):
+                    st.session_state["_auto_run_outcome"] = (
+                        "warning",
+                        f"Pipeline skipped — {result.get('error', 'weekly budget exceeded')}. "
+                        "No leads delivered.")
+                elif result.get("error"):
+                    st.session_state["_auto_run_outcome"] = (
+                        "warning",
+                        f"Pipeline completed with a caveat: {result['error']}")
+                else:
+                    _note = f"Pipeline complete — {exported} leads exported."
+                    if result.get("batch_id"):
+                        _note += f" Batch {result['batch_id']}."
+                    st.session_state["_auto_run_outcome"] = ("success", _note)
             else:
                 st.session_state["_auto_run_outcome"] = (
                     "error", f"Pipeline failed: {result.get('error', 'Unknown error')}")
@@ -453,6 +468,8 @@ _outcome = st.session_state.pop("_auto_run_outcome", None)
 if _outcome:
     if _outcome[0] == "success":
         st.success(_outcome[1])
+    elif _outcome[0] == "warning":
+        st.warning(_outcome[1])
     else:
         st.error(_outcome[1])
 

@@ -1318,11 +1318,17 @@ if (
                 # PipelineError path left it 'running' forever (HADES-mq5)
                 _run_id = st.session_state.get("intent_run_id")
                 if _rl and _run_id:
-                    db.complete_pipeline_run(
-                        _run_id, "failed", _rl.to_summary(),
-                        batch_id=None, credits_used=0,
-                        leads_exported=0, error=e.user_message,
-                    )
+                    # Best-effort: a DB hiccup here must not replace the
+                    # graceful API-error message with an unhandled crash
+                    # (matches the guarded supersede path above).
+                    try:
+                        db.complete_pipeline_run(
+                            _run_id, "failed", _rl.to_summary(),
+                            batch_id=None, credits_used=0,
+                            leads_exported=0, error=e.user_message,
+                        )
+                    except Exception:
+                        logger.warning("Could not close pipeline run", exc_info=True)
                     st.session_state.intent_run_logger = None
                     st.session_state.intent_run_id = None
                 st.error(e.user_message)
@@ -1344,11 +1350,14 @@ if (
                     _rl.error("Contact Search failed unexpectedly")
                 _run_id = st.session_state.get("intent_run_id")
                 if _rl and _run_id:
-                    db.complete_pipeline_run(
-                        _run_id, "failed", _rl.to_summary(),
-                        batch_id=None, credits_used=0,
-                        leads_exported=0, error="Unexpected error in contact search",
-                    )
+                    try:
+                        db.complete_pipeline_run(
+                            _run_id, "failed", _rl.to_summary(),
+                            batch_id=None, credits_used=0,
+                            leads_exported=0, error="Unexpected error in contact search",
+                        )
+                    except Exception:
+                        logger.warning("Could not close pipeline run", exc_info=True)
                     st.session_state.intent_run_logger = None
                     st.session_state.intent_run_id = None
                 st.error("Contact search failed unexpectedly. Check application logs.")
@@ -1646,11 +1655,16 @@ if (
                             # Close the run (was left 'running' forever, HADES-mq5)
                             _run_id = st.session_state.get("intent_run_id")
                             if _rl and _run_id:
-                                db.complete_pipeline_run(
-                                    _run_id, "failed", _rl.to_summary(),
-                                    batch_id=None, credits_used=0,
-                                    leads_exported=0, error=e.user_message,
-                                )
+                                # Best-effort close — a DB failure must not turn
+                                # the graceful enrichment error into a crash.
+                                try:
+                                    db.complete_pipeline_run(
+                                        _run_id, "failed", _rl.to_summary(),
+                                        batch_id=None, credits_used=0,
+                                        leads_exported=0, error=e.user_message,
+                                    )
+                                except Exception:
+                                    logger.warning("Could not close pipeline run", exc_info=True)
                                 st.session_state.intent_run_logger = None
                                 st.session_state.intent_run_id = None
                             st.error(f"Enrichment failed: {e.user_message}")
@@ -1674,11 +1688,14 @@ if (
                                 _rl.error("Contact Enrich failed unexpectedly")
                             _run_id = st.session_state.get("intent_run_id")
                             if _rl and _run_id:
-                                db.complete_pipeline_run(
-                                    _run_id, "failed", _rl.to_summary(),
-                                    batch_id=None, credits_used=0,
-                                    leads_exported=0, error="Unexpected error in enrichment",
-                                )
+                                try:
+                                    db.complete_pipeline_run(
+                                        _run_id, "failed", _rl.to_summary(),
+                                        batch_id=None, credits_used=0,
+                                        leads_exported=0, error="Unexpected error in enrichment",
+                                    )
+                                except Exception:
+                                    logger.warning("Could not close pipeline run", exc_info=True)
                                 st.session_state.intent_run_logger = None
                                 st.session_state.intent_run_id = None
                             st.error("Enrichment failed unexpectedly. Check application logs.")

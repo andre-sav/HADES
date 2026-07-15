@@ -1277,11 +1277,14 @@ if has_operator:
                         if _rl:
                             _rl.error(f"Search failed: {job.error}")
                         if _rl and _run_id:
-                            db.complete_pipeline_run(
-                                _run_id, "failed", _rl.to_summary(),
-                                batch_id=None, credits_used=0,
-                                leads_exported=0, error=job.error,
-                            )
+                            try:
+                                db.complete_pipeline_run(
+                                    _run_id, "failed", _rl.to_summary(),
+                                    batch_id=None, credits_used=0,
+                                    leads_exported=0, error=job.error,
+                                )
+                            except Exception:
+                                logger.warning("Could not close pipeline run", exc_info=True)
                             st.session_state.geo_run_logger = None
                             st.session_state.geo_run_id = None
                     elif job.result:
@@ -1756,11 +1759,14 @@ if (st.session_state.geo_selection_confirmed and st.session_state.geo_selected_c
                         _rl.error("Contact Enrich failed unexpectedly")
                     _run_id = st.session_state.get("geo_run_id")
                     if _rl and _run_id:
-                        db.complete_pipeline_run(
-                            _run_id, "failed", _rl.to_summary(),
-                            batch_id=None, credits_used=0,
-                            leads_exported=0, error="Unexpected error in enrichment",
-                        )
+                        try:
+                            db.complete_pipeline_run(
+                                _run_id, "failed", _rl.to_summary(),
+                                batch_id=None, credits_used=0,
+                                leads_exported=0, error="Unexpected error in enrichment",
+                            )
+                        except Exception:
+                            logger.warning("Could not close pipeline run", exc_info=True)
                         st.session_state.geo_run_logger = None
                         st.session_state.geo_run_id = None
     else:
@@ -1923,11 +1929,17 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
         _run_id = st.session_state.get("geo_run_id")
         if _rl and _run_id:
             _rl.error(f"Enrichment returned no contact data for all {_total_enriched} records")
-            db.complete_pipeline_run(
-                _run_id, "failed", _rl.to_summary(),
-                batch_id=None, credits_used=len(enriched_contacts),
-                leads_exported=0, error="Enrichment returned no contact data (credit/entitlement?)",
-            )
+            # Best-effort close — a DB failure here must not replace the
+            # deliberate graceful halt with an unhandled crash AND leave the
+            # run stuck 'running', the exact state this block prevents.
+            try:
+                db.complete_pipeline_run(
+                    _run_id, "failed", _rl.to_summary(),
+                    batch_id=None, credits_used=len(enriched_contacts),
+                    leads_exported=0, error="Enrichment returned no contact data (credit/entitlement?)",
+                )
+            except Exception:
+                logger.warning("Could not close pipeline run", exc_info=True)
             st.session_state.geo_run_logger = None
             st.session_state.geo_run_id = None
         st.stop()

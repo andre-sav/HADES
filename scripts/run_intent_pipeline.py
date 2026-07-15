@@ -228,15 +228,21 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             summary.update(run_logger.to_summary())
             db.complete_pipeline_run(run_id, "skipped", summary, None, 0, 0, msg)
             # A silent green skip means reps stop receiving leads with no
-            # signal until someone opens the dashboard (HADES-guz).
+            # signal until someone opens the dashboard (HADES-guz). If the
+            # alert itself can't be delivered (SMTP down/unconfigured), flag
+            # it so main() exits non-zero — otherwise the skip vanishes into
+            # a green run exactly like the email-delivery case (HADES-2oe).
             try:
-                send_alert(
+                _alert_sent = send_alert(
                     "[HADES] Intent pipeline SKIPPED — weekly budget exceeded",
                     f"{msg}\n\nNo leads will be delivered until the weekly "
                     "window resets or the budget is raised in config/icp.yaml.",
                 )
             except Exception:
                 logger.exception("Budget-skip alert failed")
+                _alert_sent = False
+            if not _alert_sent:
+                summary["alert_failed"] = True
             return {"success": True, "csv_content": None, "csv_filename": None,
                     "batch_id": None, "summary": summary, "error": msg}
 
@@ -846,6 +852,13 @@ def main():
     if s.get("email_failed") or s.get("email_skipped_no_smtp"):
         logger.error("Leads staged but NOT delivered by email — failing the run "
                      "so the missed delivery is visible.")
+        sys.exit(2)
+
+    # A budget skip whose alert never reached anyone is likewise invisible —
+    # fail the run so GitHub's own failure notification fires (HADES-2oe).
+    if s.get("alert_failed"):
+        logger.error("Budget-skip alert could not be delivered — failing the run "
+                     "so the missed notification is visible.")
         sys.exit(2)
 
 
