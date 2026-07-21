@@ -1,8 +1,66 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-07-12
-**Status:** P0 ZIP centroid corruption + P1 Home/Business phone-column inversion fixed in response to operator field report. 775 tests passing. All prior sessions: 764 tests passing through session 50. See session 51 below for the current change.
+**Date:** 2026-07-19
+**Status:** Hardening campaign MERGED to main and deployed (CI green for the first time since May). HADES-dio VS dedup built + live (18,223 non-HADES leads in the dedup window). Whole-project review done; first review fix on PR #1 (open, tests green). ZoomInfo API entitlement lapsed account-wide — ALL lead generation down pending account-manager action. 958 tests passing.
 
+
+## Session Summary (2026-07-13 → 07-19, long-running session, close)
+
+### What Was Done
+
+1. **HADES-dio — VanillaSoft lead-history dedup (built, imported, CLOSED)**
+   - `vs_leads.py` parser (validated against the real 294k-row export: 293,927 importable, 2,138 HADES markers, 0 bad dates), `vanillasoft_leads` table (ContactID PK, idempotent), `db/_vs_leads.py` mixin, `scripts/import_vs_leads.py` CLI, CSV Export page upload UI + flag-first VS-match breakdown.
+   - Export dedup third source: person-phone match, or name+ZIP; switchboard phones (`companyPhone`/`companyHQPhone`) require ZIP corroboration (franchise safety — found by the same-day review and fixed immediately).
+   - Bulk import into prod Turso complete: **18,223 non-HADES VS leads inside the 1-year dedup window** are now visible to dedup. E2E-verified on local libsql (caught real bug: `execute_many`'s multi-row INSERT drops inline `CURRENT_TIMESTAMP` — `imported_at` is a bound param).
+
+2. **Whole-project code review — `docs/CODE_REVIEW_2026-07-12-whole-project.md`**
+   - 5 parallel domain agents + CodeRabbit; every P1 manually verified. **No P0s; 8 P1s (N-01..N-08), 9 P2s (N-09..N-17), 4 P3s.**
+   - Beads filed: HADES-tfp (N-07/08), HADES-96q (N-02/05/09), HADES-c6q (N-03/04), HADES-7r2 (N-06), HADES-znl (N-01/10), HADES-obn (P2/P3 umbrella).
+   - CodeRabbit's second pass was polluted by the stale `HADES_CODEBASE_FLAT.md` snapshot (untracked, root) — **delete it and `REVIEW_PROMPT.md`**; recommendation recorded in the report.
+
+3. **Hardening branch MERGED to `main`** (merge `23c9e07`) — the whole silent-failure campaign + HADES-dio is deployed via Streamlit Cloud. Two CI fixes made green possible: `ed874b3` (27 ruff errors — pre-commit runs pytest but not ruff, so lint drift accumulated) and `ccc28fa` (**`pytest-asyncio` missing from requirements — CI Tests had been red on async Zoho tests since ≥May 20**, masked by the two known-red scheduled workflows). CI Tests on main: GREEN.
+
+4. **HADES-tfp fixed (review N-07/N-08) — [PR #1](https://github.com/andre-sav/HADES/pull/1), OPEN, tests green**
+   - Guarded 7 `complete_pipeline_run` calls in exception handlers (review named 3; swept 4 more sibling generic-except sites).
+   - Budget-skip: undelivered `send_alert` now flags `summary['alert_failed']` → `main()` exits 2 (red run when SMTP down); +3 regression tests.
+   - Automation Run-Now surfaces budget-skip/soft-error as `st.warning` instead of green "complete".
+
+5. **HADES-m29 diagnosed (ZoomInfo 403)** — live-tested: auth succeeds, but EVERY endpoint incl. the free `/lookup/usage` returns 403 "contact your Account Manager for purchasing options" = **account-wide API-entitlement lapse, will NOT self-clear**. Blocks Geography too, not just intent — all lead generation is down. The health-check monitoring IS working: daily `[HADES] ZoomInfo health UNKNOWN` alert emails delivering since ~07-14 (green run = alert delivered, by design; check EMAIL_RECIPIENTS inbox/spam).
+
+### Key Files Modified
+```
+vs_leads.py, db/_vs_leads.py, db/__init__.py, db/_schema.py   — VS lead history (new)
+export_dedup.py                                               — third dedup source + franchise-safe phone rules
+scripts/import_vs_leads.py                                    — bulk import CLI (new)
+pages/4_CSV_Export.py                                         — VS upload UI + flag-first breakdown
+pages/1_Intent_Workflow.py, pages/2_Geography_Workflow.py     — 7 guarded complete_pipeline_run sites
+pages/10_Automation.py                                        — Run-Now warning-level outcomes
+scripts/run_intent_pipeline.py                                — budget-skip alert_failed → exit 2
+requirements.txt                                              — pytest-asyncio (CI fix)
+docs/CODE_REVIEW_2026-07-12-whole-project.md                  — review report (new)
+tests/test_vs_leads.py (new), test_export_dedup.py, test_run_intent_pipeline.py
+```
+
+### Branch State
+- `main` — merged + pushed at `e050cbe`, CI Tests green, Streamlit Cloud deployed.
+- `fix/review-n07-n08-hardening-edges` — pushed, **PR #1 open** (tests green), ready to merge.
+- `fix/hades-silent-failure-hardening` — fully merged into main; can be deleted.
+
+### Known Issues
+- **HADES-m29 (P1, USER)**: ZoomInfo API entitlement lapsed — call the Account Manager. ALL lead generation down.
+- **HADES-jdi (P1, USER)**: `ZOHO_*` secrets still missing in GitHub Actions — Zoho Operator Sync red daily.
+- Post-merge smoke tests not yet done (need app URL/password): auth gate after the requirements rebuild, and one radius search (ZIP 20147 @15mi should return VA results, not empty DC).
+- Stale `HADES_CODEBASE_FLAT.md` + `REVIEW_PROMPT.md` in repo root should be deleted.
+
+### What Needs Doing Next Session
+1. **Merge [PR #1](https://github.com/andre-sav/HADES/pull/1)** (N-07/N-08 fixes, tests green).
+2. **USER: ZoomInfo entitlement (HADES-m29)** + **ZOHO_* secrets (HADES-jdi)**.
+3. **Review P1s**: HADES-96q (export-page state), HADES-c6q (dedup keys), HADES-7r2 (enrich parity), HADES-znl (execute_many rollback).
+4. In-progress tails: HADES-mcx (P2/P3 remainder), HADES-1d3 via HADES-jkd (wire degraded-batch alert headless).
+5. Post-merge smoke tests (above).
+
+### Test Count
+**958 passing** (775 → 953 via campaign+dio, → 956 review fixes, → 958 tfp regression tests).
 
 ## Session Summary (2026-07-12, Session close)
 

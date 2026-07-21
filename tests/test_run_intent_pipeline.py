@@ -319,13 +319,63 @@ class TestFullPipeline:
         budget.alert_message = "Weekly cap reached"
         MockCostTracker.return_value.check_budget.return_value = budget
 
-        result = run_pipeline(config, creds)
+        with patch("scripts.run_intent_pipeline.send_alert", return_value=True):
+            result = run_pipeline(config, creds)
 
         assert result["success"] is True
         assert result["csv_content"] is None
         assert result["summary"].get("budget_exceeded") is True
+        # Alert delivered → no undelivered-alert flag
+        assert result["summary"].get("alert_failed") is not True
         # Client should NOT have been called for search
         MockClient.return_value.search_intent_all_pages.assert_not_called()
+
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_budget_skip_flags_alert_failure_when_undelivered(
+        self, MockClient, MockDB, MockCostTracker
+    ):
+        """N-08: a budget-skip whose alert can't be delivered (SMTP down)
+        must set summary['alert_failed'] so main() exits non-zero instead
+        of vanishing into a green run (mirrors email_skipped_no_smtp)."""
+        config = _make_config()
+        creds = _make_creds()
+        MockDB.return_value.has_running_pipeline.return_value = False
+
+        budget = MagicMock()
+        budget.alert_level = "exceeded"
+        budget.alert_message = "Weekly cap reached"
+        MockCostTracker.return_value.check_budget.return_value = budget
+
+        with patch("scripts.run_intent_pipeline.send_alert", return_value=False):
+            result = run_pipeline(config, creds)
+
+        assert result["summary"].get("budget_exceeded") is True
+        assert result["summary"].get("alert_failed") is True
+
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_budget_skip_flags_alert_failure_when_alert_raises(
+        self, MockClient, MockDB, MockCostTracker
+    ):
+        """An exception raising out of send_alert is also an undelivered
+        alert — same flag, not a swallowed silent skip."""
+        config = _make_config()
+        creds = _make_creds()
+        MockDB.return_value.has_running_pipeline.return_value = False
+
+        budget = MagicMock()
+        budget.alert_level = "exceeded"
+        budget.alert_message = "Weekly cap reached"
+        MockCostTracker.return_value.check_budget.return_value = budget
+
+        with patch("scripts.run_intent_pipeline.send_alert",
+                   side_effect=RuntimeError("smtp down")):
+            result = run_pipeline(config, creds)
+
+        assert result["summary"].get("alert_failed") is True
 
     @patch("scripts.run_intent_pipeline.CostTracker")
     @patch("scripts.run_intent_pipeline.TursoDatabase")
