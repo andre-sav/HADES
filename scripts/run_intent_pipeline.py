@@ -23,7 +23,7 @@ import os
 import smtplib
 import sys
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
