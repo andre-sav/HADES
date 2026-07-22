@@ -310,6 +310,24 @@ class TestVanillaSoftColumns:
         assert len(VANILLASOFT_COLUMNS) == 31
 
 
+class TestUtcNowStr:
+    """N-02: single canonical timestamp generator for DB-bound 'now' values.
+    Space-separated UTC, matching CURRENT_TIMESTAMP and the HADES-8s5
+    convention — never 'T'-separated isoformat, never naive local time."""
+
+    def test_format_is_space_separated_seconds(self):
+        import re
+        from utils import utc_now_str
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", utc_now_str())
+
+    def test_value_is_utc_not_local(self):
+        from datetime import datetime, timezone
+        from utils import utc_now_str
+        parsed = datetime.strptime(utc_now_str(), "%Y-%m-%d %H:%M:%S")
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        assert abs((now_utc - parsed).total_seconds()) < 5
+
+
 class TestNormalizeZip:
     """Tests for centralized ZIP code normalization."""
 

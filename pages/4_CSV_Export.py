@@ -14,7 +14,7 @@ from vanillasoft_client import push_leads
 from dedup import find_duplicates, flag_duplicates_in_list, get_dedup_days_back
 from export_dedup import apply_export_dedup
 from vs_leads import parse_vs_export
-from utils import get_call_center_agents
+from utils import get_call_center_agents, utc_now_str
 from ui_components import (
     inject_base_styles,
     page_header,
@@ -179,11 +179,15 @@ if not intent_leads and not geo_leads:
                 # the automation generated it) must not dedup-block re-delivery
                 # of the very same batch (HADES-guz).
                 st.session_state["_loaded_staged_batch_id"] = export_row.get("batch_id")
-                # Restore operator if available
+                # Restore the batch's operator — or clear it. A staged batch
+                # from a MANUALLY-entered operator persists operator_id=NULL;
+                # leaving a leftover session operator attached would export
+                # this batch under the wrong operator's name/team (review
+                # N-05, same class as the session-46 wrong-state incident).
+                op = None
                 if export_row.get("operator_id"):
                     op = db.get_operator(export_row["operator_id"])
-                    if op:
-                        st.session_state["geo_operator"] = op
+                st.session_state["geo_operator"] = op
                 st.rerun()
 
         st.markdown("---")
@@ -656,7 +660,9 @@ if (_push_confirmed or _retry_rows) and _vs_push_available:
 
     # Record outcomes for successful leads only — match by personId (unique), fallback to name+company
     if batch_id:
-        now_iso = datetime.now().isoformat()
+        # UTC space-separated (review N-02) — naive local isoformat here skewed
+        # the 365-day dedup window by the UTC offset and mixed separators.
+        now_iso = utc_now_str()
         succeeded_pids = {r.person_id for r in summary.succeeded if r.person_id}
         succeeded_names = {(r.lead_name, r.company) for r in summary.succeeded if not r.person_id}
         outcome_rows = []

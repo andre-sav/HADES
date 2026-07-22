@@ -173,6 +173,11 @@ def _reset_intent_downstream():
     st.session_state.intent_usage_logged = False
     st.session_state.intent_leads_staged = False
     st.session_state.intent_results = None
+    # A previously loaded staged batch must not keep excluding itself from
+    # export dedup once a NEW search produces a different lead set — the
+    # exclusion is only valid for re-delivering that exact batch (review N-09).
+    st.session_state.pop("_loaded_staged_id", None)
+    st.session_state.pop("_loaded_staged_batch_id", None)
     st.session_state.intent_export_leads = None
     st.session_state.intent_exported = False
     st.session_state.pop("intent_numeric_map", None)
