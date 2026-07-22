@@ -1417,6 +1417,66 @@ class TestCompanyEnrich:
         assert body["matchCompanyInput"] == [{"companyId": "111"}, {"companyId": "222"}]
         assert "outputFields" in body
 
+    def test_enrich_companies_warns_on_count_mismatch(self, client, caplog):
+        """N-06: fewer companies back than requested must log a warning —
+        blank SIC/industry/employeeCount is the company-side sibling of the
+        blank-enrichment incident class (HADES-mcx/1d3)."""
+        import logging
+        mock_response = {
+            "success": True,
+            "data": {"result": [
+                {"input": {"companyid": "111"},
+                 "data": [{"id": 111, "name": "Only One"}],
+                 "matchStatus": "FULL_MATCH"},
+            ]},
+        }
+        with patch.object(client, "_request", return_value=mock_response):
+            params = CompanyEnrichParams(company_ids=["111", "222", "333"])
+            with caplog.at_level(logging.WARNING, logger="zoominfo_client"):
+                result = client.enrich_companies(params)
+        assert len(result["data"]) == 1
+        assert any("2/3" in r.message for r in caplog.records)
+
+    def test_enrich_companies_full_match_no_warning(self, client, caplog):
+        import logging
+        mock_response = {
+            "success": True,
+            "data": {"result": [
+                {"input": {"companyid": "111"},
+                 "data": [{"id": 111, "name": "A"}], "matchStatus": "FULL_MATCH"},
+            ]},
+        }
+        with patch.object(client, "_request", return_value=mock_response):
+            params = CompanyEnrichParams(company_ids=["111"])
+            with caplog.at_level(logging.WARNING, logger="zoominfo_client"):
+                client.enrich_companies(params)
+        assert not caplog.records
+
+    def test_enrich_companies_flat_dict_response(self, client):
+        """N-06: a flat single-company dict (no 'result' wrapper) must parse —
+        enrich_contacts has this fallback, enrich_companies did not."""
+        mock_response = {
+            "success": True,
+            "data": {"id": 111, "name": "Flat Co", "employeeCount": 50},
+        }
+        with patch.object(client, "_request", return_value=mock_response):
+            params = CompanyEnrichParams(company_ids=["111"])
+            result = client.enrich_companies(params)
+        assert len(result["data"]) == 1
+        assert result["data"][0]["name"] == "Flat Co"
+
+    def test_enrich_companies_unexpected_type_warns_not_crashes(self, client, caplog):
+        """N-06: a string/None data payload must yield [] with a warning,
+        never a silent empty return or a crash."""
+        import logging
+        mock_response = {"success": True, "data": "maintenance page"}
+        with patch.object(client, "_request", return_value=mock_response):
+            params = CompanyEnrichParams(company_ids=["111"])
+            with caplog.at_level(logging.WARNING, logger="zoominfo_client"):
+                result = client.enrich_companies(params)
+        assert result["data"] == []
+        assert any("Unexpected" in r.message for r in caplog.records)
+
 
 class TestContactSearchByCompanyId:
     """Tests for Contact Search by company ID (Intent workflow)."""
