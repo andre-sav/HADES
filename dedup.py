@@ -133,7 +133,14 @@ def get_dedup_key(lead: dict) -> str:
 
     Combines normalized phone and normalized company name.
     """
-    phone = normalize_phone(lead.get("phone", "") or lead.get("Business", "") or "")
+    # directPhone → mobilePhone → phone → Business (ZOOMINFO_TO_VANILLASOFT
+    # priority): required_fields is an OR, so raw contacts often carry ONLY
+    # directPhone/mobilePhone — keying on 'phone' alone collapsed the key to
+    # '|companyname', and tier-1 exact matches skip the state veto (N-04).
+    phone = normalize_phone(
+        lead.get("directPhone", "") or lead.get("mobilePhone", "")
+        or lead.get("phone", "") or lead.get("Business", "") or ""
+    )
     company = normalize_company_name(lead.get("companyName", "") or lead.get("Company", "") or "")
 
     return f"{phone}|{company}"

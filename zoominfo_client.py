@@ -1003,7 +1003,9 @@ class ZoomInfoClient:
 
                 # Dedupe by contact id
                 for contact in batch_contacts:
-                    contact_id = contact.get("id") or contact.get("personId")
+                    # str(): mixed int/str ids across batches (CLAUDE.md rule)
+                    raw_id = contact.get("id") or contact.get("personId")
+                    contact_id = str(raw_id) if raw_id else None
                     if contact_id and contact_id not in all_contacts_by_id:
                         all_contacts_by_id[contact_id] = contact
 
@@ -1049,7 +1051,10 @@ class ZoomInfoClient:
             pages_fetched += 1
 
             for contact in page_results:
-                pid = contact.get("personId") or contact.get("id")
+                # str(): ids arrive as int or str across pages (CLAUDE.md
+                # mixed-ID rule) — raw keys let the same person through twice.
+                raw_pid = contact.get("personId") or contact.get("id")
+                pid = str(raw_pid) if raw_pid else None
                 if pid and pid in seen_person_ids:
                     dupes_removed += 1
                     continue
@@ -1129,7 +1134,9 @@ class ZoomInfoClient:
                 truncation_signal = self.last_search_truncated
 
             for contact in batch_contacts:
-                contact_id = contact.get("id") or contact.get("personId")
+                # str(): mixed int/str ids across batches (CLAUDE.md rule)
+                raw_id = contact.get("id") or contact.get("personId")
+                contact_id = str(raw_id) if raw_id else None
                 if contact_id and contact_id not in all_contacts_by_id:
                     all_contacts_by_id[contact_id] = contact
 
@@ -1202,7 +1209,10 @@ class ZoomInfoClient:
 
         for contact in all_contacts:
             co = contact.get("company") if isinstance(contact.get("company"), dict) else {}
-            company_id = contact.get("companyId") or co.get("id")
+            # str(): int-vs-str companyId across pages must not yield the
+            # same company twice (duplicate enrich spend, CLAUDE.md rule).
+            raw_cid = contact.get("companyId") or co.get("id")
+            company_id = str(raw_cid) if raw_cid else None
             if company_id and company_id not in seen_companies:
                 seen_companies.add(company_id)
                 unique_contacts.append(contact)
