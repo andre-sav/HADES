@@ -811,6 +811,22 @@ class TestContactSearch:
         assert scores_by_company["B"] == 90
         assert scores_by_company["C"] == 88
 
+    def test_one_per_company_coerces_mixed_company_id_types(self, client):
+        """N-03: companyId may be int on one page and str on another
+        (CLAUDE.md messy-data rule) — the same company must dedupe, not
+        produce two rows and double enrich spend."""
+        all_contacts = [
+            {"personId": "1", "companyId": 100, "contactAccuracyScore": 95},
+            {"personId": "2", "companyId": "100", "contactAccuracyScore": 85},
+            {"personId": "3", "companyId": "B", "contactAccuracyScore": 90},
+        ]
+        with patch.object(
+            client, "search_contacts_all_pages", return_value=all_contacts
+        ):
+            params = ContactQueryParams(zip_codes=["75201"], radius_miles=25, states=["TX"])
+            results = client.search_contacts_one_per_company(params)
+        assert len(results) == 2
+
     def test_search_contacts_one_per_company_nested_company_id(self, client):
         """Test deduplication handles nested company.id structure."""
         all_contacts = [
@@ -1528,6 +1544,37 @@ class TestContactSearchByCompanyId:
         assert body["state"] == "TX"
         assert body["zipCode"] == "75201"
         assert "companyId" not in body
+
+    def test_single_batch_person_dedup_coerces_mixed_id_types(self, client):
+        """N-03: the same person returned as int personId on one page and
+        str on another must still dedupe to one contact."""
+        page1 = {
+            "data": [{"personId": 123, "firstName": "Alice"}],
+            "totalResults": 2,
+            "pagination": {"totalPages": 2},
+        }
+        page2 = {
+            "data": [{"personId": "123", "firstName": "Alice"}],
+            "totalResults": 2,
+            "pagination": {"totalPages": 2},
+        }
+        with patch.object(client, "search_contacts", side_effect=[page1, page2]):
+            params = ContactQueryParams(company_ids=["111"])
+            contacts = client._search_contacts_single_batch(params, max_pages=5)
+        assert len(contacts) == 1
+
+    def test_all_pages_cross_batch_dedup_coerces_mixed_id_types(self, client):
+        """N-03: cross-ZIP-batch dedup keys on raw contact ids — an int id
+        in batch 1 and the same id as str in batch 2 must not duplicate."""
+        zips = [f"{75000 + i:05d}" for i in range(80)]  # >75 forces 2 batches
+        batch1 = [{"id": 123, "firstName": "Alice"}]
+        batch2 = [{"id": "123", "firstName": "Alice"}]
+        with patch.object(
+            client, "_search_contacts_single_batch", side_effect=[batch1, batch2]
+        ):
+            params = ContactQueryParams(zip_codes=zips, radius_miles=0, states=["TX"])
+            contacts = client.search_contacts_all_pages(params)
+        assert len(contacts) == 1
 
     def test_search_contacts_single_batch_deduplicates_by_person_id(self, client):
         """Pagination within a single batch should deduplicate by personId."""

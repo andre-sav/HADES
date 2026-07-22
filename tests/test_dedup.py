@@ -113,6 +113,39 @@ class TestGetDedupKey:
         assert key == "|"
 
 
+class TestGetDedupKeyPhoneFallback:
+    """N-04: the key must use the phone fields ZoomInfo contacts actually
+    carry — required_fields is an OR over mobilePhone/directPhone/phone, so
+    'phone' is often absent, and 'Business' is a VanillaSoft CSV column that
+    never exists on raw API dicts. An empty phone collapses the key to
+    '|companyname', and tier-1 exact matches skip the state veto — two
+    different-state franchise locations would merge on name alone."""
+
+    def test_direct_phone_populates_key(self):
+        key = get_dedup_key({"directPhone": "(214) 555-0100", "companyName": "Acme Inc"})
+        assert key == "2145550100|acme"
+
+    def test_mobile_phone_populates_key(self):
+        key = get_dedup_key({"mobilePhone": "214-555-0199", "companyName": "Acme Inc"})
+        assert key == "2145550199|acme"
+
+    def test_fallback_order_matches_vanillasoft_mapping(self):
+        # directPhone → mobilePhone → phone → Business (ZOOMINFO_TO_VANILLASOFT priority)
+        key = get_dedup_key({
+            "directPhone": "1115550000",
+            "mobilePhone": "2225550000",
+            "phone": "3335550000",
+            "Business": "444-555-0000",
+            "companyName": "Acme Inc",
+        })
+        assert key == "1115550000|acme"
+
+    def test_franchise_locations_with_distinct_direct_phones_do_not_collide(self):
+        dallas = {"companyName": "Planet Fitness", "directPhone": "2145550100"}
+        fort_worth = {"companyName": "Planet Fitness", "directPhone": "8175550100"}
+        assert get_dedup_key(dallas) != get_dedup_key(fort_worth)
+
+
 class TestDedupeByPhone:
     """Tests for phone-based deduplication."""
 
