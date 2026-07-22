@@ -137,8 +137,14 @@ class ConnectionMixin:
         (1 round-trip instead of N). Falls back to individual statements
         for non-INSERT queries.
 
-        Safe to replay on reconnect because the old connection never
-        committed — partial writes are rolled back when the stream dies.
+        Inside a ``transaction()`` context the commit is deferred to the
+        context exit (same contract as execute_write); outside one, any
+        non-stale failure rolls back the partially-executed batch so it
+        can't ride along with a later unrelated commit.
+
+        Safe to replay on reconnect (outside a transaction) because the old
+        connection never committed — partial writes are rolled back when
+        the stream dies.
         """
         if not params_list:
             return
@@ -157,8 +163,13 @@ class ConnectionMixin:
         try:
             for params in params_list:
                 self.connection.execute(query, params)
-            self.connection.commit()
+            if not self._in_transaction:
+                self.connection.commit()
         except Exception as e:
+            if getattr(self, "_in_transaction", False):
+                # transaction() owns rollback; replaying/committing here would
+                # produce a partial transaction (HADES-638 contract).
+                raise
             if self._is_stale_stream_error(e):
                 logger.warning("Stale Hrana stream detected, reconnecting...")
                 try:
@@ -170,6 +181,13 @@ class ConnectionMixin:
                     conn.execute(query, params)
                 conn.commit()
                 return
+            # Roll back the rows that DID execute — left pending on the
+            # shared connection, the next unrelated commit would silently
+            # persist a partial batch (review N-01).
+            try:
+                self.connection.rollback()
+            except Exception:
+                logger.warning("Rollback failed after execute_many error", exc_info=True)
             raise
 
     def _execute_multi_row_insert(self, query: str, params_list: list[tuple]) -> None:
@@ -194,8 +212,13 @@ class ConnectionMixin:
                 multi_query = prefix + ", ".join([row_placeholder] * len(batch))
                 flat_params = tuple(p for row in batch for p in row)
                 self.connection.execute(multi_query, flat_params)
-            self.connection.commit()
+            if not self._in_transaction:
+                self.connection.commit()
         except Exception as e:
+            if getattr(self, "_in_transaction", False):
+                # transaction() owns rollback; replaying/committing here would
+                # produce a partial transaction (HADES-638 contract).
+                raise
             if self._is_stale_stream_error(e):
                 logger.warning("Stale Hrana stream detected, reconnecting...")
                 try:
@@ -210,4 +233,11 @@ class ConnectionMixin:
                     conn.execute(multi_query, flat_params)
                 conn.commit()
                 return
+            # Roll back the batches that DID execute — left pending on the
+            # shared connection, the next unrelated commit would silently
+            # persist a partial batch (review N-01).
+            try:
+                self.connection.rollback()
+            except Exception:
+                logger.warning("Rollback failed after execute_many error", exc_info=True)
             raise

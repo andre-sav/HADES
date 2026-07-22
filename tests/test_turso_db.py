@@ -834,6 +834,81 @@ class TestMultiRowInsert:
         assert mock_conn.execute.call_count == 2  # one per row
 
 
+class TestExecuteManyTransactionSafety:
+    """N-01/N-10: execute_many must roll back leaked statements on non-stale
+    failures (or the next unrelated commit silently persists a partial batch
+    on the shared connection) and defer commits to an enclosing transaction()
+    exactly like execute_write does."""
+
+    def _db(self):
+        mock_conn = MagicMock()
+        db = TursoDatabase(url="libsql://test.turso.io", auth_token="test-token")
+        db._conn = mock_conn
+        return db, mock_conn
+
+    def test_fallback_rolls_back_on_non_stale_failure(self):
+        """Row 2 of an UPDATE batch fails: row 1 must be rolled back, not
+        left pending for an unrelated later commit."""
+        db, conn = self._db()
+        conn.execute.side_effect = [MagicMock(), ValueError("constraint")]
+        with pytest.raises(ValueError):
+            db.execute_many("UPDATE t SET name = ? WHERE id = ?", [("a", 1), ("b", 2)])
+        conn.rollback.assert_called_once()
+        conn.commit.assert_not_called()
+
+    def test_multi_row_insert_rolls_back_on_non_stale_failure(self):
+        """Batch 2 of a chunked INSERT fails: batch 1 must be rolled back."""
+        db, conn = self._db()
+        conn.execute.side_effect = [MagicMock(), ValueError("bind error")]
+        # 2 cols → batch_size 450; 500 rows → 2 batches
+        params = [("a", i) for i in range(500)]
+        with pytest.raises(ValueError):
+            db.execute_many("INSERT INTO t (name, val) VALUES (?, ?)", params)
+        conn.rollback.assert_called_once()
+        conn.commit.assert_not_called()
+
+    def test_fallback_defers_commit_inside_transaction(self):
+        db, conn = self._db()
+        db._in_transaction = True
+        db.execute_many("UPDATE t SET name = ? WHERE id = ?", [("a", 1)])
+        conn.commit.assert_not_called()
+
+    def test_multi_row_insert_defers_commit_inside_transaction(self):
+        db, conn = self._db()
+        db._in_transaction = True
+        db.execute_many("INSERT INTO t (name) VALUES (?)", [("a",)])
+        conn.commit.assert_not_called()
+
+    def test_failure_inside_transaction_leaves_rollback_to_owner(self):
+        """transaction() owns the rollback (matching execute/execute_write) —
+        execute_many must raise without rolling back the enclosing
+        transaction's earlier statements itself."""
+        db, conn = self._db()
+        db._in_transaction = True
+        conn.execute.side_effect = ValueError("constraint")
+        with pytest.raises(ValueError):
+            db.execute_many("UPDATE t SET name = ?", [("a",)])
+        conn.rollback.assert_not_called()
+
+    def test_stale_stream_inside_transaction_raises_without_replay(self):
+        """HADES-638 contract: replaying only the current statement inside an
+        open transaction would let transaction() commit a PARTIAL transaction."""
+        db, conn = self._db()
+        db._in_transaction = True
+        conn.execute.side_effect = Exception("Hrana: stream not found (404)")
+        with pytest.raises(Exception, match="stream not found"):
+            db.execute_many("INSERT INTO t (name) VALUES (?)", [("a",)])
+        assert db._conn is conn  # no reconnect happened
+        conn.commit.assert_not_called()
+
+    def test_rollback_failure_does_not_mask_original_error(self):
+        db, conn = self._db()
+        conn.execute.side_effect = ValueError("original")
+        conn.rollback.side_effect = Exception("stream dead")
+        with pytest.raises(ValueError, match="original"):
+            db.execute_many("UPDATE t SET name = ?", [("a",)])
+
+
 class TestPipelineRuns:
     """Test pipeline_runs table operations."""
 
