@@ -1398,15 +1398,31 @@ class ZoomInfoClient:
                     elif "id" in item:
                         companies.append(item)
         elif isinstance(raw_data, dict):
-            for item in raw_data.get("result", []):
-                if isinstance(item, dict) and item.get("data"):
-                    inner = item["data"]
-                    if isinstance(inner, list) and inner:
-                        companies.append(inner[0])
-                    elif isinstance(inner, dict):
-                        companies.append(inner)
+            if "result" in raw_data:
+                for item in raw_data.get("result", []):
+                    if isinstance(item, dict) and item.get("data"):
+                        inner = item["data"]
+                        if isinstance(inner, list) and inner:
+                            companies.append(inner[0])
+                        elif isinstance(inner, dict):
+                            companies.append(inner)
+            elif "id" in raw_data or "name" in raw_data:
+                # Flat single-company payload (mirrors enrich_contacts'
+                # flat-response fallback — review N-06)
+                companies = [raw_data]
+        else:
+            logger.warning(f"Unexpected Company Enrich response data type: {type(raw_data)}")
 
         logger.info(f"Company Enrich complete: {len(companies)} companies returned")
+        # Fewer companies than requested = blank SIC/industry/employeeCount
+        # downstream — the company-side sibling of the blank-enrichment
+        # incident (HADES-mcx/1d3). Same fail-loud as enrich_contacts.
+        if len(companies) < len(params.company_ids):
+            logger.warning(
+                "Company Enrich: %d/%d had no match or empty data",
+                len(params.company_ids) - len(companies),
+                len(params.company_ids),
+            )
         return {"data": companies, "success": response.get("success")}
 
     def enrich_companies_batch(
