@@ -352,12 +352,12 @@ def record_csv_export(db, leads: list[dict], batch_id: str | None,
     Returns the number of rows submitted.
     """
     import json
-    from datetime import timezone
+    from utils import utc_now_str
 
     if not batch_id or not leads:
         return 0
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = utc_now_str()
     rows = []
     for lead in leads:
         features = {k: v for k, v in lead.items() if k.startswith("_") and v is not None}

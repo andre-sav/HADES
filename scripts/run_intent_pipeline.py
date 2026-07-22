@@ -23,7 +23,7 @@ import os
 import smtplib
 import sys
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -64,7 +64,8 @@ except ImportError:  # pragma: no cover
 from export_dedup import get_previously_exported, filter_previously_exported
 from expand_search import build_contacts_by_company
 from cost_tracker import CostTracker
-from utils import get_call_center_agents, get_sic_codes, get_employee_minimum, get_default_phone_fields
+from utils import (get_call_center_agents, get_sic_codes, get_employee_minimum,
+                   get_default_phone_fields, utc_now_str)
 
 logger = logging.getLogger("intent_pipeline")
 
@@ -578,7 +579,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             })
 
         # Record outcomes for calibration tracking
-        now = datetime.now(timezone.utc).isoformat()
+        now = utc_now_str()
         features = json.dumps({"automated": True, "topics": config["topics"]})
         outcomes = [
             db.build_outcome_row(lead, batch_id, "intent", now, features)

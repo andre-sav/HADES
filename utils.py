@@ -485,6 +485,17 @@ def time_ago(iso_str: str | None) -> str:
         return "Unknown"
 
 
+def utc_now_str() -> str:
+    """Canonical DB-bound 'now': UTC, space-separated seconds precision.
+
+    Matches SQLite's CURRENT_TIMESTAMP text so lexicographic comparison and
+    date('now') windows work — never 'T'-separated isoformat and never naive
+    local time (the HADES-8s5 drift class; review N-02).
+    """
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def normalize_zip(raw: str | int | None) -> str | None:
     """Normalize a ZIP code to 5-digit string.
 

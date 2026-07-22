@@ -305,6 +305,12 @@ class TestFullPipeline:
         outcomes = db.record_lead_outcomes_batch.call_args[0][0]
         assert len(outcomes) == 2
 
+        # N-02: exported_at (build_outcome_row arg 3) must be UTC
+        # space-separated — it feeds the 365-day dedup window.
+        import re
+        exported_at = db.build_outcome_row.call_args_list[0][0][3]
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", exported_at)
+
     @patch("scripts.run_intent_pipeline.CostTracker")
     @patch("scripts.run_intent_pipeline.TursoDatabase")
     @patch("scripts.run_intent_pipeline.ZoomInfoClient")

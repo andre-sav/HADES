@@ -969,6 +969,19 @@ class TestRecordCsvExport:
         assert record_csv_export(db, self._leads(), None, "intent") == 0
         db.record_lead_outcomes_batch.assert_not_called()
 
+    def test_exported_at_uses_utc_space_separated_convention(self):
+        """N-02: exported_at feeds the 365-day dedup window (compared against
+        SQLite date('now')) — must be UTC 'YYYY-MM-DD HH:MM:SS', never
+        'T'-separated isoformat (HADES-8s5 drift class)."""
+        import re
+        from unittest.mock import MagicMock
+        from export import record_csv_export
+        db = MagicMock()
+        db.build_outcome_row.side_effect = lambda *a, **k: ("row",)
+        record_csv_export(db, self._leads(), "HADES-B1", "geography")
+        exported_at = db.build_outcome_row.call_args_list[0][0][3]
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", exported_at)
+
     def test_empty_leads_records_nothing(self):
         from unittest.mock import MagicMock
         from export import record_csv_export

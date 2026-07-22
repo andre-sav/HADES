@@ -212,6 +212,10 @@ def _reset_geo_search_state():
     st.session_state.geo_last_search_params = {}
     st.session_state.pop("geo_export_leads", None)
     st.session_state.pop("geo_enrich_error", None)
+    # A previously loaded staged batch must not keep excluding itself from
+    # export dedup once a NEW search produces a different lead set (review N-09).
+    st.session_state.pop("_loaded_staged_id", None)
+    st.session_state.pop("_loaded_staged_batch_id", None)
     st.session_state.pop("geo_search_error", None)
     # Complete any in-flight pipeline run as cancelled
     _reset_run_id = st.session_state.get("geo_run_id")
