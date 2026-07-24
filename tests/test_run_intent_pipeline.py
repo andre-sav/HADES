@@ -877,6 +877,53 @@ class TestFailLoudAutomation:
     @patch("scripts.run_intent_pipeline.CostTracker")
     @patch("scripts.run_intent_pipeline.TursoDatabase")
     @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_degraded_enrichment_alert_failure_is_flagged(
+        self, MockClient, MockDB, MockCostTracker, mock_alert
+    ):
+        """HADES-jkd/2oe: a WARNING-severity degraded batch whose alert can't
+        be delivered must set summary['alert_failed'] so main() exits 2 —
+        otherwise SMTP-down makes the degradation invisible (the run still
+        'succeeds' with the surviving leads)."""
+        config, creds, client, db = self._standard_mocks(MockClient, MockDB, MockCostTracker)
+        client.enrich_contacts_batch.side_effect = [
+            [
+                {"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
+                {"id": "p_c2", "company": {"id": 200, "name": "Beta Inc"}, "companyId": 200},
+            ],
+            # 1 of 2 fieldless = 50% = warning severity, run still completes
+            [_make_contact("p1", "100", "Acme Corp"),
+             {"id": "p_ghost", "personId": "p_ghost"}],
+        ]
+        mock_alert.return_value = False  # SMTP down/unconfigured
+        result = run_pipeline(config, creds)
+        assert result["success"] is True
+        assert result["summary"]["fieldless_dropped"] == 1
+        assert result["summary"].get("alert_failed") is True
+
+    @patch("scripts.run_intent_pipeline.send_alert")
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
+    def test_degraded_enrichment_alert_delivered_no_flag(
+        self, MockClient, MockDB, MockCostTracker, mock_alert
+    ):
+        config, creds, client, db = self._standard_mocks(MockClient, MockDB, MockCostTracker)
+        client.enrich_contacts_batch.side_effect = [
+            [
+                {"id": "p_c1", "company": {"id": 100, "name": "Acme Corp"}, "companyId": 100},
+                {"id": "p_c2", "company": {"id": 200, "name": "Beta Inc"}, "companyId": 200},
+            ],
+            [_make_contact("p1", "100", "Acme Corp"),
+             {"id": "p_ghost", "personId": "p_ghost"}],
+        ]
+        mock_alert.return_value = True
+        result = run_pipeline(config, creds)
+        assert result["summary"].get("alert_failed") is not True
+
+    @patch("scripts.run_intent_pipeline.send_alert")
+    @patch("scripts.run_intent_pipeline.CostTracker")
+    @patch("scripts.run_intent_pipeline.TursoDatabase")
+    @patch("scripts.run_intent_pipeline.ZoomInfoClient")
     def test_resolution_failure_is_error_run(self, MockClient, MockDB, MockCostTracker, mock_alert):
         """Company-ID resolution API failure must not report 'success'."""
         config, creds, client, db = self._standard_mocks(MockClient, MockDB, MockCostTracker)

@@ -486,13 +486,18 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         if batch_verdict["severity"] != "ok":
             logger.warning(batch_verdict["message"])
             run_logger.warn(batch_verdict["message"])
+            # Undelivered alert → flag it so main() exits 2 (red run when
+            # SMTP is down — same 2oe contract as the budget-skip path).
             try:
-                send_alert(
+                _sent = send_alert(
                     f"[HADES] Intent enrichment {batch_verdict['severity'].upper()}",
                     batch_verdict["message"],
                 )
             except Exception:
                 logger.exception("Enrichment-health alert failed")
+                _sent = False
+            if not _sent:
+                summary["alert_failed"] = True
         enriched = [c for c in enriched if contact_has_core_data(c)]
         dropped = _enriched_total - len(enriched)
         if dropped:
