@@ -1176,49 +1176,59 @@ if (
 
                 logger.info("Company ID resolution: %d cached, %d need enrichment", len(numeric_map), len(company_ids) - len(numeric_map))
 
-                # Enrich 1 recommended contact per uncached company to get numeric IDs
+                # Enrich 1 recommended contact per uncached company to get
+                # numeric IDs — one BATCHED call, mirroring the headless
+                # pipeline (review N-17: the per-company loop was N sequential
+                # requests, each behind the 0.5s min-request interval).
                 uncached = [hid for hid in company_ids if hid not in numeric_map]
+                _resolution_responses = 0
                 if uncached:
                     st.write(f"Enriching {len(uncached)} contacts to resolve IDs ({len(numeric_map)} cached)...")
-                    for idx, hid in enumerate(uncached, 1):
+                    search_status.update(label=f"Phase 1: Resolving {len(uncached)} company IDs (batched)...")
+                    pid_to_hid = {}  # person_id → hashed_company_id
+                    for hid in uncached:
                         company_lead = selected_companies[hid]
-                        company_name = company_lead.get("companyName", hid[:8])
-                        recommended = company_lead.get("recommendedContacts", [])
-                        if not recommended:
-                            logger.warning("No recommended contacts for %s — skipping", company_name)
+                        recommended = company_lead.get("recommendedContacts") or []
+                        if not recommended or not isinstance(recommended[0], dict):
+                            logger.warning("No recommended contacts for %s — skipping",
+                                           company_lead.get("companyName", hid[:8]))
                             continue
-                        # Enrich first recommended contact
                         pid = recommended[0].get("id")
-                        if not pid:
-                            continue
+                        if pid:
+                            pid_to_hid[str(pid)] = hid
+                    if pid_to_hid:
                         try:
-                            search_status.update(label=f"Phase 1: Resolving company IDs ({idx}/{len(uncached)})...")
                             enriched = client.enrich_contacts_batch(
-                                person_ids=[pid],
+                                person_ids=list(pid_to_hid.keys()),
                                 output_fields=["id", "companyId", "companyName"],
                             )
-                            if enriched:
-                                company = enriched[0].get("company")
+                            _resolution_responses = len(enriched)
+                            for contact in enriched:
+                                hid = pid_to_hid.get(str(contact.get("id", "")))
+                                if not hid:
+                                    continue
+                                company = contact.get("company")
                                 company = company if isinstance(company, dict) else {}
-                                numeric_id = company.get("id") or enriched[0].get("companyId")
-                                resolved_name = company.get("name") or enriched[0].get("companyName", "")
+                                numeric_id = company.get("id") or contact.get("companyId")
+                                resolved_name = company.get("name") or contact.get("companyName", "")
                                 if numeric_id:
                                     numeric_map[hid] = int(numeric_id)
                                     db.save_company_id(hid, int(numeric_id), resolved_name)
-                                    logger.info("Resolved %s → %s (ID %s)", company_name, resolved_name, numeric_id)
+                                    logger.info("Resolved %s (ID %s)", resolved_name, numeric_id)
                         except Exception as e:
-                            logger.warning("Could not resolve %s: %s", company_name, e)
-                            st.caption(f"Could not resolve {company_name}: {e}")
+                            logger.warning("Batch company ID resolution failed: %s", e)
+                            st.caption(f"Company ID resolution failed: {e}")
                 else:
                     st.write(f"All {len(numeric_map)} company IDs found in cache.")
 
-                # Resolution enriches consume credits — log them (HADES-n7u)
-                _resolution_enriches = len(numeric_map) - len(cached)
-                if _resolution_enriches > 0 and not st.session_state.intent_test_mode:
+                # Resolution enriches consume credits — log the count of enrich
+                # RESPONSES: every match is billed, fieldless or not (n7u rule).
+                # Counting successful resolutions under-counted spend (N-13).
+                if _resolution_responses > 0 and not st.session_state.intent_test_mode:
                     cost_tracker.log_usage(
                         workflow_type="intent",
                         query_params={"source": "id_resolution"},
-                        credits_used=_resolution_enriches,
+                        credits_used=_resolution_responses,
                         leads_returned=0,
                     )
                 st.write(f"Resolved {len(numeric_map)}/{len(company_ids)} company IDs.")

@@ -269,6 +269,34 @@ class TestZohoClient:
 # ZOHO SYNC TESTS
 # =============================================================================
 
+class TestClassifyDealStage:
+    """Review P3: the substring check ('delivered' in stage) recorded
+    'Not Delivered'/'Undelivered' as WINS and open deals as no_delivery,
+    poisoning score calibration. Only closed stages record an outcome."""
+
+    def _classify(self, stage):
+        from zoho_sync import classify_deal_stage
+        return classify_deal_stage(stage)
+
+    def test_delivered_stages_are_delivery(self):
+        assert self._classify("Delivered") == "delivery"
+        assert self._classify("Closed Won (Delivered)") == "delivery"
+
+    def test_negated_delivered_is_no_delivery(self):
+        assert self._classify("Not Delivered") == "no_delivery"
+        assert self._classify("Undelivered") == "no_delivery"
+        assert self._classify("Delivery Cancelled") == "no_delivery"
+
+    def test_closed_lost_is_no_delivery(self):
+        assert self._classify("Closed Lost") == "no_delivery"
+
+    def test_open_and_unknown_stages_record_nothing(self):
+        assert self._classify("Negotiation") is None
+        assert self._classify("Proposal Sent") is None
+        assert self._classify("") is None
+        assert self._classify(None) is None
+
+
 class TestZohoSyncHelpers:
     """Tests for zoho_sync helper functions."""
 

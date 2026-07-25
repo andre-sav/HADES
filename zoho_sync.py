@@ -341,6 +341,29 @@ def run_sync(db, auth: ZohoAuth, force_full: bool = False) -> Dict[str, int]:
 OUTCOME_SYNC_KEY = "zoho_outcome_last_sync"
 
 
+# Negatives FIRST: "Not Delivered"/"Undelivered" contain "delivered".
+_STAGE_NEGATIVE_MARKERS = ("not delivered", "undelivered", "cancel", "closed lost", "dead")
+_STAGE_WON_MARKERS = ("delivered", "closed won")
+
+
+def classify_deal_stage(stage: str | None) -> str | None:
+    """Map a Zoho deal Stage to a lead outcome, or None for open/unknown.
+
+    The old bare substring check ('delivered' in stage) recorded
+    'Not Delivered'/'Undelivered' as wins and every open deal as
+    no_delivery — poisoning score calibration (review P3). Only closed
+    stages record an outcome; open/unknown stages are skipped.
+    """
+    s = (stage or "").strip().lower()
+    if not s:
+        return None
+    if any(neg in s for neg in _STAGE_NEGATIVE_MARKERS):
+        return "no_delivery"
+    if any(win in s for win in _STAGE_WON_MARKERS):
+        return "delivery"
+    return None
+
+
 async def sync_outcomes(
     db,
     auth: ZohoAuth,
@@ -414,9 +437,8 @@ async def sync_outcomes(
                 stage = (deal.get("Stage") or "").strip()
                 closing_date = deal.get("Closing_Date") or ""
 
-                if deal_name in outcome_names:
-                    # Map Zoho stage to outcome
-                    outcome = "delivery" if "delivered" in stage.lower() else "no_delivery"
+                outcome = classify_deal_stage(stage)
+                if deal_name in outcome_names and outcome:
                     db.update_lead_outcome(
                         batch_id=batch_id,
                         company_name=outcome_names[deal_name]["company_name"],
