@@ -205,16 +205,17 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
 
     cost_tracker = CostTracker(db)
 
-    # --- Concurrent-run guard ---
-    if db.has_running_pipeline("intent"):
+    # --- Concurrent-run guard: one atomic claim (review N-16) ---
+    # The old has_running_pipeline() check + start_pipeline_run() insert had
+    # a TOCTOU window — the scheduled cron firing while a user clicked
+    # Run Now both passed the check and double-spent the weekly budget.
+    run_id = db.claim_pipeline_run("intent", trigger, config)
+    if run_id is None:
         logger.warning("Pipeline already running — aborting to prevent overlap")
         return {
             "success": False, "csv_content": None, "csv_filename": None,
             "batch_id": None, "summary": summary, "error": "Pipeline already running",
         }
-
-    # --- Log pipeline start ---
-    run_id = db.start_pipeline_run("intent", trigger, config)
 
     try:
         # --- Budget check ---

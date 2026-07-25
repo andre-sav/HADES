@@ -635,11 +635,11 @@ class TestPipelineRunLogging:
         db.get_exported_company_ids.return_value = {}
         db.execute_write = MagicMock()
         db.execute.return_value = [(1,)]
-        db.start_pipeline_run.return_value = 42
+        db.claim_pipeline_run.return_value = 42
 
         result = run_pipeline(config, creds, trigger="manual")
 
-        db.start_pipeline_run.assert_called_once_with("intent", "manual", config)
+        db.claim_pipeline_run.assert_called_once_with("intent", "manual", config)
         db.complete_pipeline_run.assert_called_once()
         call_args = db.complete_pipeline_run.call_args
         assert call_args[0][0] == 42  # run_id
@@ -688,18 +688,19 @@ class TestPipelineRunLogging:
         # Should NOT have created a new TursoDatabase
         MockDB.assert_not_called()
         # Should have used external_db
-        external_db.start_pipeline_run.assert_called_once()
+        external_db.claim_pipeline_run.assert_called_once()
 
     @patch("scripts.run_intent_pipeline.CostTracker")
     @patch("scripts.run_intent_pipeline.TursoDatabase")
     @patch("scripts.run_intent_pipeline.ZoomInfoClient")
     def test_concurrent_run_guard_aborts(self, MockClient, MockDB, MockCostTracker):
-        """Pipeline aborts if another run is already in progress."""
+        """N-16: the guard is an atomic claim — a None claim means another
+        run holds the lock; no separate check-then-insert pair."""
         config = _make_config()
         creds = _make_creds()
 
         db = MockDB.return_value
-        db.has_running_pipeline.return_value = True
+        db.claim_pipeline_run.return_value = None
 
         result = run_pipeline(config, creds)
 

@@ -75,9 +75,12 @@ def main() -> int:
         if not verdict.get("breaches"):
             body_lines.append("  (none parseable — see message above)")
         sent = send_alert(f"[HADES] ZoomInfo health {verdict['severity'].upper()}", "\n".join(body_lines))
-        if not sent and verdict["severity"] in ("critical", "unknown"):
+        if not sent:
             # No human-visible signal exists: fail the run so GitHub's own
             # failure notification becomes the fallback channel (HADES-2oe).
+            # Warnings included (review N-12): the 80-94% window is this
+            # script's entire purpose — an SMTP outage there produced green
+            # runs until usage crossed critical.
             logger.error("Alert email undeliverable for %s verdict — failing the "
                          "run so the condition is visible.", verdict["severity"])
             return 1

@@ -489,7 +489,11 @@ else:
 # --- Execute Intent Search ---
 # Phase 1: Button click sets pending flag and reruns (so Cancel button renders)
 if not _is_pending and search_clicked:
-    budget_status = cost_tracker.check_budget("intent", 100)
+    # Estimate from the actual selected target (~2x: resolution + full
+    # enriches, mirroring the headless HADES-n7u estimate) — the hardcoded
+    # 100 mis-warned for small/large targets. The real gate remains at the
+    # enrichment spend point.
+    budget_status = cost_tracker.check_budget("intent", target_companies * 2)
     if budget_status.alert_level == "exceeded":
         st.error("Weekly budget exceeded")
         st.stop()

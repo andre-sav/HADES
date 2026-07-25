@@ -68,7 +68,9 @@ class ZoomInfoAPIError(ZoomInfoError):
         super().__init__(
             message=f"API error {status_code}: {message}",
             user_message=f"ZoomInfo API error ({status_code}). Check logs for details.",
-            recoverable=status_code >= 500,
+            # 0 = connection error / retry exhaustion (the client's marker for
+            # the most transient cases) — recoverable, matching ZohoAPIError.
+            recoverable=status_code >= 500 or status_code == 0,
         )
 
 

@@ -234,6 +234,11 @@ class SchemaMixin:
         try:
             self.clear_expired_cache()
             self.purge_old_error_logs(days=90)
+            # Review N-14: one row per API call with no cap — the same
+            # unbounded-growth class HADES-7qi closed for the tables above.
+            self.purge_old_credit_usage(days=365)
+            self.purge_old_query_history(days=365)
+            self.purge_old_company_id_mappings(days=180)
         except Exception:  # purge must never block startup
             import logging
             logging.getLogger(__name__).warning("Startup purge failed", exc_info=True)

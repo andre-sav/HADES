@@ -38,3 +38,19 @@ class CompanyIdMixin:
             )
             result.update({r[0]: {"numeric_id": r[1], "company_name": r[2]} for r in rows})
         return result
+
+
+    def purge_old_company_id_mappings(self, days: int = 180) -> int:
+        """TTL for the hashed→numeric id cache (review N-14): stale mappings
+        re-resolve on demand, so expiring them is safe. Returns count deleted."""
+        rows = self.execute(
+            "SELECT COUNT(*) FROM company_id_mapping WHERE resolved_at < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        count = rows[0][0] if rows else 0
+        if count > 0:
+            self.execute_write(
+                "DELETE FROM company_id_mapping WHERE resolved_at < datetime('now', ?)",
+                (f"-{days} days",),
+            )
+        return count

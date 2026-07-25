@@ -50,3 +50,19 @@ class UsageMixin:
             {"workflow_type": r[0], "credits": r[1], "leads": r[2], "queries": r[3]}
             for r in rows
         ]
+
+
+    def purge_old_credit_usage(self, days: int = 365) -> int:
+        """Delete credit_usage rows older than *days* (one row per API call —
+        unbounded growth without this; review N-14). Returns count deleted."""
+        rows = self.execute(
+            "SELECT COUNT(*) FROM credit_usage WHERE created_at < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        count = rows[0][0] if rows else 0
+        if count > 0:
+            self.execute_write(
+                "DELETE FROM credit_usage WHERE created_at < datetime('now', ?)",
+                (f"-{days} days",),
+            )
+        return count

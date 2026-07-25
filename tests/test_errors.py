@@ -70,6 +70,18 @@ class TestZoomInfoErrorHierarchy:
         assert e.recoverable is True  # 5xx = recoverable
         assert "(500)" in e.user_message
 
+    def test_zoominfo_status_zero_is_recoverable(self):
+        """N-11: status 0 is the client's marker for connection errors and
+        retry exhaustion — the MOST transient cases. ZohoAPIError already
+        treats 0 as recoverable; the health page renders non-recoverable
+        errors as red/critical, so a network blip must not show red."""
+        e = ZoomInfoAPIError(status_code=0, message="Connection error")
+        assert e.recoverable is True
+
+    def test_zoominfo_client_4xx_still_not_recoverable(self):
+        e = ZoomInfoAPIError(status_code=403, message="Forbidden")
+        assert e.recoverable is False
+
     def test_zoominfo_api_error_4xx_not_recoverable(self):
         e = ZoomInfoAPIError(status_code=400, message="Bad Request")
         assert e.recoverable is False

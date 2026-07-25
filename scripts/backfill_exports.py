@@ -71,6 +71,7 @@ def main():
         client = get_zoominfo_client()
 
     total_backfilled = 0
+    failures = 0
 
     for export_id in target_ids:
         export_row = db.get_staged_export(export_id)
@@ -119,6 +120,7 @@ def main():
             logger.info("Re-enriched %d contacts", len(enriched))
         except Exception as e:
             logger.error("Re-enrichment failed for export %d: %s", export_id, e)
+            failures += 1
             continue
 
         # Merge: original lead data (with scores, metadata) + fresh enrich data
@@ -160,6 +162,12 @@ def main():
 
     if not args.dry_run:
         logger.info("Backfill complete: %d total leads updated", total_backfilled)
+
+    # Exit non-zero when any export failed to re-enrich — an always-0 exit
+    # would hide total failure if this is ever scheduled (review P3).
+    if failures:
+        logger.error("Backfill finished with %d failed export(s)", failures)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
