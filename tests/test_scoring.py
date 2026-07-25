@@ -21,6 +21,38 @@ from scoring import (
 )
 
 
+class TestScoresAllIdentical:
+    """HADES-mcx P3: a result set where every lead carries the SAME score is
+    the signature of degraded scoring inputs (blank SIC/employees/distance
+    all pinned at defaults) — surface it instead of presenting uniform
+    scores as meaningful ranking."""
+
+    def _leads(self, scores):
+        return [{"companyName": f"Co{i}", "_score": s} for i, s in enumerate(scores)]
+
+    def test_identical_scores_detected(self):
+        from scoring import scores_all_identical
+        assert scores_all_identical(self._leads([64, 64, 64, 64, 64])) is True
+
+    def test_varied_scores_not_flagged(self):
+        from scoring import scores_all_identical
+        assert scores_all_identical(self._leads([64, 71, 64, 82, 55])) is False
+
+    def test_small_sets_not_flagged(self):
+        """A handful of leads can legitimately tie — only flag at scale."""
+        from scoring import scores_all_identical
+        assert scores_all_identical(self._leads([64, 64, 64, 64])) is False
+
+    def test_min_size_override(self):
+        from scoring import scores_all_identical
+        assert scores_all_identical(self._leads([64, 64, 64]), min_size=3) is True
+
+    def test_empty_and_missing_scores(self):
+        from scoring import scores_all_identical
+        assert scores_all_identical([]) is False
+        assert scores_all_identical([{"companyName": "NoScore"}] * 6) is True  # all None = all identical
+
+
 class TestIntentScoring:
     """Tests for intent lead scoring."""
 

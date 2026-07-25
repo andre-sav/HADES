@@ -296,6 +296,19 @@ def score_geography_leads(leads: list[dict], target_zip: str = None) -> list[dic
     return scored_leads
 
 
+def scores_all_identical(leads: list[dict], min_size: int = 5) -> bool:
+    """True when a result set of min_size+ leads all carry the same _score.
+
+    The uniform-score signature means the scoring inputs are degraded —
+    SIC/employee/distance all pinned at defaults (HADES-mcx: blank
+    enrichment rendered as a uniform-64 "ranking"). Small sets can tie
+    legitimately, so only flag at scale.
+    """
+    if len(leads) < min_size:
+        return False
+    return len({lead.get("_score") for lead in leads}) == 1
+
+
 def get_score_breakdown_intent(lead: dict) -> str:
     """Get human-readable score breakdown for intent lead."""
     return (

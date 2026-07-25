@@ -31,7 +31,8 @@ from zoominfo_client import (
     get_zoominfo_client,
     DEFAULT_ENRICH_OUTPUT_FIELDS,
 )
-from scoring import score_geography_leads, get_priority_label, get_priority_action
+from scoring import (score_geography_leads, get_priority_label,
+                     get_priority_action, scores_all_identical)
 from db._title_prefs import normalize_title
 from dedup import get_dedup_days_back
 from export_dedup import apply_export_dedup
@@ -1947,12 +1948,26 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             st.session_state.geo_run_logger = None
             st.session_state.geo_run_id = None
         st.stop()
-    elif _empty_count:
+    # The all-empty branch above ends in st.stop(), so a plain `if` here is
+    # the partial-empty case.
+    if _empty_count:
         st.warning(
             f"⚠️ {_empty_count} of {_total_enriched} enriched records came back "
             f"with no contact data (likely a ZoomInfo credit/entitlement issue). Showing "
             f"the {len(scored)} records that returned data — check the "
             "**Usage Dashboard** if you expected more."
+        )
+
+    # P3 guard (HADES-mcx): survivors that ALL score identically mean the
+    # scoring INPUTS are degraded (SIC/employee/distance pinned at defaults)
+    # even though contact fields exist — a uniform score is not a ranking.
+    if scores_all_identical(scored):
+        st.warning(
+            f"⚠️ All {len(scored)} leads scored identically "
+            f"({scored[0].get('_score')}). Scoring inputs (SIC code, employee "
+            "count, distance) appear to be missing or degraded — the order "
+            "below is not a meaningful ranking. Check enrichment health "
+            "before prioritizing calls by score."
         )
 
     # Results summary
