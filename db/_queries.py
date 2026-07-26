@@ -96,3 +96,19 @@ class QueryHistoryMixin:
             "UPDATE query_history SET leads_exported = ? WHERE id = ?",
             (leads_exported, query_id),
         )
+
+
+    def purge_old_query_history(self, days: int = 365) -> int:
+        """Delete query_history rows older than *days* (review N-14).
+        Returns count deleted."""
+        rows = self.execute(
+            "SELECT COUNT(*) FROM query_history WHERE created_at < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        count = rows[0][0] if rows else 0
+        if count > 0:
+            self.execute_write(
+                "DELETE FROM query_history WHERE created_at < datetime('now', ?)",
+                (f"-{days} days",),
+            )
+        return count

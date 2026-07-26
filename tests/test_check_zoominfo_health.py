@@ -50,7 +50,16 @@ def test_unknown_with_undeliverable_alert_exits_nonzero():
     assert code == 1
 
 
-def test_warning_with_undeliverable_alert_stays_green():
-    """Warnings are advisory; only critical/unknown force a red run."""
-    code, _ = _run_main("warning", alert_sent=False)
+def test_warning_with_delivered_alert_exits_zero():
+    code, mock_alert = _run_main("warning", alert_sent=True)
     assert code == 0
+    mock_alert.assert_called_once()
+
+
+def test_warning_with_undeliverable_alert_exits_nonzero():
+    """N-12 — deliberately overturns the earlier 'warnings are advisory'
+    pin: the 80-94% warning window is this script's entire reason to exist
+    (catch the pre-critical window before the blank-lead incident repeats).
+    An SMTP outage during that window produced green runs until 95%."""
+    code, _ = _run_main("warning", alert_sent=False)
+    assert code == 1

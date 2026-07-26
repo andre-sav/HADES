@@ -928,6 +928,45 @@ class TestPipelineRuns:
         assert isinstance(run_id, int)
         assert run_id > 0
 
+    def test_claim_pipeline_run_returns_id_when_free(self):
+        db = self._get_db()
+        run_id = db.claim_pipeline_run("intent", "scheduled", {"topics": ["Vending"]})
+        assert isinstance(run_id, int)
+        assert run_id > 0
+
+    def test_claim_pipeline_run_refuses_second_concurrent_claim(self):
+        """N-16: the old check-then-insert pair had a TOCTOU window — the
+        scheduled cron firing while a user clicks Run Now double-ran the
+        pipeline and double-spent credits. The claim is one atomic statement."""
+        db = self._get_db()
+        first = db.claim_pipeline_run("intent", "scheduled", {})
+        second = db.claim_pipeline_run("intent", "manual", {})
+        assert first is not None
+        assert second is None
+
+    def test_claim_ignores_stale_running_rows(self):
+        """A crashed run must not hold the lock forever (mirrors
+        has_running_pipeline's 30-minute staleness window)."""
+        db = self._get_db()
+        first = db.claim_pipeline_run("intent", "scheduled", {})
+        db.execute_write(
+            "UPDATE pipeline_runs SET started_at = datetime('now', '-45 minutes') WHERE id = ?",
+            (first,),
+        )
+        second = db.claim_pipeline_run("intent", "manual", {})
+        assert second is not None
+
+    def test_claim_scoped_per_workflow(self):
+        db = self._get_db()
+        assert db.claim_pipeline_run("intent", "scheduled", {}) is not None
+        assert db.claim_pipeline_run("geography", "manual", {}) is not None
+
+    def test_claim_frees_after_completion(self):
+        db = self._get_db()
+        first = db.claim_pipeline_run("intent", "scheduled", {})
+        db.complete_pipeline_run(first, "success", {}, None, 0, 0, None)
+        assert db.claim_pipeline_run("intent", "scheduled", {}) is not None
+
     def test_complete_pipeline_run_success(self):
         db = self._get_db()
         run_id = db.start_pipeline_run("intent", "manual", {})
@@ -1357,6 +1396,59 @@ class TestP3QuickWins:
         src = inspect.getsource(SchemaMixin.init_schema)
         assert "clear_expired_cache" in src
         assert "purge_old_error_logs" in src
+
+
+class TestRetentionPurges:
+    """Review N-14: credit_usage and query_history grow one row per API call
+    forever; company_id_mapping is a cache with no TTL. Cap them like the
+    other purged tables."""
+
+    def _db(self):
+        db = TursoDatabase(url="libsql://test.turso.io", auth_token="t")
+        db._conn = MagicMock()
+        db.execute = MagicMock(return_value=[(3,)])
+        db.execute_write = MagicMock()
+        return db
+
+    def test_purge_old_credit_usage(self):
+        db = self._db()
+        deleted = db.purge_old_credit_usage(days=365)
+        assert deleted == 3
+        sql = db.execute_write.call_args[0][0]
+        assert "DELETE FROM credit_usage" in sql
+        assert "created_at" in sql
+        assert "-365 days" in db.execute_write.call_args[0][1]
+
+    def test_purge_old_query_history(self):
+        db = self._db()
+        deleted = db.purge_old_query_history(days=365)
+        assert deleted == 3
+        sql = db.execute_write.call_args[0][0]
+        assert "DELETE FROM query_history" in sql
+        assert "created_at" in sql
+
+    def test_purge_old_company_id_mappings(self):
+        db = self._db()
+        deleted = db.purge_old_company_id_mappings(days=180)
+        assert deleted == 3
+        sql = db.execute_write.call_args[0][0]
+        assert "DELETE FROM company_id_mapping" in sql
+        assert "resolved_at" in sql
+        assert "-180 days" in db.execute_write.call_args[0][1]
+
+    def test_purges_skip_delete_when_nothing_old(self):
+        db = self._db()
+        db.execute = MagicMock(return_value=[(0,)])
+        assert db.purge_old_credit_usage() == 0
+        db.execute_write.assert_not_called()
+
+    def test_init_schema_wires_retention_purges(self):
+        import inspect
+        from db._schema import SchemaMixin
+        src = inspect.getsource(SchemaMixin.init_schema)
+        assert "purge_old_credit_usage" in src
+        assert "purge_old_query_history" in src
+        assert "purge_old_company_id_mappings" in src
 
     def test_recent_operator_ids_orders_by_max_created(self):
         """DISTINCT + ORDER BY created_at returns an arbitrary row's timestamp

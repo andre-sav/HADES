@@ -9,6 +9,7 @@ import streamlit as st
 
 from turso_db import get_database
 from scoring import build_stale_guidance, get_priority_label
+from dedup import get_dedup_days_back
 from utils import get_automation_config, get_budget_config
 from ui_components import (
     inject_base_styles,
@@ -632,4 +633,6 @@ else:
         with cfg5:
             metric_card("Accuracy Min", auto_config.get("accuracy_min", "—"))
         with cfg6:
-            metric_card("Dedup Days", auto_config.get("dedup_days_back", 365))
+            # Fallback from the shared source of truth — this literal drifted
+            # 180→365 once already (review N-15).
+            metric_card("Dedup Days", auto_config.get("dedup_days_back", get_dedup_days_back()))

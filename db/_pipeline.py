@@ -58,6 +58,36 @@ class PipelineRunsMixin:
             (workflow_type, trigger, json.dumps(config)),
         )
 
+    def claim_pipeline_run(
+        self, workflow_type: str, trigger: str, config: dict,
+        max_age_minutes: int = 30,
+    ) -> int | None:
+        """Atomically claim the right to run: insert a 'running' row ONLY if
+        no live one exists. Returns the new run id, or None when another run
+        holds the claim.
+
+        Replaces the has_running_pipeline()-then-start_pipeline_run() pair,
+        whose check-then-insert window let a scheduled run and a manual
+        Run Now both pass the guard (review N-16). Runs older than
+        *max_age_minutes* are stale (crashed without cleanup) and ignored.
+        """
+        rows = self.execute(
+            """INSERT INTO pipeline_runs
+                   (workflow_type, trigger, status, config_json, started_at)
+               SELECT ?, ?, 'running', ?, CURRENT_TIMESTAMP
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM pipeline_runs
+                   WHERE workflow_type = ? AND status = 'running'
+                     AND started_at > datetime('now', ?)
+               )
+               RETURNING id""",
+            (workflow_type, trigger, json.dumps(config),
+             workflow_type, f"-{max_age_minutes} minutes"),
+        )
+        if not self._in_transaction:
+            self.connection.commit()
+        return rows[0][0] if rows else None
+
     def complete_pipeline_run(
         self, run_id: int, status: str, summary: dict,
         batch_id: str | None, credits_used: int, leads_exported: int,
