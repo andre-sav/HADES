@@ -108,7 +108,19 @@ ZOOMINFO_CLIENT_SECRET = "..."
 VANILLASOFT_WEB_LEAD_ID = "..."  # VanillaSoft Incoming Web Leads profile ID
 APP_PASSWORD = "..."              # Password gate for Streamlit Community Cloud (optional for local dev)
 ZOOMINFO_TOKEN_KEY = "..."        # Fernet key for encrypting JWT at rest (generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+SENTRY_DSN = "https://...@...ingest.sentry.io/..."  # Error monitoring (optional; omit = monitoring off, no errors)
 ```
+
+**Error monitoring (`observability.py`, HADES-5w0):** `init_sentry()` is
+idempotent and a no-op without `SENTRY_DSN`. Called from `utils.require_auth()`
+(every page's first call — Streamlit runs pages as independent scripts, so an
+`app.py`-only init would miss them) and from each headless script's `main()`,
+tagged by `component`. Privacy: `send_default_pii=False` **and**
+`include_local_variables=False` — stack frames here hold lead dicts with names,
+phones and emails; a `before_send` hook also redacts credential-shaped keys.
+`SENTRY_DSN` must be set in **three** places to be fully live: Streamlit Cloud
+secrets (UI), GitHub Actions secrets (crons — already wired into all three
+workflow YAMLs), and `.streamlit/secrets.toml` for local use.
 
 ## Testing
 

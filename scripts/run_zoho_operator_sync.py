@@ -42,6 +42,9 @@ REQUIRED_ENV = (
 
 
 def main(force_full: bool) -> int:
+    from observability import init_sentry
+    init_sentry(component="zoho-sync")  # no-op without SENTRY_DSN
+
     missing = [k for k in REQUIRED_ENV if not os.environ.get(k)]
     if missing:
         logger.error(f"Missing required env vars: {', '.join(missing)}")

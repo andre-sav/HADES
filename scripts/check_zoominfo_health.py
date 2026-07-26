@@ -41,6 +41,9 @@ logger = logging.getLogger("check_zoominfo_health")
 
 
 def main() -> int:
+    from observability import init_sentry
+    init_sentry(component="health-check")  # no-op without SENTRY_DSN
+
     from _credentials import load_credentials
 
     try:

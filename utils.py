@@ -22,7 +22,16 @@ def require_auth() -> None:
     configured, the gate is skipped so local development works without a
     password.  Once authenticated, the flag persists in session state for
     the browser session.
+
+    Doubles as the page-bootstrap hook: Streamlit runs each page as an
+    INDEPENDENT script (app.py does not execute when a page is opened
+    directly), and this is the one call every page makes first — so it is
+    where Sentry gets initialized for UI coverage (HADES-5w0). The init is
+    idempotent and a no-op without a DSN.
     """
+    from observability import init_sentry
+    init_sentry(component="streamlit")
+
     password = st.secrets.get("APP_PASSWORD")
     if not password:
         return  # no secret configured — skip gate (local dev)

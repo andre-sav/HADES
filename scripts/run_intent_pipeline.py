@@ -791,6 +791,10 @@ def main():
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+    # Error monitoring (HADES-5w0) — no-op without SENTRY_DSN
+    from observability import init_sentry
+    init_sentry(component="headless-intent")
+
     # Load credentials
     from _credentials import load_credentials
     try:
