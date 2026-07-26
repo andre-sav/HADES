@@ -122,6 +122,30 @@ phones and emails; a `before_send` hook also redacts credential-shaped keys.
 secrets (UI), GitHub Actions secrets (crons — already wired into all three
 workflow YAMLs), and `.streamlit/secrets.toml` for local use.
 
+## Data-health monitoring (HADES-e7j)
+
+`scripts/data_anomaly_check.py` runs daily at **07:00 UTC** (after the 06:00
+Zoho sync, so linkage is measured on a freshly-synced table). Detection logic
+is pure and unit-tested in `monitoring.py`; the script only supplies DB reads,
+stores baselines, and alerts.
+
+| Check | Threshold | Tune when |
+|---|---|---|
+| `operators` row count vs. yesterday | drop ≥ **5%** (0 rows = critical) | Bulk operator cleanups fire false alarms → raise, or pause the workflow for the cleanup |
+| Zoho-linked % vs. yesterday | drop ≥ **5 points** | Expected during a Zoho re-auth; a sustained drop is a real sync regression |
+| Export volume vs. 30-day history | below **2σ** of the mean (0 with a healthy history = critical) | Seasonal/holiday lulls → widen to 2.5σ; needs ≥10 days of history or it stays quiet |
+| Mutation-log delete burst | **100+ deletes within 60s** | Legit bulk deletes → raise the count. Inserts are deliberately exempt (VS imports are bulky by nature) |
+
+**Baselines** live in `sync_metadata` (`anomaly_baseline_*`) and advance on
+every non-dry run **even when an anomaly fired** — otherwise a one-off drop
+re-alerts daily against a stale high-water mark. First run is always quiet
+(no baseline to compare against).
+
+**Exit codes** follow the HADES-2oe contract: 0 when healthy *or* when the
+alert was delivered (the email is the signal); 1 when an anomaly was found but
+the alert could not be delivered, so the red run becomes the fallback channel.
+Dry-run: `python scripts/data_anomaly_check.py --dry-run`.
+
 ## Testing
 
 Always run `python -m pytest tests/ -x -q --tb=short` after Python changes before committing. Run the full test suite, not just new tests. The pre-commit hook enforces this automatically.

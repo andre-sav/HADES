@@ -124,3 +124,148 @@ def evaluate_enrichment_batch(records: list[dict], *, empty_fraction_threshold: 
 
     return {"severity": severity, "total": total, "empty": empty, "fraction": fraction,
             "message": message}
+
+
+# ---------------------------------------------------------------------------
+# Data-drift anomaly detection (HADES-e7j)
+#
+# Early warning for the slow failure modes nothing else catches: an operator
+# mass-delete, a Zoho sync degrading silently, a yield collapse after a filter
+# change. All pure — scripts/data_anomaly_check.py supplies the DB reads.
+# ---------------------------------------------------------------------------
+
+_SEVERITY_RANK = {"ok": 0, "warning": 1, "unknown": 2, "critical": 3}
+
+def evaluate_row_count_drop(table: str, current: int, baseline: int | None,
+                            *, threshold_pct: float = 5.0) -> dict:
+    """Flag a table shrinking since the last baseline.
+
+    No baseline (first ever run) is "ok" — crying wolf on day one would
+    train the operator to ignore the channel.
+    """
+    if baseline is None or baseline <= 0:
+        return {"severity": "ok", "message": f"{table}: {current} rows (no baseline yet)."}
+
+    dropped = baseline - current
+    if dropped <= 0:
+        return {"severity": "ok", "message": f"{table}: {current} rows (was {baseline})."}
+
+    pct = dropped / baseline * 100.0
+    if current == 0:
+        severity = "critical"
+    elif pct >= threshold_pct:
+        severity = "warning"
+    else:
+        severity = "ok"
+
+    if severity == "ok":
+        return {"severity": "ok", "message": f"{table}: {current} rows (was {baseline})."}
+    return {
+        "severity": severity,
+        "message": (f"{table}: row count fell {dropped} ({pct:.1f}%) — "
+                    f"{baseline} -> {current}."),
+    }
+
+
+def evaluate_linkage_drop(current_fraction: float, baseline_fraction: float | None,
+                          *, threshold_pct: float = 5.0, label: str = "Zoho-linked operators") -> dict:
+    """Flag a linked/synced percentage regressing (silent sync degradation)."""
+    if baseline_fraction is None:
+        return {"severity": "ok",
+                "message": f"{label}: {current_fraction:.0%} (no baseline yet)."}
+
+    drop_points = (baseline_fraction - current_fraction) * 100.0
+    if drop_points < threshold_pct:
+        return {"severity": "ok",
+                "message": f"{label}: {current_fraction:.0%} (was {baseline_fraction:.0%})."}
+    return {
+        "severity": "warning",
+        "message": (f"{label}: fell {drop_points:.1f} points — "
+                    f"{baseline_fraction:.0%} -> {current_fraction:.0%}."),
+    }
+
+
+def evaluate_export_volume(today_count: int, history: list[int],
+                           *, min_samples: int = 10, sigmas: float = 2.0) -> dict:
+    """Flag today's export volume collapsing versus recent history.
+
+    Uses a 2σ floor, with two guards: too few samples can't support the
+    claim, and a zero-variance history would otherwise fire on any dip.
+    """
+    import statistics
+
+    if len(history) < min_samples:
+        return {"severity": "ok",
+                "message": f"Exports today: {today_count} (history too short to judge)."}
+
+    mean = statistics.fmean(history)
+    stdev = statistics.pstdev(history)
+    floor = mean - sigmas * stdev if stdev > 0 else mean * 0.5
+
+    if today_count >= floor:
+        return {"severity": "ok",
+                "message": f"Exports today: {today_count} (30-day mean {mean:.1f})."}
+
+    severity = "critical" if today_count == 0 and mean > 0 else "warning"
+    return {
+        "severity": severity,
+        "message": (f"Exports today: {today_count}, far below the 30-day mean "
+                    f"{mean:.1f} (floor {floor:.1f})."),
+    }
+
+
+def evaluate_mutation_burst(mutations: list[dict], *, threshold: int = 100,
+                            window_seconds: int = 60) -> dict:
+    """Flag a burst of DELETEs in a short window (mass-delete signature).
+
+    Inserts are excluded: a VanillaSoft import legitimately writes many rows
+    at once. Unparseable timestamps are skipped rather than crashing the check.
+    """
+    from datetime import datetime
+
+    deletes = []
+    for m in mutations:
+        if m.get("op") != "delete":
+            continue
+        ts = m.get("ts")
+        if not ts:
+            continue
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                deletes.append(datetime.strptime(str(ts)[:19], fmt))
+                break
+            except ValueError:
+                continue
+
+    if len(deletes) < threshold:
+        return {"severity": "ok",
+                "message": f"Mutation log: {len(deletes)} delete(s) in the window."}
+
+    deletes.sort()
+    # Sliding window: any `threshold` deletes inside `window_seconds`.
+    for i in range(len(deletes) - threshold + 1):
+        span = (deletes[i + threshold - 1] - deletes[i]).total_seconds()
+        if span <= window_seconds:
+            return {
+                "severity": "critical",
+                "message": (f"Mutation log: {threshold}+ delete operations within "
+                            f"{window_seconds}s — possible mass delete."),
+            }
+    return {"severity": "ok",
+            "message": f"Mutation log: {len(deletes)} delete(s), none bursty."}
+
+
+def summarise_verdicts(verdicts: list[dict]) -> dict:
+    """Combine verdicts into one, worst-severity-wins.
+
+    The message lists only the non-ok lines — an alert should say what is
+    wrong, not recite everything that is fine.
+    """
+    if not verdicts:
+        return {"severity": "ok", "message": "No checks ran.", "verdicts": []}
+
+    worst = max(verdicts, key=lambda v: _SEVERITY_RANK.get(v.get("severity", "ok"), 0))
+    severity = worst.get("severity", "ok")
+    problems = [v["message"] for v in verdicts if v.get("severity") != "ok"]
+    message = "\n".join(problems) if problems else "All data-health checks passed."
+    return {"severity": severity, "message": message, "verdicts": verdicts}
