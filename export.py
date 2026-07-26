@@ -368,3 +368,30 @@ def record_csv_export(db, leads: list[dict], batch_id: str | None,
     db.record_lead_outcomes_batch(rows)
     logger.info("CSV export recorded: %d leads, batch %s (%s)", len(rows), batch_id, workflow_type)
     return len(rows)
+
+
+def resolve_export_operator(db, snapshot: dict | None) -> dict | None:
+    """Re-read the operator by ID at export time (HADES-fpd step 1).
+
+    The Geography page snapshots the whole operator dict into session_state
+    when it is picked, and that snapshot is what supplies export metadata.
+    Any edit afterwards — through the UI or the nightly out-of-process Zoho
+    sync — leaves the export carrying stale name/phone/business into
+    VanillaSoft for the life of the browser session.
+
+    Re-reading at the point of consequence bounds that to a single query.
+    Never blocks an export: a missing id (manually-entered operator), a DB
+    failure, or a purged row all fall back to the snapshot we already had.
+    """
+    if not snapshot:
+        return None
+    op_id = snapshot.get("id")
+    if not op_id:
+        return snapshot  # manual operator — no DB row to refresh from
+    try:
+        fresh = db.get_operator(op_id)
+    except Exception:
+        logger.warning("Could not refresh operator %s for export — using the "
+                       "session snapshot", op_id, exc_info=True)
+        return snapshot
+    return fresh or snapshot
