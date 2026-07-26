@@ -25,7 +25,8 @@ class SchemaMixin:
                 zoho_id TEXT UNIQUE,
                 synced_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP
+                updated_at TIMESTAMP,
+                deleted_at TIMESTAMP
             )
             """,
             # ZoomInfo cache table
@@ -151,7 +152,8 @@ class SchemaMixin:
                 push_status TEXT,
                 pushed_at TEXT,
                 push_results_json TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                deleted_at TIMESTAMP
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_staged_created ON staged_exports(created_at)",
@@ -268,6 +270,9 @@ class SchemaMixin:
             ("staged_exports", "push_status", "ALTER TABLE staged_exports ADD COLUMN push_status TEXT"),
             ("staged_exports", "pushed_at", "ALTER TABLE staged_exports ADD COLUMN pushed_at TEXT"),
             ("staged_exports", "push_results_json", "ALTER TABLE staged_exports ADD COLUMN push_results_json TEXT"),
+            # Soft delete (HADES-l3n) — recoverable for 90 days
+            ("operators", "deleted_at", "ALTER TABLE operators ADD COLUMN deleted_at TIMESTAMP"),
+            ("staged_exports", "deleted_at", "ALTER TABLE staged_exports ADD COLUMN deleted_at TIMESTAMP"),
         ]
 
         for table, column, statement in migrations:
