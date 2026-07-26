@@ -9,7 +9,8 @@ import streamlit as st
 from datetime import datetime
 
 from turso_db import get_database
-from export import export_leads_to_csv, get_export_summary, build_vanillasoft_row, record_csv_export
+from export import (export_leads_to_csv, get_export_summary, build_vanillasoft_row,
+                    record_csv_export, resolve_export_operator)
 from vanillasoft_client import push_leads
 from dedup import find_duplicates, flag_duplicates_in_list, get_dedup_days_back
 from export_dedup import apply_export_dedup
@@ -493,6 +494,14 @@ elif operators:
 else:
     st.caption("No operators configured")
     selected_operator = None
+
+# Re-read the picked operator by ID before its metadata reaches VanillaSoft
+# (HADES-fpd): geo_operator is a session_state SNAPSHOT taken when the
+# operator was picked, so a later edit — via the Operators page or the
+# nightly out-of-process Zoho sync — would otherwise ship stale
+# name/phone/business for the life of the browser session. Falls back to the
+# snapshot on any failure; never blocks an export.
+selected_operator = resolve_export_operator(db, selected_operator)
 
 
 # =============================================================================
