@@ -23,6 +23,7 @@ from db._metadata import MetadataMixin
 from db._error_log import ErrorLogMixin
 from db._title_prefs import TitlePrefsMixin
 from db._vs_leads import VsLeadsMixin
+from db._mutation_log import MutationLogMixin
 
 
 class TursoDatabase(
@@ -41,6 +42,7 @@ class TursoDatabase(
     ErrorLogMixin,
     TitlePrefsMixin,
     VsLeadsMixin,
+    MutationLogMixin,
 ):
     """Turso database connection manager."""
 

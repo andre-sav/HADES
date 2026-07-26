@@ -173,10 +173,20 @@ class OutcomesMixin:
 
     def update_lead_outcome(self, batch_id: str, company_name: str,
                             outcome: str, outcome_at: str) -> None:
-        """Update outcome for a specific lead (matched by batch + company)."""
+        """Update outcome for a specific lead (matched by batch + company).
+
+        Audited (HADES-6if): outcomes feed score calibration, so a wrong
+        write here silently skews future lead ranking.
+        """
         self.execute_write(
             """UPDATE lead_outcomes
                SET outcome = ?, outcome_at = ?, updated_at = CURRENT_TIMESTAMP
                WHERE batch_id = ? AND company_name = ?""",
             (outcome, outcome_at, batch_id, company_name),
+        )
+        self.log_mutation(
+            "lead_outcomes", f"{batch_id}:{company_name}", "update",
+            before=None,
+            after={"outcome": outcome, "outcome_at": outcome_at,
+                   "batch_id": batch_id, "company_name": company_name},
         )
