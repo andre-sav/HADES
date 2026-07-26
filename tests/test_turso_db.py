@@ -1184,6 +1184,7 @@ class TestMigrations:
                 (0, "id", "INTEGER", 1, None, 1),
                 (1, "zoho_id", "TEXT", 0, None, 0),
                 (2, "synced_at", "TIMESTAMP", 0, None, 0),
+                (3, "deleted_at", "TIMESTAMP", 0, None, 0),
             ],
             "lead_outcomes": [
                 (0, "id", "INTEGER", 1, None, 1),
@@ -1194,6 +1195,7 @@ class TestMigrations:
                 (1, "push_status", "TEXT", 0, None, 0),
                 (2, "pushed_at", "TEXT", 0, None, 0),
                 (3, "push_results_json", "TEXT", 0, None, 0),
+                (4, "deleted_at", "TIMESTAMP", 0, None, 0),
             ],
         }
 
@@ -1468,4 +1470,4 @@ class TestRetentionPurges:
         db.get_recent_operator_ids(limit=5)
         q = captured["q"].upper()
         assert "GROUP BY" in q
-        assert "MAX(CREATED_AT)" in q
+        assert "MAX(S.CREATED_AT)" in q

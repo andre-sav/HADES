@@ -9,7 +9,7 @@ class OperatorsMixin:
         rows = self.execute(
             "SELECT id, operator_name, vending_business_name, operator_phone, "
             "operator_email, operator_zip, operator_website, team, zoho_id, synced_at, created_at "
-            "FROM operators ORDER BY operator_name"
+            "FROM operators WHERE deleted_at IS NULL ORDER BY operator_name"
         )
         return [
             {
@@ -37,9 +37,10 @@ class OperatorsMixin:
                  "operator_email, operator_zip, operator_website, team, zoho_id, synced_at, created_at")
         if query:
             like = f"%{query}%"
-            where = ("WHERE operator_name LIKE ? OR vending_business_name LIKE ? "
+            where = ("WHERE deleted_at IS NULL AND (operator_name LIKE ? "
+                     "OR vending_business_name LIKE ? "
                      "OR operator_phone LIKE ? OR operator_email LIKE ? "
-                     "OR operator_zip LIKE ? OR operator_website LIKE ?")
+                     "OR operator_zip LIKE ? OR operator_website LIKE ?)")
             params = (like, like, like, like, like, like)
             count_rows = self.execute(f"SELECT COUNT(*) FROM operators {where}", params)
             total = count_rows[0][0] if count_rows else 0
@@ -48,10 +49,10 @@ class OperatorsMixin:
                 (*params, limit, offset),
             )
         else:
-            count_rows = self.execute("SELECT COUNT(*) FROM operators")
+            count_rows = self.execute("SELECT COUNT(*) FROM operators WHERE deleted_at IS NULL")
             total = count_rows[0][0] if count_rows else 0
             rows = self.execute(
-                f"SELECT {_cols} FROM operators ORDER BY operator_name LIMIT ? OFFSET ?",
+                f"SELECT {_cols} FROM operators WHERE deleted_at IS NULL ORDER BY operator_name LIMIT ? OFFSET ?",
                 (limit, offset),
             )
         operators = [
@@ -133,16 +134,45 @@ class OperatorsMixin:
                           after=self.safe_snapshot(self.get_operator, operator_id))
 
     def delete_operator(self, operator_id: int) -> None:
-        """Delete operator and nullify references in staged_exports.
+        """Soft-delete an operator — recoverable for 90 days (HADES-l3n).
 
-        Audited BEFORE the delete — the log is the only surviving copy of
-        the row afterwards (HADES-6if).
+        Staged-export links are deliberately NOT nullified: the row still
+        exists, so severing them would make ``restore_operator`` only
+        partially recoverable. List/picker queries filter deleted rows;
+        by-ID lookups still resolve so historical exports keep their
+        operator attribution.
+
+        Also audited (HADES-6if) — the two defenses are complementary.
         """
         before = self.safe_snapshot(self.get_operator, operator_id)
         self.execute_write(
-            "UPDATE staged_exports SET operator_id = NULL WHERE operator_id = ?",
+            "UPDATE operators SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
             (operator_id,),
         )
-        self.execute_write("DELETE FROM operators WHERE id = ?", (operator_id,))
         self.log_mutation("operators", operator_id, "delete",
                           before=before, after=None)
+
+    def restore_operator(self, operator_id: int) -> None:
+        """Undo a soft delete."""
+        self.execute_write(
+            "UPDATE operators SET deleted_at = NULL WHERE id = ?", (operator_id,)
+        )
+        self.log_mutation("operators", operator_id, "update", before=None,
+                          after=self.safe_snapshot(self.get_operator, operator_id))
+
+    def find_deleted_operator_by_name(self, operator_name: str) -> dict | None:
+        """Look up a SOFT-DELETED operator by name.
+
+        ``operator_name`` carries a column-level UNIQUE constraint, so a
+        soft-deleted row still reserves its name. This lets the UI detect
+        that case and offer "restore" instead of surfacing a raw
+        IntegrityError when someone re-adds a deleted operator.
+        """
+        rows = self.execute(
+            "SELECT id, operator_name, deleted_at FROM operators "
+            "WHERE operator_name = ? AND deleted_at IS NOT NULL",
+            (operator_name,),
+        )
+        if not rows:
+            return None
+        return {"id": rows[0][0], "operator_name": rows[0][1], "deleted_at": rows[0][2]}

@@ -157,7 +157,8 @@ class TestInstrumentedSites:
         row = db.get_recent_mutations(table_name="operators")[0]
         assert row["op"] == "delete"
         assert row["before"]["operator_name"] == "Acme Vending"
-        assert db.get_operator(op_id) is None
+        # Soft-delete (HADES-l3n): hidden from lists, still resolvable by id
+        assert db.get_operators() == []
 
     def test_staged_export_insert_logged(self):
         db = _db()

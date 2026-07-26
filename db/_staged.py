@@ -41,7 +41,7 @@ class StagedExportsMixin:
         rows = self.execute(
             "SELECT id, workflow_type, lead_count, query_params, operator_id, "
             "batch_id, exported_at, created_at, push_status "
-            "FROM staged_exports ORDER BY created_at DESC LIMIT ?",
+            "FROM staged_exports WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ?",
             (limit,),
         )
         return [
@@ -92,10 +92,14 @@ class StagedExportsMixin:
         # by an ARBITRARY retained row (observed: the oldest), pushing recently
         # re-used operators out of the list (HADES-7qi).
         rows = self.execute(
-            "SELECT operator_id FROM staged_exports "
-            "WHERE operator_id IS NOT NULL "
-            "GROUP BY operator_id "
-            "ORDER BY MAX(created_at) DESC LIMIT ?",
+            # Excludes soft-deleted operators AND exports (HADES-l3n) —
+            # a deleted operator must not resurface in the recent picker.
+            "SELECT s.operator_id FROM staged_exports s "
+            "JOIN operators o ON o.id = s.operator_id "
+            "WHERE s.operator_id IS NOT NULL "
+            "AND s.deleted_at IS NULL AND o.deleted_at IS NULL "
+            "GROUP BY s.operator_id "
+            "ORDER BY MAX(s.created_at) DESC LIMIT ?",
             (limit,),
         )
         return [r[0] for r in rows]
@@ -134,3 +138,36 @@ class StagedExportsMixin:
             logger.info(f"Purged {count} staged exports older than {days} days")
 
         return count
+
+    def delete_staged_export(self, export_id: int) -> None:
+        """Soft-delete a staged export — recoverable for 90 days (HADES-l3n)."""
+        self.execute_write(
+            "UPDATE staged_exports SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (export_id,),
+        )
+        self.log_mutation("staged_exports", export_id, "delete",
+                          before=None, after=None)
+
+    def purge_soft_deleted(self, days: int = 90) -> dict:
+        """Hard-delete rows soft-deleted more than *days* ago.
+
+        The end of the recovery window. Only ever touches rows with a
+        non-NULL deleted_at, so live data can never be caught by it —
+        including when days=0.
+        """
+        result = {}
+        for table in ("operators", "staged_exports"):
+            rows = self.execute(
+                f"SELECT COUNT(*) FROM {table} "
+                "WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)",
+                (f"-{days} days",),
+            )
+            count = rows[0][0] if rows else 0
+            if count:
+                self.execute_write(
+                    f"DELETE FROM {table} "
+                    "WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)",
+                    (f"-{days} days",),
+                )
+            result[table] = count
+        return result

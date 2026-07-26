@@ -1,0 +1,62 @@
+name: Purge Soft-Deleted Rows
+
+# Ends the 90-day recovery window for soft-deleted operators and staged
+# exports (HADES-l3n). Only ever touches rows with a non-NULL deleted_at,
+# so live data can never be affected.
+
+on:
+  schedule:
+    # 09:00 UTC Sunday — quiet window, well clear of the weekday pipelines.
+    - cron: '0 9 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report what would be purged without deleting'
+        type: boolean
+        default: false
+
+concurrency:
+  group: purge-soft-deleted
+  cancel-in-progress: false
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements-lock.txt
+
+      - name: Purge rows past the recovery window
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          ZOOMINFO_CLIENT_ID: ${{ secrets.ZOOMINFO_CLIENT_ID }}
+          ZOOMINFO_CLIENT_SECRET: ${{ secrets.ZOOMINFO_CLIENT_SECRET }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          # Passed via env rather than interpolated into the run: line —
+          # the safe pattern for any workflow input.
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python scripts/purge_soft_deleted.py --dry-run
+          else
+            python scripts/purge_soft_deleted.py
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: python scripts/notify_failure.py --workflow "Purge Soft-Deleted Rows"
