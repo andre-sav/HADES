@@ -1,0 +1,66 @@
+name: Data Anomaly Check
+
+# Daily data-health early warning (HADES-e7j): operator row-count drops,
+# Zoho linkage regression, export-volume collapse, and mass-delete bursts
+# in the mutation log. Detection logic is unit-tested in monitoring.py.
+
+on:
+  schedule:
+    # 07:00 UTC — after the Zoho operator sync (06:00 UTC), so linkage is
+    # measured against a freshly-synced table rather than yesterday's.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report findings without alerting or storing baselines'
+        type: boolean
+        default: false
+
+concurrency:
+  group: data-anomaly-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements-lock.txt
+
+      - name: Check data health (alerts on its own when anomalous)
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          ZOOMINFO_CLIENT_ID: ${{ secrets.ZOOMINFO_CLIENT_ID }}
+          ZOOMINFO_CLIENT_SECRET: ${{ secrets.ZOOMINFO_CLIENT_SECRET }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          # Passed via env, never interpolated into the run: line.
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python scripts/data_anomaly_check.py --dry-run
+          else
+            python scripts/data_anomaly_check.py
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: python scripts/notify_failure.py --workflow "Data Anomaly Check"
