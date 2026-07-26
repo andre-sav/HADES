@@ -366,3 +366,34 @@ try:
 except Exception:
     logger.exception("Failed to load error log")
     st.caption("Error log not available")
+
+
+# =============================================================================
+# RECENT DATA CHANGES (HADES-6if)
+# =============================================================================
+labeled_divider("Recent Data Changes")
+st.caption(
+    "Audit trail of writes to operators, staged exports and lead outcomes — "
+    "answers *what changed, when, and what was it before*. Kept 90 days."
+)
+try:
+    _mutations = db.get_recent_mutations(limit=20)
+    if _mutations:
+        _op_icons = {"insert": "➕", "update": "✏️", "delete": "\U0001f5d1️"}
+        for m in _mutations:
+            _icon = _op_icons.get(m["op"], "•")
+            _label = (f"{_icon} {m['op']} {m['table_name']} #{m['row_id']} "
+                      f"· {m['ts']} · {m['actor'] or 'app'}")
+            with st.expander(_label):
+                _c1, _c2 = st.columns(2)
+                with _c1:
+                    st.caption("Before")
+                    st.json(m["before"]) if m["before"] else st.caption("—")
+                with _c2:
+                    st.caption("After")
+                    st.json(m["after"]) if m["after"] else st.caption("—")
+    else:
+        st.caption("No data changes recorded yet")
+except Exception:
+    logger.exception("Failed to load mutation log")
+    st.caption("Mutation log not available")

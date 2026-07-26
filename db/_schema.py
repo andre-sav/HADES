@@ -216,6 +216,19 @@ class SchemaMixin:
                 imported_at TIMESTAMP
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS mutation_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                actor TEXT,
+                table_name TEXT NOT NULL,
+                row_id TEXT,
+                op TEXT NOT NULL,
+                before_json TEXT,
+                after_json TEXT
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_mutation_table_ts ON mutation_log(table_name, ts)",
             "CREATE INDEX IF NOT EXISTS idx_vs_leads_added ON vanillasoft_leads(added_date)",
             "CREATE INDEX IF NOT EXISTS idx_vs_leads_norm ON vanillasoft_leads(company_norm)",
         ]
@@ -239,6 +252,7 @@ class SchemaMixin:
             self.purge_old_credit_usage(days=365)
             self.purge_old_query_history(days=365)
             self.purge_old_company_id_mappings(days=180)
+            self.purge_old_mutations(days=90)
         except Exception:  # purge must never block startup
             import logging
             logging.getLogger(__name__).warning("Startup purge failed", exc_info=True)

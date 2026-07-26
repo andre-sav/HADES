@@ -159,7 +159,11 @@ class TestTursoDatabase:
         )
 
         assert result == 1
-        mock_conn.commit.assert_called_once()
+        # 2 commits: the operator INSERT + the mutation-log audit row
+        # (HADES-6if). The operator write itself is what matters here.
+        assert mock_conn.commit.call_count == 2
+        assert any("INSERT INTO operators" in c[0][0]
+                   for c in mock_conn.execute.call_args_list)
 
     def test_cache_results(self, mock_db):
         """Test caching query results."""
@@ -591,10 +595,12 @@ class TestLeadOutcomes:
             outcome_at="2026-03-01",
         )
 
-        mock_conn.execute.assert_called_once()
-        call_args = mock_conn.execute.call_args[0]
-        assert "UPDATE lead_outcomes" in call_args[0]
-        assert call_args[1] == ("delivery", "2026-03-01", "HADES-20260212-001", "Acme Corp")
+        # The outcome UPDATE plus the mutation-log audit row (HADES-6if).
+        outcome_calls = [c[0] for c in mock_conn.execute.call_args_list
+                         if "UPDATE lead_outcomes" in c[0][0]]
+        assert len(outcome_calls) == 1
+        assert outcome_calls[0][1] == ("delivery", "2026-03-01", "HADES-20260212-001", "Acme Corp")
+        assert any("mutation_log" in c[0][0] for c in mock_conn.execute.call_args_list)
 
     def test_get_recent_batches(self, mock_db):
         """Test getting recent batch summaries."""

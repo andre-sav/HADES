@@ -90,8 +90,8 @@ class OperatorsMixin:
         }
 
     def create_operator(self, **kwargs) -> int:
-        """Create new operator."""
-        return self.execute_write(
+        """Create new operator. Audited (HADES-6if)."""
+        new_id = self.execute_write(
             "INSERT INTO operators (operator_name, vending_business_name, operator_phone, "
             "operator_email, operator_zip, operator_website, team) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -105,9 +105,14 @@ class OperatorsMixin:
                 kwargs.get("team"),
             ),
         )
+        self.log_mutation("operators", new_id, "insert", before=None,
+                          after=self.safe_snapshot(self.get_operator, new_id))
+        return new_id
 
     def update_operator(self, operator_id: int, **kwargs) -> None:
-        """Update operator."""
+        """Update operator. Audited with before/after state (HADES-6if) —
+        a wrong edit here mislabels every export under that operator."""
+        before = self.safe_snapshot(self.get_operator, operator_id)
         self.execute_write(
             "UPDATE operators SET operator_name = ?, vending_business_name = ?, "
             "operator_phone = ?, operator_email = ?, operator_zip = ?, "
@@ -124,11 +129,20 @@ class OperatorsMixin:
                 operator_id,
             ),
         )
+        self.log_mutation("operators", operator_id, "update", before=before,
+                          after=self.safe_snapshot(self.get_operator, operator_id))
 
     def delete_operator(self, operator_id: int) -> None:
-        """Delete operator and nullify references in staged_exports."""
+        """Delete operator and nullify references in staged_exports.
+
+        Audited BEFORE the delete — the log is the only surviving copy of
+        the row afterwards (HADES-6if).
+        """
+        before = self.safe_snapshot(self.get_operator, operator_id)
         self.execute_write(
             "UPDATE staged_exports SET operator_id = NULL WHERE operator_id = ?",
             (operator_id,),
         )
         self.execute_write("DELETE FROM operators WHERE id = ?", (operator_id,))
+        self.log_mutation("operators", operator_id, "delete",
+                          before=before, after=None)

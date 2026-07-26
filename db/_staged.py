@@ -13,8 +13,12 @@ class StagedExportsMixin:
         self, workflow_type: str, leads: list[dict],
         query_params: dict | None = None, operator_id: int | None = None,
     ) -> int:
-        """Persist leads for later CSV re-export. Returns the row id."""
-        return self.execute_write(
+        """Persist leads for later CSV re-export. Returns the row id.
+
+        Audited (HADES-6if) — the lead payload itself is NOT copied into
+        the log, only its shape (see _mutation_log._SKIP_FIELDS).
+        """
+        new_id = self.execute_write(
             "INSERT INTO staged_exports (workflow_type, leads_json, lead_count, query_params, operator_id) "
             "VALUES (?, ?, ?, ?, ?)",
             (
@@ -25,6 +29,12 @@ class StagedExportsMixin:
                 operator_id,
             ),
         )
+        self.log_mutation(
+            "staged_exports", new_id, "insert", before=None,
+            after={"workflow_type": workflow_type, "lead_count": len(leads),
+                   "operator_id": operator_id},
+        )
+        return new_id
 
     def get_staged_exports(self, limit: int = 10) -> list[dict]:
         """Get recent staged exports (newest first)."""
@@ -96,6 +106,8 @@ class StagedExportsMixin:
             "UPDATE staged_exports SET batch_id = ?, exported_at = CURRENT_TIMESTAMP WHERE id = ?",
             (batch_id, export_id),
         )
+        self.log_mutation("staged_exports", export_id, "update",
+                          before=None, after={"batch_id": batch_id, "exported": True})
 
     def mark_staged_pushed(self, export_id: int, push_status: str, push_results_json: str) -> None:
         """Record push results on a staged export."""
@@ -103,6 +115,8 @@ class StagedExportsMixin:
             "UPDATE staged_exports SET push_status = ?, pushed_at = CURRENT_TIMESTAMP, push_results_json = ? WHERE id = ?",
             (push_status, push_results_json, export_id),
         )
+        self.log_mutation("staged_exports", export_id, "update",
+                          before=None, after={"push_status": push_status})
 
     def purge_old_staged_exports(self, days: int = 90) -> int:
         """Remove staged exports older than N days (PII retention). Returns count purged."""
