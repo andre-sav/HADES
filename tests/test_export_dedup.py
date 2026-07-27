@@ -527,7 +527,11 @@ class TestGetPreviouslyExportedVsSource:
         ]
         result = get_previously_exported(mock_db, days_back=180)
         assert "woodmere health care center" in result["vs_by_name"]
-        assert "5163749300" in result["vs_by_phone"]
+        # N2-07: the VS "Business" column is the company line, so it indexes
+        # separately and requires ZIP corroboration; Mobile/Home are
+        # person-level and remain standalone proof.
+        assert "5163749300" in result["vs_by_company_phone"]
+        assert "5163749300" not in result["vs_by_phone"]
         assert "2145550199" in result["vs_by_phone"]
         mock_db.get_vs_dedup_index.assert_called_once_with(days_back=180)
 

@@ -193,8 +193,12 @@ async def sync_operators(
     logger.info(f"Found {len(zoho_records)} {'modified ' if sync_type == 'incremental' else ''}records in Zoho")
 
     # Single query: get all operators, split into synced vs unlinked in Python
+    # deleted_at IS NULL (review N2-01): without it the batch UPDATE below
+    # keeps rewriting soft-deleted operators — breaking the "frozen and
+    # recoverable" guarantee while they stay invisible in every UI — and their
+    # names shadow live Zoho records as false duplicates forever.
     all_operators = db.execute(
-        "SELECT id, zoho_id, operator_name FROM operators"
+        "SELECT id, zoho_id, operator_name FROM operators WHERE deleted_at IS NULL"
     )
     existing_by_zoho_id = {}
     unlinked_by_name = {}

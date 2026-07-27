@@ -16,12 +16,21 @@ from vs_leads import normalize_phone
 
 logger = logging.getLogger(__name__)
 
-# Person-level phones are unique to a contact — a match is company-level
-# proof on its own. companyPhone/companyHQPhone are the chain-wide
-# switchboard shared by every location of a franchise, so they only count
-# when the ZIP corroborates the same physical location (HADES-u1x class).
-_PERSON_PHONE_FIELDS = ("phone", "directPhone", "mobilePhone")
-_COMPANY_PHONE_FIELDS = ("companyPhone", "companyHQPhone")
+# Person-level phones are unique to a contact — a match is proof on its own.
+# COMPANY-level numbers are the chain-wide switchboard shared by every
+# location of a franchise, so they only count when the ZIP corroborates the
+# same physical location (HADES-u1x class).
+#
+# `phone` is COMPANY-level despite the bare name: utils.ZOOMINFO_TO_VANILLASOFT
+# documents it as the fallback for the VanillaSoft "Business" column, i.e. the
+# company line, not a personal one (review N2-07).
+_PERSON_PHONE_FIELDS = ("directPhone", "mobilePhone")
+_COMPANY_PHONE_FIELDS = ("phone", "companyPhone", "companyHQPhone")
+
+# Same split on the VanillaSoft side: the "Business" column is the company
+# line; Mobile/Home are person-level.
+_VS_PERSON_PHONE_KEYS = ("phone_mobile", "phone_home")
+_VS_COMPANY_PHONE_KEYS = ("phone_business",)
 
 
 def get_previously_exported(db, days_back: int = 365,
@@ -51,43 +60,63 @@ def get_previously_exported(db, days_back: int = 365,
     # Third source: VanillaSoft lead history (no companyId universe — the
     # index cutoff enforces the 1-year re-contact rule).
     vs_by_name: dict[str, list] = {}
-    vs_by_phone: dict[str, dict] = {}
+    vs_by_phone: dict[str, dict] = {}          # person-level: standalone proof
+    vs_by_company_phone: dict[str, dict] = {}  # company-level: needs ZIP
     for entry in db.get_vs_dedup_index(days_back=days_back):
         if entry.get("company_norm"):
             vs_by_name.setdefault(entry["company_norm"], []).append(entry)
-        for ph in (entry.get("phone_business"), entry.get("phone_mobile"),
-                   entry.get("phone_home")):
+        # Two indexes, because a match on the VS "Business" column is only
+        # company-level evidence and needs ZIP corroboration (N2-07).
+        for key in _VS_PERSON_PHONE_KEYS:
+            ph = entry.get(key)
             if ph and ph not in vs_by_phone:
                 vs_by_phone[ph] = entry
+        for key in _VS_COMPANY_PHONE_KEYS:
+            ph = entry.get(key)
+            if ph and ph not in vs_by_company_phone:
+                vs_by_company_phone[ph] = entry
 
     return {"by_id": by_id, "by_name": by_name,
-            "vs_by_name": vs_by_name, "vs_by_phone": vs_by_phone}
+            "vs_by_name": vs_by_name, "vs_by_phone": vs_by_phone,
+            "vs_by_company_phone": vs_by_company_phone}
 
 
-def _match_vs_lead(contact: dict, vs_by_name: dict, vs_by_phone: dict) -> dict | None:
+def _match_vs_lead(contact: dict, vs_by_name: dict, vs_by_phone: dict,
+                   vs_by_company_phone: dict | None = None) -> dict | None:
     """Match a contact against VanillaSoft history.
 
     VS rows have no ZoomInfo companyId, so a name match alone would
     re-introduce the franchise false-drop (HADES-u1x). Rules:
-    1. A person-level phone matching a VS phone — proof on its own.
-    2. A company switchboard phone, or a normalized name match, corroborated
-       by an exact ZIP match.
-    No contact ZIP -> no switchboard/name matching -> keep the contact.
+    1. A PERSON-level phone on BOTH sides — proof on its own.
+    2. A company-level phone on EITHER side, or a normalized name match,
+       corroborated by an exact ZIP match.
+    No contact ZIP -> no company-phone/name matching -> keep the contact.
     """
+    vs_by_company_phone = vs_by_company_phone or {}
     czip = normalize_zip(contact.get("zip") or contact.get("zipCode")
                          or contact.get("companyZipCode") or "")
 
+    # 1. person-level on both sides
     if vs_by_phone:
         for f in _PERSON_PHONE_FIELDS:
             ph = normalize_phone(contact.get(f))
             if ph and ph in vs_by_phone:
                 return vs_by_phone[ph]
-        if czip:
-            for f in _COMPANY_PHONE_FIELDS:
-                ph = normalize_phone(contact.get(f))
-                entry = vs_by_phone.get(ph) if ph else None
-                if entry and entry.get("zip") == czip:
-                    return entry
+
+    # 2. company-level on EITHER side — always needs ZIP corroboration
+    if czip:
+        for f in _PERSON_PHONE_FIELDS + _COMPANY_PHONE_FIELDS:
+            ph = normalize_phone(contact.get(f))
+            if not ph:
+                continue
+            entry = vs_by_company_phone.get(ph)
+            if entry and entry.get("zip") == czip:
+                return entry
+        for f in _COMPANY_PHONE_FIELDS:
+            ph = normalize_phone(contact.get(f))
+            entry = vs_by_phone.get(ph) if ph else None
+            if entry and entry.get("zip") == czip:
+                return entry
 
     if vs_by_name and czip:
         normalized = normalize_company_name(contact.get("companyName", "") or "")
@@ -114,6 +143,7 @@ def filter_previously_exported(
     by_name = lookup.get("by_name", {})
     vs_by_name = lookup.get("vs_by_name", {})
     vs_by_phone = lookup.get("vs_by_phone", {})
+    vs_by_company_phone = lookup.get("vs_by_company_phone", {})
 
     new = []
     filtered = []
@@ -153,7 +183,8 @@ def filter_previously_exported(
         # Third source: VanillaSoft history — runs regardless of companyId
         # (VS rows live in a companyId-less universe, so a known-numeric id
         # proves nothing here).
-        vs_match = _match_vs_lead(contact, vs_by_name, vs_by_phone)
+        vs_match = _match_vs_lead(contact, vs_by_name, vs_by_phone,
+                                  vs_by_company_phone)
         if vs_match:
             contact["_previously_exported"] = True
             contact["_last_exported_at"] = vs_match.get("added_date", "")
