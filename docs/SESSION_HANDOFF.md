@@ -1,7 +1,7 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-07-27
-**Status:** **Insurance measures M1/M4/M5 landed; [PR #17](https://github.com/andre-sav/HADES/pull/17) open and green.** **1227 tests** (1149 → 1227). Four beads closed, two built-and-open on user action. **ZoomInfo API entitlement still lapsed — ALL lead generation down pending an account-manager call.** A credential-exposure gap in the test suite was found and fixed (see below). **Four items now need the user**, listed at the end of this section.
+**Status:** **Insurance measures M1/M4/M5 landed; [PR #17](https://github.com/andre-sav/HADES/pull/17) open and green.** **1227 tests** (1149 → 1227). Five beads closed (incl. the HADES-zz6 hardening epic), two built-and-open on user action. **ZoomInfo API entitlement still lapsed — ALL lead generation down pending an account-manager call.** A credential-exposure gap in the test suite was found and fixed (see below). **Four items now need the user**, listed at the end of this section.
 
 ## Session Summary (2026-07-27, later — insurance M1/M4/M5, test isolation, PITR)
 
@@ -129,7 +129,15 @@ Deleted the stale `HADES_CODEBASE_FLAT.md` (706K) and `REVIEW_PROMPT.md` — Mar
 1. **Merge [PR #17](https://github.com/andre-sav/HADES/pull/17)** — green and mergeable.
 2. Chase the four user items above; #3 and #4 are each one action away from closing a bead.
 3. Remaining unblocked backlog is the P3/P4 tail: `HADES-7qi` (~25 lower-severity review findings), `HADES-1w2` (freshness badges, insurance M8), `HADES-bdr`/`0qu`/`dgr`/`iic` (P4 polish).
-4. `HADES-zz6` (P1 epic, silent-failure campaign) is an umbrella with all children closed — worth closing or re-scoping rather than leaving as a standing P1.
+4. ~~`HADES-zz6` — worth closing or re-scoping.~~ **Done in-session — and my first read of it was wrong.** I had assumed it was an umbrella with all children closed. `docs/HARDENING_LEDGER.md` showed the opposite on paper: only 2 of 14 surfaces marked done, 12 untouched, and a "RESUME HERE" pointer three merges out of date (aimed at `fix/hades-silent-failure-hardening`, already merged at `23c9e07`, and bead HADES-6ic, already closed).
+
+The truth was in between. Surfaces #3–#14 *had* been swept — by the two whole-project review cycles under ~50 differently-named beads — and nobody updated the ledger. **The ledger, not the code, was the stale artifact.** I reconciled every row against the closed beads, then audited the two with no obvious mapping: #6 VanillaSoft push (fail-loud by construction — per-lead `PushResult`, non-200/timeout/connection/unparseable-XML all → `success=False`; a partial push cannot report success) and #7 Zoho sync (fail-loud intact; `HADES-jdi`'s daily red run is live proof of it working). Both ruled out clean. Epic closed, `4fbeda0`.
+
+Three modes turned out to have a **different mechanism than the ledger predicted**, which is the case for auditing surfaces rather than hunting the guessed bug: calibration wasn't training on degenerate data, it was silently not training at all (`lru_cache`, R-08); scoring's worst finding was proximity — 40% of the geo score — fabricated as a flat 15mi (R-04), not a uniform baseline; and the highest-severity item was that **the alerting layer was a no-op with SMTP unconfigured** (R-11), so the monitoring built to end the campaign could not itself report.
+
+Conventions **C7** (a detector needs an independent oracle *and* a low base rate), **C8** (a bead proposing a detector must name the incident and say how it fires on it) and **C9** (verify a monitor *can* fail before trusting it) added to the ledger from this session's insurance work.
+
+**Lesson for the next durable-state doc:** a ledger only works if updating it is part of closing the work it tracks. A stale "resume here" pointer is worse than none — it sends the next instance to a branch that no longer exists.
 
 ## Session Summary (2026-07-27, second review cycle — close)
 
