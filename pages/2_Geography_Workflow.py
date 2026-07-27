@@ -8,12 +8,17 @@ import html as html_mod
 import json
 import logging
 import threading
+from pathlib import Path
 
 import streamlit as st
 from keyboard_shortcuts import inject_ctrl_enter_shortcut
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+_ROOT = Path(__file__).resolve().parents[1]
+ZIP_CENTROID_PATH = _ROOT / "data" / "zip_centroids.csv"
+ICP_CONFIG_PATH = _ROOT / "config" / "icp.yaml"
 import pandas as pd
 from datetime import datetime
 
@@ -50,8 +55,13 @@ from utils import (
     get_default_radius,
     get_default_target_contacts,
     surface_data_anomaly,
+    file_mtime_iso,
 )
-from monitoring import evaluate_lead_states, evaluate_radius_invariants
+from monitoring import (
+    evaluate_data_freshness,
+    evaluate_lead_states,
+    evaluate_radius_invariants,
+)
 from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, distance_between_zips
 from expand_search import (
     expand_search,
@@ -66,6 +76,7 @@ from expand_search import (
 )
 from ui_components import (
     data_anomaly_banner,
+    freshness_caption,
     inject_base_styles,
     page_header,
     step_indicator,
@@ -427,6 +438,29 @@ if operator_mode == "Select existing":
                 f"Type any name to search all {len(operators):,} operators — synced from Zoho CRM."
             )
 
+        # How old is that Zoho sync? The caption above has always claimed the
+        # list is "synced from Zoho CRM" without saying when — and on
+        # 2026-07-27 every operator was 159 days stale because the sync cron
+        # had been failing on missing secrets (HADES-jdi). The failure alerted
+        # to a GitHub Actions email; nothing reached the person choosing from
+        # this dropdown (HADES-1w2, insurance M8).
+        try:
+            _op_freshness = evaluate_data_freshness(
+                db.get_sync_value("zoho_operators_last_sync"),
+                label="Operators synced from Zoho",
+            )
+            freshness_caption(
+                _op_freshness,
+                # Only tell them what to do when there is something to do.
+                suffix=(
+                    "— the Zoho sync is not running; these details may be out of date"
+                    if _op_freshness["severity"] in ("warning", "critical", "unknown")
+                    else ""
+                ),
+            )
+        except Exception:
+            logger.warning("Could not render operator freshness", exc_info=True)
+
         operator_options = {}
         if recent_ops:
             for op in recent_ops:
@@ -620,6 +654,19 @@ if has_operator:
                 value=default_zip,
                 placeholder="Enter center ZIP code",
                 help="All ZIP codes within the radius will be searched",
+            )
+            # Where the radius maths actually comes from. The session-51
+            # collapse ran for months partly because nothing named the data
+            # source or its age (HADES-1w2).
+            freshness_caption(
+                evaluate_data_freshness(
+                    file_mtime_iso(ZIP_CENTROID_PATH),
+                    label="Centroid data (Census 2024 ZCTA)",
+                    warn_days=400, critical_days=800,
+                ),
+                # mtime is when THIS COPY landed — a deploy resets it. Say so,
+                # or "updated today" reads as "someone edited the data today".
+                suffix="· file timestamp, resets on deploy",
             )
 
         with col2:
@@ -849,6 +896,17 @@ if has_operator:
     # Industry Filters
     with st.expander("Industry Filters", expanded=False):
         st.caption(f"Employees: {get_employee_minimum():,} - {get_employee_maximum():,}")
+        # Calibration rewrites icp.yaml, and on Streamlit Cloud that write
+        # lands on an ephemeral FS — so "when did this copy last change"
+        # is a real question when scores look wrong (HADES-zw1, HADES-1w2).
+        freshness_caption(
+            evaluate_data_freshness(
+                file_mtime_iso(ICP_CONFIG_PATH),
+                label="ICP config",
+                warn_days=90, critical_days=365,
+            ),
+            suffix="· file timestamp, resets on deploy",
+        )
 
         default_sic_codes = get_sic_codes()
         sic_options = get_sic_codes_with_descriptions()

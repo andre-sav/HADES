@@ -2665,3 +2665,38 @@ def data_anomaly_banner() -> None:
         if st.button("Dismiss", key="_dismiss_data_anomaly"):
             st.session_state.pop("data_anomaly", None)
             st.rerun()
+
+
+# Severity → the palette already used by status_badge/health_indicator, so a
+# freshness badge reads the same as every other status signal in the app.
+_FRESHNESS_COLORS = {
+    "ok": COLORS.get("success", "#10b981"),
+    "warning": COLORS.get("warning", "#f59e0b"),
+    "critical": COLORS.get("error", "#ef4444"),
+    "unknown": COLORS.get("text_muted", "#94a3b8"),
+}
+_FRESHNESS_ICONS = {"ok": "✓", "warning": "!", "critical": "⚠", "unknown": "?"}
+
+
+def freshness_caption(verdict: dict, suffix: str = "") -> None:
+    """Render a data-source freshness verdict as a coloured caption (HADES-1w2).
+
+    Takes the dict from `monitoring.evaluate_data_freshness` so the grading
+    rule lives in one tested place and this stays presentation-only.
+
+    Green is deliberately quiet and amber/red deliberately are not: the whole
+    point is that a stale source should be hard to scroll past. The Geography
+    page said "synced from Zoho CRM" for 159 days while the sync was dead.
+    """
+    if not verdict:
+        return
+    severity = verdict.get("severity", "unknown")
+    colour = _FRESHNESS_COLORS.get(severity, _FRESHNESS_COLORS["unknown"])
+    icon = _FRESHNESS_ICONS.get(severity, "?")
+    weight = "600" if severity in ("warning", "critical") else "400"
+    text = html_mod.escape(f"{icon} {verdict.get('message', '')} {suffix}".strip())
+    st.markdown(
+        f"<div style='color:{colour};font-size:0.8rem;font-weight:{weight};"
+        f"margin:-0.4rem 0 0.5rem 0;'>{text}</div>",
+        unsafe_allow_html=True,
+    )

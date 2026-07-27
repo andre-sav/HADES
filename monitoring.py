@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from export import contact_has_core_data
 from geo import MAX_SHARED_COORD, haversine_distance
-from utils import get_state_from_zip, safe_company
+from utils import get_state_from_zip, parse_db_timestamp, safe_company
 
 # Cap on how many individual violations a verdict enumerates. A wholesale
 # corruption produces thousands; the log line has to stay readable, and the
@@ -479,6 +479,82 @@ def evaluate_lead_states(leads, expected_states) -> dict:
 # distinguish "no work to do" from "the schedule is dead".
 # ---------------------------------------------------------------------------
 
+def _parse_utc_timestamp(raw):
+    """Parse any timestamp shape this codebase writes, as UTC. None if unusable.
+
+    Three shapes reach these evaluators: `utils.utc_now_str()` writes
+    space-separated seconds, Zoho writes offset-aware ISO with microseconds,
+    and SQLite's CURRENT_TIMESTAMP writes bare text with no offset.
+
+    Delegates to `utils.parse_db_timestamp` rather than reimplementing the
+    parse — that function exists because reading a naive stamp as local time
+    (or blowing up on aware-minus-naive) is what pinned the home-page
+    freshness badge to "Unknown" forever, HADES-eke. Two copies of this rule
+    would drift, and the drift would be silent.
+    """
+    if raw is None:
+        return None
+    return parse_db_timestamp(raw if isinstance(raw, str) else str(raw))
+
+
+def _as_utc_now(now):
+    from datetime import datetime, timezone
+
+    current = now or datetime.now(timezone.utc)
+    return current.replace(tzinfo=timezone.utc) if current.tzinfo is None else current
+
+
+def evaluate_data_freshness(
+    last_updated,
+    *,
+    now=None,
+    warn_days: float = 1.0,
+    critical_days: float = 7.0,
+    label: str = "Data",
+) -> dict:
+    """Age a data source and grade it green / amber / red (HADES-1w2).
+
+    Built because the Geography page told operators their list was "synced from
+    Zoho CRM" while it had in fact been frozen for 159 days — the sync cron was
+    failing on missing secrets, and that signal went to a GitHub Actions email
+    rather than to the dropdown anyone was choosing from.
+
+    Absent or unreadable is "unknown", never "ok". A source that cannot say
+    when it was last updated has not proved it is fresh.
+    """
+    if not last_updated:
+        return {
+            "severity": "unknown",
+            "age_days": None,
+            "message": f"{label}: never synced — freshness unknown.",
+        }
+
+    stamp = _parse_utc_timestamp(last_updated)
+    if stamp is None:
+        return {
+            "severity": "unknown",
+            "age_days": None,
+            "message": f"{label}: timestamp {last_updated!r} is unreadable — freshness unknown.",
+        }
+
+    # Clamp negative ages: clock skew between Turso and the app must not flip a
+    # fresh source to critical.
+    age_days = max(0, int((_as_utc_now(now) - stamp).total_seconds() // 86400))
+
+    if age_days >= critical_days:
+        severity = "critical"
+    elif age_days >= warn_days:
+        severity = "warning"
+    else:
+        severity = "ok"
+
+    if severity == "ok":
+        message = f"{label}: updated today."
+    else:
+        message = f"{label}: last updated {age_days} days ago."
+    return {"severity": severity, "age_days": age_days, "message": message}
+
+
 def evaluate_scheduled_job_freshness(
     last_run: str | None,
     *,
@@ -491,29 +567,20 @@ def evaluate_scheduled_job_freshness(
     An absent or unparseable stamp is "unknown", never "ok" — the same rule the
     usage evaluator follows. A signal you cannot read is not a healthy signal.
     """
-    from datetime import datetime, timezone
-
     if not last_run:
         return {
             "severity": "unknown",
             "message": f"{label}: never recorded a run — cannot tell if the schedule is live.",
         }
 
-    text = str(last_run).strip().replace("T", " ").replace("Z", "")
-    try:
-        stamp = datetime.fromisoformat(text)
-    except ValueError:
+    stamp = _parse_utc_timestamp(last_run)
+    if stamp is None:
         return {
             "severity": "unknown",
             "message": f"{label}: last-run stamp {last_run!r} is unreadable.",
         }
 
-    if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
-    current = now or datetime.now(timezone.utc)
-    if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
-
+    current = _as_utc_now(now)
     age_hours = (current - stamp).total_seconds() / 3600.0
     if age_hours <= max_age_hours:
         return {

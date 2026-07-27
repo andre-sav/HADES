@@ -813,3 +813,22 @@ ZOOMINFO_TO_VANILLASOFT = {
     "companyZipCode": "ZIP code",       # Enrich returns companyZipCode
     "companyStreet": "Address",         # Enrich returns companyStreet
 }
+
+
+def file_mtime_iso(path) -> str | None:
+    """Last-modified time of a file as a UTC ISO string, or None if absent.
+
+    Backs the centroid/ICP freshness captions (HADES-1w2). Note this reports
+    when the file was last WRITTEN, which on Streamlit Cloud is the deploy
+    time, not the moment someone edited it upstream — an honest answer to
+    "how old is the copy this app is running", which is the question that
+    matters when results look wrong.
+    """
+    from datetime import datetime, timezone
+
+    try:
+        return datetime.fromtimestamp(
+            Path(path).stat().st_mtime, tz=timezone.utc
+        ).isoformat()
+    except OSError:
+        return None
