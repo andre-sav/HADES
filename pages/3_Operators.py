@@ -60,7 +60,7 @@ if "operators_selected_id" not in st.session_state:
 # =============================================================================
 # HEADER
 # =============================================================================
-_total_count = db.execute("SELECT COUNT(*) FROM operators")[0][0]
+_total_count = db.execute("SELECT COUNT(*) FROM operators WHERE deleted_at IS NULL")[0][0]
 
 page_header(
     "Operators",
@@ -80,7 +80,7 @@ with st.expander("Sync from Zoho CRM", expanded=False):
         from zoho_sync import get_last_sync_time
         last_sync = get_last_sync_time(db)
 
-        _synced_count = db.execute("SELECT COUNT(*) FROM operators WHERE synced_at IS NOT NULL")[0][0]
+        _synced_count = db.execute("SELECT COUNT(*) FROM operators WHERE synced_at IS NOT NULL AND deleted_at IS NULL")[0][0]
 
         if last_sync:
             st.caption(f"Last sync: {last_sync[:16].replace('T', ' ')} UTC ({_synced_count} synced operators)")

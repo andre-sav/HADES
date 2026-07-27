@@ -136,14 +136,26 @@ def get_dedup_key(lead: dict) -> str:
     # directPhone → mobilePhone → phone → Business (ZOOMINFO_TO_VANILLASOFT
     # priority): required_fields is an OR, so raw contacts often carry ONLY
     # directPhone/mobilePhone — keying on 'phone' alone collapsed the key to
-    # '|companyname', and tier-1 exact matches skip the state veto (N-04).
+    # '|companyname' (N-04).
     phone = normalize_phone(
         lead.get("directPhone", "") or lead.get("mobilePhone", "")
         or lead.get("phone", "") or lead.get("Business", "") or ""
     )
     company = normalize_company_name(lead.get("companyName", "") or lead.get("Company", "") or "")
 
-    return f"{phone}|{company}"
+    if phone:
+        return f"{phone}|{company}"
+
+    # No phone: the key is NAME-ONLY, and callers treat an exact key match as
+    # tier-1 identity WITHOUT consulting states_conflict (that veto guards only
+    # the fuzzy tier). Two same-name franchise locations in different states
+    # would therefore merge — the HADES-u1x class. Fold the state into the key
+    # so name-only matches are state-scoped by construction, for set-based
+    # (dedupe_leads) and pairwise (find_duplicates) callers alike (N2-02).
+    state = _lead_state(lead)
+    if state:
+        return f"|{company}|{state}"
+    return f"|{company}"
 
 
 def dedupe_by_phone(leads: list[dict], phone_field: str = "phone") -> tuple[list[dict], int]:
