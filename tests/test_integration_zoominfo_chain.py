@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
 from zoominfo_client import ZoomInfoClient, ContactEnrichParams, ContactQueryParams

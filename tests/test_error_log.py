@@ -5,8 +5,6 @@ import json
 from unittest.mock import MagicMock
 
 sys.modules.setdefault("libsql_experimental", MagicMock())
-sys.modules.setdefault("streamlit", MagicMock())
-
 from db._error_log import ErrorLogMixin
 
 

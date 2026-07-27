@@ -11,7 +11,6 @@ from unittest.mock import MagicMock
 
 # Mock external dependencies before importing turso_db
 sys.modules["libsql_experimental"] = MagicMock()
-sys.modules["streamlit"] = MagicMock()
 
 from turso_db import TursoDatabase
 

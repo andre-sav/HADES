@@ -6,7 +6,6 @@ import sys
 from unittest.mock import MagicMock
 
 # Mock Streamlit before importing modules that use it
-sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
 from export import build_vanillasoft_row, export_leads_to_csv, get_export_summary, generate_batch_id, merge_contact, merge_company_data, contact_has_core_data

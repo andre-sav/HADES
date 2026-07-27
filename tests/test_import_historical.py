@@ -4,7 +4,6 @@ import sys
 from unittest.mock import MagicMock
 
 # Mock Streamlit before importing modules
-sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
 from scripts.import_historical import normalize_state

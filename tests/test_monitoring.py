@@ -8,7 +8,6 @@ degraded (fieldless) enrichment batches before a human notices blank rows.
 import sys
 from unittest.mock import MagicMock
 
-sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
 from monitoring import evaluate_usage, evaluate_enrichment_batch

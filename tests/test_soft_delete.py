@@ -13,7 +13,6 @@ import sqlite3
 import sys
 from unittest.mock import MagicMock
 
-sys.modules.setdefault("streamlit", MagicMock())
 sys.modules.setdefault("libsql_experimental", MagicMock())
 
 from turso_db import TursoDatabase

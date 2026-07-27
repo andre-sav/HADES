@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.modules.setdefault("streamlit", MagicMock())
 sys.modules.setdefault("libsql_experimental", MagicMock())
 
 import observability

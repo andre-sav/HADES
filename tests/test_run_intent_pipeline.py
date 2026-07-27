@@ -5,7 +5,6 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 # Mock Streamlit and libsql before importing modules
-sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
 from scripts._credentials import load_credentials

@@ -11,7 +11,6 @@ import sqlite3
 import sys
 from unittest.mock import MagicMock
 
-sys.modules.setdefault("streamlit", MagicMock())
 sys.modules.setdefault("libsql_experimental", MagicMock())
 
 from monitoring import evaluate_export_volume

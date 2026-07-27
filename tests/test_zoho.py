@@ -4,13 +4,11 @@ Tests for Zoho integration modules: zoho_auth, zoho_client, zoho_sync.
 Run with: pytest tests/test_zoho.py -v
 """
 
-import sys
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime, timedelta, timezone
 
 # Mock streamlit before importing
-sys.modules["streamlit"] = MagicMock()
 
 
 # =============================================================================

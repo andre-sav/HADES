@@ -5,8 +5,6 @@ from unittest.mock import MagicMock
 
 # Mock external dependencies before importing
 sys.modules.setdefault("libsql_experimental", MagicMock())
-sys.modules.setdefault("streamlit", MagicMock())
-
 from db._metadata import MetadataMixin
 
 

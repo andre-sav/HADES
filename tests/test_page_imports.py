@@ -56,13 +56,17 @@ def _iter_pages() -> list[Path]:
 # --------------------------------------------------------------------------
 # Isolation from the rest of the suite
 #
-# Fourteen test modules run ``sys.modules["streamlit"] = MagicMock()`` at
-# import time and never restore it, so by the time these tests execute the
-# interpreter's "streamlit" is somebody else's mock. That breaks both layers
-# here: a MagicMock is not a package, so ``import streamlit.components.v1``
-# (via keyboard_shortcuts) raises, and a mocked ``st.stop()`` does not halt
-# the page. Both layers therefore install a genuine streamlit for their
-# duration and put back exactly what they found.
+# Fifteen test modules used to run ``sys.modules["streamlit"] = MagicMock()``
+# at import time and never restore it, so whichever pytest imported first won
+# the session and both layers here broke: a MagicMock is not a package, so
+# ``import streamlit.components.v1`` (via keyboard_shortcuts) raised, and a
+# mocked ``st.stop()`` does not halt the page.
+#
+# That root cause is fixed (HADES-w1k) and
+# ``test_no_test_module_replaces_streamlit_globally`` keeps it fixed. The
+# machinery below is retained as defence in depth — it costs one cached import
+# and makes these layers correct regardless of what any future fixture or
+# plugin leaves in sys.modules.
 # --------------------------------------------------------------------------
 
 def _snapshot_streamlit_modules() -> dict[str, object]:
@@ -452,6 +456,64 @@ def test_execution_reports_page_that_never_reaches_auth_gate(tmp_path):
 # --------------------------------------------------------------------------
 # The real pages
 # --------------------------------------------------------------------------
+
+def test_no_test_module_replaces_streamlit_globally():
+    """Guard the convention that HADES-w1k established.
+
+    Assigning ``sys.modules["streamlit"]`` at test-module import time is never
+    undone, so whichever module pytest imports first wins the entire session:
+    every repo module imported afterwards binds THAT mock as its ``st``. Fifteen
+    modules used to do it, and it broke this file in two ways — a MagicMock is
+    not a package, so ``import streamlit.components.v1`` raised, and a mocked
+    ``st.stop()`` does not halt, so pages ran past the auth gate into DB code.
+
+    Thirteen of those mocks turned out to be unnecessary (streamlit is a real
+    installed dependency) and were deleted; the one genuine stub, in
+    test_ui_components.py, now patches that module's own ``st`` global via
+    monkeypatch, which is restored per test.
+
+    Stub streamlit by patching the module under test, not the interpreter.
+    """
+    def _is_sys_modules(node) -> bool:
+        return isinstance(node, ast.Attribute) and node.attr == "modules"
+
+    offenders = []
+    for path in sorted(Path(__file__).parent.glob("test_*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in tree.body:  # module level only — a fixture body is fine
+            # sys.modules["streamlit"] = ...
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if (
+                        isinstance(target, ast.Subscript)
+                        and _is_sys_modules(target.value)
+                        and isinstance(target.slice, ast.Constant)
+                        and target.slice.value == "streamlit"
+                    ):
+                        offenders.append(f"{path.name}:{node.lineno}")
+            # sys.modules.setdefault("streamlit", ...) — only a no-op if
+            # streamlit happens to be imported already, which is not a
+            # guarantee any test may rely on.
+            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                func = node.value.func
+                if (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "setdefault"
+                    and _is_sys_modules(func.value)
+                    and node.value.args
+                    and isinstance(node.value.args[0], ast.Constant)
+                    and node.value.args[0].value == "streamlit"
+                ):
+                    offenders.append(f"{path.name}:{node.lineno} (setdefault)")
+
+    assert not offenders, (
+        "These test modules replace sys.modules['streamlit'] at import time, "
+        "which leaks into every module imported afterwards:\n"
+        + "\n".join(f"  - {o}" for o in offenders)
+        + "\n\nPatch the module under test instead (monkeypatch.setattr("
+        "the_module, 'st', mock)), so the stub is scoped and restored."
+    )
+
 
 def test_pages_directory_is_discovered():
     pages = _iter_pages()
