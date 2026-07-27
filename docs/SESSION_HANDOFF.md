@@ -1,7 +1,135 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-07-27
-**Status:** **Code backlog empty; two full review cycles retired.** 16 PRs merged, `main` green, 0 open PRs, **1149 tests** (953 → 1149 this session). App verified live and booting cleanly. **ZoomInfo API entitlement still lapsed — ALL lead generation down pending an account-manager call.**
+**Status:** **Insurance measures M1/M4/M5 landed; [PR #17](https://github.com/andre-sav/HADES/pull/17) open and green.** **1227 tests** (1149 → 1227). Four beads closed, two built-and-open on user action. **ZoomInfo API entitlement still lapsed — ALL lead generation down pending an account-manager call.** A credential-exposure gap in the test suite was found and fixed (see below). **Four items now need the user**, listed at the end of this section.
+
+## Session Summary (2026-07-27, later — insurance M1/M4/M5, test isolation, PITR)
+
+### Branch / PR state
+
+`feat/insurance-m1-m4-m5` → **[PR #17](https://github.com/andre-sav/HADES/pull/17)**, open, `MERGEABLE`, CI green. Everything is pushed; nothing is stranded locally. Eight commits.
+
+| Commit | What |
+|---|---|
+| `ab78869` | Page-import smoke test (HADES-0h1 ✅) |
+| `eb6d119` | Geography runtime invariants (HADES-av6 ✅) |
+| `7217297` | Post-deploy synthetic check (HADES-704 — open, schedule disabled) |
+| `c7b7a17` | Stale review artifacts deleted, PII exports gitignored |
+| `bbb5536` | Test isolation + production-credential fix (HADES-w1k ✅) |
+| `d2d52cb` | HADES-0n4 closed with production measurement |
+| `ffad272` | Turso PITR runbook (HADES-9p9 — open, unrehearsed) |
+
+### THE PATTERN WORTH CARRYING FORWARD
+
+**Four of four beads specified a check that could not detect the incident that motivated it.** This is not a coincidence and it will recur:
+
+- **HADES-0h1 (M4)** — the motivating plotly crash was already fixed *and* already guarded by `test_requirements_coverage.py`. The residual value was a different class entirely (post-refactor module-level breakage).
+- **HADES-av6 (M1)** — proposed re-running haversine over the results to catch the session-51 centroid collapse. But `get_zips_in_radius` computes distance from *that same table*, so collapsed ZIPs report 0.0 miles and pass. Self-referential.
+- **HADES-704 (M5)** — proposed `curl app | grep "Sign in to HADES"`. That text is rendered client-side by Streamlit's JS and is *never* in the HTML curl receives. Also the app now 303s to viewer SSO.
+- **HADES-0n4** — proposed an area-code↔state check for an entity swap where both companies were in the *same city* (Lincoln NE 68521), hence the same area code.
+
+**Mechanism:** each was filed right after an incident, written from the *symptom* rather than the *mechanism*. The symptom suggests a plausible check; the mechanism rules it out.
+
+**Cheap defense, worth adopting as convention:** a bead proposing a detector must name the incident record and state how the detector fires on it. One line at filing time would have caught all four.
+
+**Corollary:** an invariant needs an oracle *independent* of the computation it audits (that makes it meaningful), **and** a low base rate on legitimate data (that makes it usable). You only learn the second by measuring against real data. av6 has both (0 violations in 60 real searches). 0n4 had the first but not the second (15% of rows).
+
+### HADES-0h1 — page-import smoke test ✅
+
+`tests/test_page_imports.py`. Streamlit runs each `pages/*.py` as an independent script, so module-level `NameError`/`ImportError`/syntax errors are invisible to pytest. Two complementary layers:
+
+1. **Static** — compiles each page, resolves every module-level import *and* checks each imported name still exists in its module, then scope-checks module-level name loads. 100% of every file, executes nothing.
+2. **Execution** — runs the page with a streamlit stand-in whose `stop()` raises a sentinel, halting inside `require_auth()` exactly where Cloud halts for a signed-out visitor. All 11 pages call `require_auth()` at module level (lines 22–109), so every import runs for real and nothing touches the DB.
+
+Verified non-redundant by injecting breaks into a real page: a `NameError` below the auth gate is caught by the static layer and correctly *not* by the execution layer; a renamed import and a syntax error are caught by both.
+
+**Deliberately NOT the bead's approach** ("mock streamlit, import end-to-end"): pages iterate DB results and unpack cached resources at module level, so a MagicMock surface reports failures that are artifacts of the fakes rather than real defects.
+
+### HADES-av6 — Geography runtime invariants ✅
+
+`monitoring.evaluate_radius_invariants` + `evaluate_lead_states` (pure, per the `monitoring.py` convention), `utils.surface_data_anomaly` (one shared code path), `ui_components.data_anomaly_banner`.
+
+Independent oracles: coordinate-sharing density (the real signature of a centroid collapse) and `utils.get_state_from_zip` (prefix-derived, not from the CSV under audit). The distance check is retained — it genuinely catches units errors, bounding-box filter bugs and wrong-centre cache bugs.
+
+**Wired into all THREE production callers of `get_zips_in_radius`**, not the two the bead named. It missed `expand_search.py` (every auto-expansion sweep recalculates the ZIP set — the path that runs unattended) and named `run_intent_pipeline.py`, which performs no radius search.
+
+Expansion runs on a background thread where `st.session_state` is unsafe, so verdicts ride home in the result dict alongside the existing `_truncation_seen` accumulator (all four return sites) and the page raises the banner on the script thread. That dict now also carries `states_searched`, so a radius widening across a state line does not flag legitimate border leads.
+
+`surface_data_anomaly` **deduplicates** on `(context, severity, message)` — Streamlit reruns on every keystroke and `get_zips_in_radius` is deliberately uncached, so without it a persistent anomaly emits an identical Sentry event per rerun.
+
+`MAX_SHARED_COORD` moved to `geo.py` so the rebuild-time gate and the runtime gate cannot drift apart.
+
+Verified quiet: **0 non-ok verdicts across 60 real searches** (Dallas, LA, NYC, Texarkana, Honolulu, Anchorage, Boston). Eight are now a CI gate on `data/zip_centroids.csv` itself.
+
+### HADES-704 — synthetic check — BUILT, SCHEDULE DISABLED ⚠️
+
+`.github/workflows/synthetic-check.yml`, `scripts/synthetic_check.py`, 13 tests.
+
+Probed live: the app **303-redirects to Streamlit viewer SSO**, so no anonymous check can reach it. `/healthz` returns 200 `{"status":"ok"}` unauthenticated and looks perfect — until you curl **a subdomain with no app behind it** and get the identical payload. It is Streamlit's edge. A check built on it can never fail. `test_edge_health_payload_is_rejected` is the standing guard.
+
+Probes `/_stcore/health` (the app server's own endpoint), matching a bare `ok` **exactly** so the edge JSON cannot satisfy it. Stdlib-only and deliberately does **not** import `monitoring.py` — that pulls `utils` → `streamlit`, so a 15-minute cron would pip-install the whole app every run and a broken `requirements.txt` would redden the monitor for reasons unrelated to app health.
+
+**Scope note:** cannot catch a single page erroring while the server stays up — the actual Executive Summary shape. That class is now caught pre-deploy by `test_page_imports.py`.
+
+### HADES-w1k — test isolation, and a production-credential exposure ✅
+
+Filed during 0h1, then fixed. **28 test modules** replaced `sys.modules["streamlit"]` at import time — 14 by assignment, **13 via `setdefault` that the initial grep missed**, one configured mock — and never restored it. Whichever pytest imported first shadowed the real package session-wide.
+
+**Removing them surfaced something worse.** They were load-bearing *by accident*: `.streamlit/secrets.toml` on a dev machine holds **live production values** (Turso URL + token, ZoomInfo and Zoho secrets, a GitHub token, VanillaSoft lead ID) and real streamlit reads it. Two credential tests immediately started returning the real production Turso URL.
+
+So the suite's protection from production credentials was **never designed** — it was a side effect of import order, and only covered modules that happened to mock streamlit.
+
+Fixed at the root: `conftest.py` now neutralises `st.secrets` for **every** test (same shape as the existing SMTP block); 27 unnecessary mocks deleted; the one genuine stub (`test_ui_components`) patches its own module's `st` via monkeypatch; `tests/test_credential_safety.py` asserts the guarantee *plus* a canary that fails if `secrets.toml` stops holding the guarded keys, so it cannot pass vacuously; `test_no_test_module_replaces_streamlit_globally` enforces the convention against both syntactic forms.
+
+**Blast radius was local-dev only** — CI references no secrets and has no `secrets.toml`. Nothing left the machine; no rotation needed.
+
+*(Note: the guard, written as a property, immediately found 13 more instances than the grep written as a pattern. State the property, don't enumerate the symptoms.)*
+
+### HADES-0n4 — phone↔company integrity — CLOSED, NOT VIABLE ✅
+
+The bead asked for a *decision*, and the decision is no, with numbers.
+
+Measured on 178 real exported leads: business-phone area code vs state = **2.2% FP** (usable), mobile = **25.8%** (ported numbers), all phones = **29.2%** of rows flagged.
+
+User-authorized read-only production measurement (counts only, no contact rows):
+```
+total rows in vanillasoft_leads    : 293,927
+phones on >1 distinct company_norm :  15,292  (7.4% of phones)
+rows sitting on such a phone       :  44,926  (15.3% of ALL rows)
+after stripping name-variant pairs :  11,927  phones (78% survive)
+```
+
+Both candidates dead: area-code can't catch the same-city incident and needs an NPA table that rots; phone-collision has the right shape but fires on ~12–15% of rows. Separating "two divisions on one switchboard" from "wrong company on this phone" requires knowing who owns the number — a reverse-lookup source we don't have. Evidence is in the bead so it is not re-litigated.
+
+### HADES-9p9 — Turso PITR — DOCUMENTED, UNREHEARSED ⚠️
+
+**PITR is available on every Turso plan** (Free 24h, Developer 10d, Scaler 30d, Pro 90d), so the bead's JSONL-fallback branch is moot. Full runbook is in **CLAUDE.md → "Disaster recovery — Turso point-in-time restore"**.
+
+**The trap:** PITR cannot restore in place — it creates a NEW database with a NEW url+token, and HADES reads that pair from **three** places: Streamlit Cloud secrets, GitHub Actions repo secrets (**five** workflows), and local `secrets.toml`. Miss one → **split brain**, UI on the restored db while crons keep writing to the damaged one. Two of those crons mutate (`zoho-operator-sync` rewrites operators nightly, `purge-soft-deleted` DELETEs). Runbook makes "disable the five workflows" step 1.
+
+**FINDING FOR HADES-njr (the P1 this blocks):** on the **Free plan, detection outlives recovery.** `data_anomaly_check` runs 07:00 UTC against the *last completed* day, so damage early on day N surfaces at 07:00 on day N+1 — up to **~31h latency** against a **24h** restore window. The system would detect corruption it can no longer undo. Developer or higher removes it entirely. Both components are individually correct; the defect lives only in their *relationship*. **This single fact dominates the rest of the data-loss design.**
+
+### Cleanup
+
+Deleted the stale `HADES_CODEBASE_FLAT.md` (706K) and `REVIEW_PROMPT.md` — Mar-03 snapshots the handoff had flagged for two sessions (they polluted a CodeRabbit pass with already-fixed findings). Added `.gitignore` entries for them, for `system-test/`, and for `HADES-*.csv` lead exports — **two were sitting untracked in the repo root containing real contact PII**, one `git add -A` from being committed. The CSVs are left on disk (operator's data) but are now uncommittable.
+
+### Test Count
+
+**1227 passing** (1149 → 1227 this session; 953 → 1227 across the day). Full suite green, ruff clean.
+
+### ⚠️ WHAT NEEDS THE USER (nothing else here is blocked)
+
+1. **ZoomInfo entitlement — HADES-m29 (P1).** Unchanged and still the thing gating all lead generation. Account-manager call.
+2. **`ZOHO_*` GitHub Actions secrets — HADES-jdi (P1).** Zoho sync red daily.
+3. **Streamlit Cloud → Settings → Sharing → make the app public** (HADES-704). `APP_PASSWORD` remains the gate on the app itself; this restores the posture CLAUDE.md documents. Then dispatch `Synthetic Check` manually, confirm green, and uncomment the `schedule:` block. Until then the cron would fail every run — 44 emails/day.
+4. **`turso auth login`** (HADES-9p9). Then two things become possible immediately: confirm the plan (`turso db show hades-pipeline`) — which may change the data-loss design per the finding above — and rehearse the restore once (~10 min, scriptable).
+
+### What Needs Doing Next Session
+
+1. **Merge [PR #17](https://github.com/andre-sav/HADES/pull/17)** — green and mergeable.
+2. Chase the four user items above; #3 and #4 are each one action away from closing a bead.
+3. Remaining unblocked backlog is the P3/P4 tail: `HADES-7qi` (~25 lower-severity review findings), `HADES-1w2` (freshness badges, insurance M8), `HADES-bdr`/`0qu`/`dgr`/`iic` (P4 polish).
+4. `HADES-zz6` (P1 epic, silent-failure campaign) is an umbrella with all children closed — worth closing or re-scoping rather than leaving as a standing P1.
 
 ## Session Summary (2026-07-27, second review cycle — close)
 
