@@ -71,22 +71,29 @@ class PipelineRunsMixin:
         Run Now both pass the guard (review N-16). Runs older than
         *max_age_minutes* are stale (crashed without cleanup) and ignored.
         """
-        rows = self.execute(
-            """INSERT INTO pipeline_runs
-                   (workflow_type, trigger, status, config_json, started_at)
-               SELECT ?, ?, 'running', ?, CURRENT_TIMESTAMP
-               WHERE NOT EXISTS (
-                   SELECT 1 FROM pipeline_runs
-                   WHERE workflow_type = ? AND status = 'running'
-                     AND started_at > datetime('now', ?)
-               )
-               RETURNING id""",
-            (workflow_type, trigger, json.dumps(config),
-             workflow_type, f"-{max_age_minutes} minutes"),
-        )
-        if not self._in_transaction:
-            self.connection.commit()
-        return rows[0][0] if rows else None
+        # Claim + commit must happen under ONE lock acquisition: self.execute()
+        # releases the lock before returning, so committing afterwards left a
+        # window where another session thread could drive the shared singleton
+        # connection mid-claim — the HADES-638 contract every other write path
+        # in _core.py honours (review N2-08). The lock is reentrant, so the
+        # nested acquisition inside execute() is fine.
+        with self.lock:
+            rows = self.execute(
+                """INSERT INTO pipeline_runs
+                       (workflow_type, trigger, status, config_json, started_at)
+                   SELECT ?, ?, 'running', ?, CURRENT_TIMESTAMP
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM pipeline_runs
+                       WHERE workflow_type = ? AND status = 'running'
+                         AND started_at > datetime('now', ?)
+                   )
+                   RETURNING id""",
+                (workflow_type, trigger, json.dumps(config),
+                 workflow_type, f"-{max_age_minutes} minutes"),
+            )
+            if not self._in_transaction:
+                self.connection.commit()
+            return rows[0][0] if rows else None
 
     def complete_pipeline_run(
         self, run_id: int, status: str, summary: dict,

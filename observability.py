@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 
 try:  # optional dependency — never take the app down over monitoring
     import sentry_sdk
@@ -68,19 +69,85 @@ def _release() -> str | None:
             or None)
 
 
-def scrub_event(event, _hint):
-    """before_send hook: redact credential-shaped keys from event extras.
+# Contact PII patterns. Sentry's default LoggingIntegration turns every
+# logger.error into an event (message + exception text verbatim) and every
+# logger.info/warning into a breadcrumb — none of which pass through an
+# `extra`-only scrubber. These run over that free text (review N2-03).
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+# 10/11-digit phone runs, with or without separators. Anchored on word
+# boundaries so batch ids and counts are untouched.
+_PHONE_RE = re.compile(r"\b(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b")
+# Name-shaped dict keys as they appear in a formatted lead repr.
+_NAME_FIELD_RE = re.compile(
+    r"(['\"]?(?:firstName|lastName|fullName|contactName)['\"]?\s*[:=]\s*)"
+    r"(['\"])([^'\"]{1,80})\2",
+    re.IGNORECASE,
+)
 
-    Last line of defence — locals are already off, but application code can
-    still attach context explicitly.
+
+def _scrub_text(text):
+    """Redact contact PII from free text, preserving diagnostic value."""
+    if not isinstance(text, str) or not text:
+        return text
+    text = _EMAIL_RE.sub(_REDACTED, text)
+    text = _PHONE_RE.sub(_REDACTED, text)
+    text = _NAME_FIELD_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}{_REDACTED}{m.group(2)}", text)
+    return text
+
+
+def scrub_breadcrumb(crumb, _hint):
+    """before_breadcrumb hook: log records become breadcrumbs verbatim."""
+    if not isinstance(crumb, dict):
+        return crumb
+    if "message" in crumb:
+        crumb["message"] = _scrub_text(crumb.get("message"))
+    data = crumb.get("data")
+    if isinstance(data, dict):
+        for k, v in list(data.items()):
+            if any(m in str(k).lower() for m in _SECRET_MARKERS):
+                data[k] = _REDACTED
+            elif isinstance(v, str):
+                data[k] = _scrub_text(v)
+    return crumb
+
+
+def scrub_event(event, _hint):
+    """before_send hook: redact credentials AND contact PII.
+
+    Covers the paths that actually carry data:
+      - event["extra"]        explicit context (credential-shaped keys)
+      - event["logentry"]     the LoggingIntegration's formatted message
+      - event["exception"]    exception .value text, e.g. a formatted lead row
+
+    Locals are already suppressed via include_local_variables=False; this is
+    the layer that catches free text (review N2-03).
     """
     if not isinstance(event, dict):
         return event
+
     extra = event.get("extra")
     if isinstance(extra, dict):
         for key in list(extra):
             if any(m in key.lower() for m in _SECRET_MARKERS):
                 extra[key] = _REDACTED
+            elif isinstance(extra[key], str):
+                extra[key] = _scrub_text(extra[key])
+
+    logentry = event.get("logentry")
+    if isinstance(logentry, dict) and logentry.get("message"):
+        logentry["message"] = _scrub_text(logentry["message"])
+
+    if isinstance(event.get("message"), str):
+        event["message"] = _scrub_text(event["message"])
+
+    exception = event.get("exception")
+    if isinstance(exception, dict):
+        values = exception.get("values")
+        if isinstance(values, list):
+            for v in values:
+                if isinstance(v, dict) and isinstance(v.get("value"), str):
+                    v["value"] = _scrub_text(v["value"])
+
     return event
 
 
@@ -118,6 +185,7 @@ def init_sentry(component: str = "streamlit") -> bool:
             send_default_pii=False,
             include_local_variables=False,
             before_send=scrub_event,
+            before_breadcrumb=scrub_breadcrumb,
         )
         sentry_sdk.set_tag("component", component)
     except Exception:

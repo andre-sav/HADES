@@ -176,3 +176,22 @@ class OperatorsMixin:
         if not rows:
             return None
         return {"id": rows[0][0], "operator_name": rows[0][1], "deleted_at": rows[0][2]}
+
+    def find_deleted_operator_by_zoho_id(self, zoho_id: str) -> dict | None:
+        """Look up a SOFT-DELETED operator by Zoho id.
+
+        ``zoho_id`` is UNIQUE too, and the Zoho sync upserts on it — without
+        this companion a soft-deleted row silently blocks re-creation from
+        Zoho with no recovery path (review N2-10).
+        """
+        if not zoho_id:
+            return None
+        rows = self.execute(
+            "SELECT id, operator_name, zoho_id, deleted_at FROM operators "
+            "WHERE zoho_id = ? AND deleted_at IS NOT NULL",
+            (zoho_id,),
+        )
+        if not rows:
+            return None
+        return {"id": rows[0][0], "operator_name": rows[0][1],
+                "zoho_id": rows[0][2], "deleted_at": rows[0][3]}

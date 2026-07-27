@@ -176,8 +176,12 @@ class OutcomesMixin:
         """Update outcome for a specific lead (matched by batch + company).
 
         Audited (HADES-6if): outcomes feed score calibration, so a wrong
-        write here silently skews future lead ranking.
+        write here silently skews future lead ranking. The pre-read is what
+        makes that audit answerable — without it the log only echoed the
+        arguments, and the (batch_id, company_name) match can touch several
+        rows, so the count matters too (review N2-12).
         """
+        before = self.safe_snapshot(self._outcome_state, batch_id, company_name)
         self.execute_write(
             """UPDATE lead_outcomes
                SET outcome = ?, outcome_at = ?, updated_at = CURRENT_TIMESTAMP
@@ -186,7 +190,20 @@ class OutcomesMixin:
         )
         self.log_mutation(
             "lead_outcomes", f"{batch_id}:{company_name}", "update",
-            before=None,
+            before=before,
             after={"outcome": outcome, "outcome_at": outcome_at,
                    "batch_id": batch_id, "company_name": company_name},
         )
+
+    def _outcome_state(self, batch_id: str, company_name: str) -> dict:
+        """Pre-read of the rows update_lead_outcome is about to touch."""
+        rows = self.execute(
+            "SELECT outcome, outcome_at FROM lead_outcomes "
+            "WHERE batch_id = ? AND company_name = ?",
+            (batch_id, company_name),
+        )
+        return {
+            "matched_rows": len(rows),
+            "outcome": rows[0][0] if rows else None,
+            "outcome_at": rows[0][1] if rows else None,
+        }

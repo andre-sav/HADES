@@ -18,15 +18,23 @@ class StagedExportsMixin:
         Audited (HADES-6if) — the lead payload itself is NOT copied into
         the log, only its shape (see _mutation_log._SKIP_FIELDS).
         """
+        # operator_name is denormalized so attribution survives the 90-day
+        # purge of the operator row itself (review N2-09).
+        operator_name = None
+        if operator_id:
+            op = self.safe_snapshot(self.get_operator, operator_id)
+            operator_name = (op or {}).get("operator_name")
         new_id = self.execute_write(
-            "INSERT INTO staged_exports (workflow_type, leads_json, lead_count, query_params, operator_id) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO staged_exports (workflow_type, leads_json, lead_count, "
+            "query_params, operator_id, operator_name) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             (
                 workflow_type,
                 json.dumps(leads),
                 len(leads),
                 json.dumps(query_params) if query_params else None,
                 operator_id,
+                operator_name,
             ),
         )
         self.log_mutation(
@@ -64,7 +72,7 @@ class StagedExportsMixin:
         rows = self.execute(
             "SELECT id, workflow_type, leads_json, lead_count, query_params, "
             "operator_id, batch_id, exported_at, created_at, "
-            "push_status, pushed_at, push_results_json "
+            "push_status, pushed_at, push_results_json, operator_name "
             "FROM staged_exports WHERE id = ?",
             (export_id,),
         )
@@ -84,6 +92,8 @@ class StagedExportsMixin:
             "push_status": r[9],
             "pushed_at": r[10],
             "push_results_json": r[11],
+            # Survives the 90-day purge of the operator row (review N2-09)
+            "operator_name": r[12],
         }
 
     def get_recent_operator_ids(self, limit: int = 5) -> list[int]:

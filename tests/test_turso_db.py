@@ -1196,6 +1196,7 @@ class TestMigrations:
                 (2, "pushed_at", "TEXT", 0, None, 0),
                 (3, "push_results_json", "TEXT", 0, None, 0),
                 (4, "deleted_at", "TIMESTAMP", 0, None, 0),
+                (5, "operator_name", "TEXT", 0, None, 0),
             ],
         }
 
