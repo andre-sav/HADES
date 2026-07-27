@@ -344,7 +344,7 @@ states = get_states_from_zips(zips)
 
 ## Status
 
-- **1100 tests passing** (all tests green)
+- **1149 tests passing** (all tests green)
 - ✅ **VanillaSoft lead-history dedup** (HADES-dio) — `vs_leads.py` parses the VS contact export into `vanillasoft_leads`; export dedup consults it as a third source (phone match, or name+ZIP — never name alone, franchise safety). Bulk import: `python scripts/import_vs_leads.py <export.csv>`; incremental: CSV Export page → VanillaSoft Lead History.
 - ✅ **Contact Search API WORKING** - Verified 2026-02-02
 - ✅ **Intent Search API** - Legacy `/search/intent` endpoint (JWT-compatible). v2 `/gtm/data/v1/intent/search` requires OAuth2 PKCE (no DevPortal access).

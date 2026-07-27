@@ -1,9 +1,62 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-07-26
-**Status:** **Code backlog empty.** 12 PRs merged, `main` green, 0 open PRs, 1100 tests passing (953 → 1100 this session). Whole-project review fully retired; both data-loss infrastructure P1s and all remaining P2s shipped. App verified live and booting cleanly after all 12 merges. **ZoomInfo API entitlement still lapsed — ALL lead generation down pending an account-manager call.**
+**Date:** 2026-07-27
+**Status:** **Code backlog empty; two full review cycles retired.** 16 PRs merged, `main` green, 0 open PRs, **1149 tests** (953 → 1149 this session). App verified live and booting cleanly. **ZoomInfo API entitlement still lapsed — ALL lead generation down pending an account-manager call.**
 
-## Session Summary (2026-07-19 → 07-26, close)
+## Session Summary (2026-07-27, second review cycle — close)
+
+### What Was Done
+
+Ran a **second whole-project code review** over the 3,158 lines added by the
+first cycle's 12 PRs (`git diff 23c9e07..HEAD`, 66 files): 4 parallel domain
+agents + CodeRabbit, every P0/P1 manually verified against source before
+acceptance. Report: `docs/CODE_REVIEW_2026-07-26-post-session.md`.
+
+**24 findings, 15 of them in code written earlier this same session.** All
+remediated across PRs #13–#16.
+
+| PR | Findings | What |
+|---|---|---|
+| #13 | N2-01/02/07 | soft-delete leaked into 3 raw queries (incl. `zoho_sync.py:197` — the nightly cron kept **rewriting soft-deleted operators** and permanently shadowed their names); empty-phone dedup key still merged same-name franchises across states; `phone` misclassified as person-level proof |
+| #14 | N2-04/14, N2-05/06/13 | anomaly export-volume compared the *in-progress* UTC day → would have fired CRITICAL every morning from ~day 10; 2σ floor could go negative; **three regressions from the first cycle's own fixes** |
+| #15 | N2-03, N2-08/09/10/12 | Sentry `before_send` scrubber was **dead code** (zero `set_extra` call sites) while the active LoggingIntegration path was unscrubbed; `claim_pipeline_run` committed outside the lock; 90-day purge orphaned export attribution; `zoho_id` had no deleted-row recovery; outcome audit had no before-state |
+| #16 | P2/P3 tail | **tests were opening real TCP to smtp.gmail.com every run** (swallowed by a broad except; suite ~20% faster once blocked); blank `ContactID` collapsed VS rows; unparseable `Added Date` dropped rows from the dedup window forever; one canonical phone match key; purge now audited; burst detector queries deletes directly; 2 more scripts init Sentry |
+
+### The pattern worth carrying forward
+
+Every new defect was a **"the fix didn't reach all the way"** failure, not a
+design error: soft-delete filtered the accessors but not raw SQL; the dedup fix
+made phones likelier to populate without closing the empty case; batching the ID
+resolution silently lost per-item error isolation. This is the *same* sibling-path
+gap class the first review named — recurring inside the fixes for it. The sweep
+habit needs to extend to raw SQL and to error-handling granularity, not just to
+the named symptom.
+
+### Honest corrections made
+- **CLAUDE.md and PR #8 overstated the Sentry scrubber.** It only touched
+  `event["extra"]`, which nothing in this repo populates. The real protections
+  (`include_local_variables=False`, `send_default_pii=False`) were genuine and
+  live-verified; the docs now say so, and the scrubber was rewritten to cover
+  the paths Sentry actually uses. Current exposure was nil — every `logger.*`
+  call logs counts, not lead contents.
+- Several prior tests were updated because they **pinned buggy behavior**
+  (empty-string date; `phone_business` in the standalone-proof index).
+
+### Deliberately NOT done
+The ~7 source-string "wiring" tests (`assert "x" in inspect.getsource(...)`)
+flagged by the review — several of them mine — remain. They cannot detect a call
+that's been commented out or had its result discarded. Converting them is a
+mechanical sweep across 5 files, better as its own change than buried in a fix
+PR. Recorded in the report and PR #16.
+
+### Test Count
+**1149 passing** (1100 → 1149 this cycle; 953 → 1149 across the whole session).
+
+### Beads
+23 closed across the session; **0 review beads open**. Remaining open items are
+P3/P4 polish or blocked on user action.
+
+## Session Summary (2026-07-19 → 07-26, first review cycle)
 
 ### What Was Done — 12 PRs, all merged
 
