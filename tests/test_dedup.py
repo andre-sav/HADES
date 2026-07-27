@@ -350,24 +350,23 @@ class TestMessyCompanyNames:
     """Edge cases for company names with HTML entities and special chars."""
 
     def test_html_ampersand_entity(self):
-        """Company 'Acme &amp; Co' normalizes same as 'Acme & Co'."""
-        # Both strip punctuation, so &amp; → "amp" remains but & → removed
-        # This shows they DON'T match — documenting the behavior
-        name1 = normalize_company_name("Acme &amp; Co")
-        name2 = normalize_company_name("Acme & Co")
-        # &amp; leaves "amp" in the normalized string
-        assert "amp" in name1
-        assert "amp" not in name2
+        """Company 'Acme &amp; Co' normalizes the same as 'Acme & Co'.
+
+        This test previously asserted the opposite — that "&amp;" left an "amp"
+        token behind — with a comment describing it as "documenting the
+        behavior". It was documenting a defect: the two names scored 81.8,
+        under the 85 fuzzy threshold, so a known duplicate was pushed as a new
+        lead. Entities are now decoded before normalising (HADES-7qi).
+        """
+        assert normalize_company_name("Acme &amp; Co") == normalize_company_name("Acme & Co")
+        assert "amp" not in normalize_company_name("Acme &amp; Co")
 
     def test_html_entity_in_dedup_key(self):
-        """HTML entities in company name affect dedup matching."""
+        """An escaped company name must produce the SAME dedup key."""
         lead1 = {"phone": "555-111-1111", "companyName": "Acme &amp; Sons"}
         lead2 = {"phone": "555-111-1111", "companyName": "Acme & Sons"}
-        # Same phone → same normalized phone, company differs
-        key1 = get_dedup_key(lead1)
-        key2 = get_dedup_key(lead2)
-        # Phone part matches (same number), company part differs
-        assert key1.split("|")[0] == key2.split("|")[0]  # phone matches
+
+        assert get_dedup_key(lead1) == get_dedup_key(lead2)
 
     def test_unicode_dash_in_company(self):
         """Company name with em-dash should normalize."""

@@ -149,9 +149,15 @@ class ConnectionMixin:
         if not params_list:
             return
 
-        # Optimize INSERT to multi-row (single round-trip to Turso)
+        # Optimize INSERT to multi-row (single round-trip to Turso). Skipped
+        # when a clause follows the VALUES tuple — the rewrite would drop it
+        # (see _has_clause_after_values); correctness beats the round-trip.
         upper = query.strip().upper()
-        if upper.startswith("INSERT") and "VALUES" in upper:
+        if (
+            upper.startswith("INSERT")
+            and "VALUES" in upper
+            and not self._has_clause_after_values(query)
+        ):
             self._execute_multi_row_insert(query, params_list)
             return
 
@@ -189,6 +195,29 @@ class ConnectionMixin:
             except Exception:
                 logger.warning("Rollback failed after execute_many error", exc_info=True)
             raise
+
+    @staticmethod
+    def _has_clause_after_values(query: str) -> bool:
+        """True if anything follows the VALUES tuple (ON CONFLICT, RETURNING…).
+
+        The multi-row rewrite keeps only `query[:idx] + "VALUES "` and appends
+        its own placeholder groups, so every trailing clause is discarded — an
+        upsert would quietly become a plain INSERT with no conflict handling
+        and no error. No caller writes one today; this makes sure the next one
+        is not silently broken.
+        """
+        idx = query.upper().find("VALUES")
+        if idx == -1:
+            return False
+        depth = 0
+        for pos, ch in enumerate(query[idx:], start=idx):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return bool(query[pos + 1:].strip())
+        return False
 
     def _execute_multi_row_insert(self, query: str, params_list: list[tuple]) -> None:
         """Build multi-row INSERT VALUES for single round-trip."""

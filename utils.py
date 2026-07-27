@@ -571,10 +571,38 @@ def normalize_zip(raw: str | int | None) -> str | None:
     digits = re.sub(r"[^0-9]", "", str(raw))
     if len(digits) < 3:
         return None
+    # An 8-digit value is a ZIP+4 whose leading zero was eaten (Excel and CSV
+    # exports both do this to the 0xxxx New England ZIPs). "10011234" is
+    # 01001-1234, Agawam MA — truncating to the first five would call it 10011,
+    # Manhattan. That is a wrong-state lead, not a formatting nit, and every
+    # downstream state derivation follows it. Pad back to 9 first.
+    if len(digits) == 8:
+        digits = digits.zfill(9)
     # Take first 5 digits (handles ZIP+4 variants)
     digits = digits[:5]
     # Pad with leading zeros (handles 4-digit CT/NJ/MA ZIPs)
     return digits.zfill(5)
+
+
+def parse_numeric(raw, default: int | None = None) -> int | None:
+    """Coerce a messy ZoomInfo numeric field to an int.
+
+    ZoomInfo sends numerics as strings and decorates them: `contactAccuracyScore`
+    arrives as `"95%"`, `signalScore` as `"85"`, `distance` as `"5.0 miles"`.
+    A bare `int()` raises on all of those and an `isinstance(x, (int, float))`
+    guard silently rejects them, which is worse — the field looks absent and the
+    caller falls back to a coarse default without saying so.
+
+    Returns `default` when nothing numeric can be found.
+    """
+    if raw is None or isinstance(raw, bool):
+        return default
+    try:
+        return int(float(raw))
+    except (ValueError, TypeError):
+        pass
+    match = re.search(r"\d+(?:\.\d+)?", str(raw))
+    return int(float(match.group())) if match else default
 
 
 def get_state_from_zip(zip_code: str) -> str | None:

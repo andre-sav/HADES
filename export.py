@@ -2,6 +2,7 @@
 CSV export functionality for VanillaSoft format with operator metadata.
 """
 
+import html
 import csv
 import io
 import logging
@@ -201,6 +202,14 @@ def build_vanillasoft_row(
     # Fallback: use generic "phone" only if directPhone didn't map
     if not row.get("Business") and lead.get("phone"):
         row["Business"] = str(lead["phone"])
+
+    # Decode HTML entities across EVERY field in one sweep rather than at each
+    # assignment site — values reach `row` from the field map, the nested
+    # company object and the phone fallback, and patching only the first would
+    # leave the other two escaped. Raw "&amp;" renders as "&amp;amp;" in the CRM.
+    for _col, _val in row.items():
+        if isinstance(_val, str) and "&" in _val:
+            row[_col] = html.unescape(_val)
 
     # Format phone numbers
     if row.get("Business"):

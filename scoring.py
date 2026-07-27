@@ -17,6 +17,7 @@ from utils import (
     get_authority_score,
     get_authority_title_keywords,
     get_intent_topics,
+    parse_numeric,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,10 +77,14 @@ def calculate_intent_score(lead: dict) -> dict:
     """
     weights = get_scoring_weights("intent")
 
-    # Signal strength score — prefer numeric signalScore for differentiation
-    signal_score_raw = lead.get("signalScore")
-    if signal_score_raw and isinstance(signal_score_raw, (int, float)) and signal_score_raw > 0:
-        signal_score = min(100, int(signal_score_raw))
+    # Signal strength score — prefer numeric signalScore for differentiation.
+    # ZoomInfo sends numerics as strings ("85", "85%"), and the previous
+    # isinstance((int, float)) guard rejected every one of them silently: the
+    # whole batch fell through to the coarse categorical band, collapsing the
+    # differentiation signalScore exists to provide.
+    signal_score_raw = parse_numeric(lead.get("signalScore"))
+    if signal_score_raw and signal_score_raw > 0:
+        signal_score = min(100, signal_score_raw)
     else:
         strength = lead.get("intentStrength", "Low")
         signal_score = get_signal_strength_score(strength)
@@ -437,14 +442,9 @@ def score_intent_contacts(
         company_intent_score = company_data.get("_score", 50)
 
         # Accuracy component (0-100)
-        raw_accuracy = contact.get("contactAccuracyScore", 0) or 0
-        try:
-            accuracy = int(raw_accuracy)
-        except (ValueError, TypeError):
-            # Handle strings like "95%" or "N/A"
-            import re
-            nums = re.findall(r"\d+", str(raw_accuracy))
-            accuracy = int(nums[0]) if nums else 0
+        # "95%" / "N/A" / int — one shared coercion (utils.parse_numeric) so
+        # this and signalScore cannot drift apart.
+        accuracy = parse_numeric(contact.get("contactAccuracyScore"), default=0)
         if accuracy >= 95:
             accuracy_score = 100
         elif accuracy >= 85:

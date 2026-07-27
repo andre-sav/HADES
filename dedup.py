@@ -3,6 +3,7 @@ Deduplication logic for phone numbers and cross-workflow leads.
 """
 
 import logging
+import html
 import re
 from functools import lru_cache
 
@@ -45,8 +46,14 @@ def normalize_company_name(name: str) -> str:
     if not name:
         return ""
 
+    # Decode HTML entities FIRST. ZoomInfo returns escaped names, and
+    # punctuation-stripping turns an undecoded "&amp;" into the token "amp" —
+    # "Smith &amp; Sons" vs "Smith & Sons" then scores 81.8, under the 85
+    # fuzzy threshold, and a known duplicate is pushed as a new lead.
+    normalized = html.unescape(name)
+
     # Lowercase
-    normalized = name.lower().strip()
+    normalized = normalized.lower().strip()
 
     # Strip common suffixes
     for suffix in COMPANY_SUFFIXES:
