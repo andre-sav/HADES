@@ -139,7 +139,7 @@ stores baselines, and alerts.
 |---|---|---|
 | `operators` row count vs. yesterday | drop ≥ **5%** (0 rows = critical) | Bulk operator cleanups fire false alarms → raise, or pause the workflow for the cleanup |
 | Zoho-linked % vs. yesterday | drop ≥ **5 points** | Expected during a Zoho re-auth; a sustained drop is a real sync regression |
-| Export volume vs. 30-day history | below **2σ** of the mean (0 with a healthy history = critical) | Seasonal/holiday lulls → widen to 2.5σ; needs ≥10 days of history or it stays quiet |
+| Export volume vs. 30-day history | **last completed day** below **2σ** of the mean (0 with a healthy history = critical); floor clamped above 0 | Seasonal/holiday lulls → widen to 2.5σ; needs ≥10 days of history or it stays quiet. Measures YESTERDAY, never the in-progress day — the job runs at 07:00 UTC, before any export lands |
 | Mutation-log delete burst | **100+ deletes within 60s** | Legit bulk deletes → raise the count. Inserts are deliberately exempt (VS imports are bulky by nature) |
 
 **Baselines** live in `sync_metadata` (`anomaly_baseline_*`) and advance on

@@ -98,13 +98,20 @@ def collect_verdicts(db) -> tuple[list[dict], dict]:
     try:
         rows = db.execute(
             "SELECT DATE(exported_at) AS d, COUNT(*) FROM lead_outcomes "
-            "WHERE exported_at >= date('now', '-30 days') "
+            "WHERE exported_at >= date('now', '-31 days') "
             "GROUP BY d ORDER BY d"
         )
         by_day = {r[0]: r[1] for r in rows}
-        today = db.execute("SELECT date('now')")[0][0]
-        today_count = by_day.pop(today, 0)
-        verdicts.append(evaluate_export_volume(today_count, list(by_day.values())))
+        # Measure the last COMPLETED day, not the in-progress one (N2-04).
+        # This runs at 07:00 UTC — before any US-hours export lands — so
+        # comparing "today" against a mean of complete days scored 0 vs a
+        # healthy mean and fired critical every single morning.
+        today, yesterday = db.execute(
+            "SELECT date('now'), date('now', '-1 day')"
+        )[0]
+        by_day.pop(today, None)                 # in-progress: not comparable
+        measured = by_day.pop(yesterday, 0)
+        verdicts.append(evaluate_export_volume(measured, list(by_day.values())))
     except Exception as exc:
         logger.warning("export volume check failed: %r", exc, exc_info=True)
         verdicts.append({"severity": "unknown",
