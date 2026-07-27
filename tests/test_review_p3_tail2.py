@@ -197,3 +197,115 @@ def test_anomaly_check_runs_after_the_zoho_sync():
     sync_hour = int(_cron_of("zoho-operator-sync.yml").split()[1])
 
     assert sync_hour < anomaly_hour, (anomaly_hour, sync_hour)
+
+
+# --------------------------------------------------------------------------
+# 4. Suffix stripping was single-pass and order-dependent
+# --------------------------------------------------------------------------
+
+def test_the_reviews_exact_case_now_matches():
+    """"Acme Corp, LLC" vs "Acme Corporation" scored 61.5 and was treated as
+    two different companies, so the duplicate was pushed as a new lead.
+
+    Cause: COMPANY_SUFFIXES is applied once each in list order and every
+    pattern is $-anchored. Stripping " LLC" leaves "acme corp," — but the
+    "corp" pattern sits EARLIER in the list and has already been passed, so
+    the second suffix never gets removed.
+    """
+    from dedup import normalize_company_name
+
+    assert normalize_company_name("Acme Corp, LLC") == normalize_company_name("Acme Corporation")
+
+
+def test_stacked_suffixes_strip_regardless_of_order():
+    from dedup import normalize_company_name
+
+    assert normalize_company_name("Widget Co., Ltd.") == normalize_company_name("Widget")
+    assert normalize_company_name("Widget LLC Inc") == normalize_company_name("Widget Inc LLC")
+
+
+def test_single_suffix_forms_still_agree():
+    from dedup import normalize_company_name
+
+    base = normalize_company_name("Acme")
+    for variant in ("Acme Inc", "Acme Inc.", "Acme Incorporated", "Acme, Inc.",
+                    "Acme Corp", "Acme Corporation", "Acme LLC", "Acme Company"):
+        assert normalize_company_name(variant) == base, variant
+
+
+def test_stripping_never_empties_a_name():
+    """A name that is nothing BUT a suffix must keep something to match on —
+    an empty key would collide with every other empty key."""
+    from dedup import normalize_company_name
+
+    for name in ("LLC", " Inc.", "Company"):
+        assert normalize_company_name(name), f"{name!r} normalised to empty"
+
+
+def test_suffix_words_inside_a_name_are_preserved():
+    """Only trailing suffixes are legal entity markers. "Corporate Express" and
+    "Company Store" are just names."""
+    from dedup import normalize_company_name
+
+    assert "corporate" in normalize_company_name("Corporate Express")
+    assert "company" in normalize_company_name("Company Store")
+    assert normalize_company_name("Incorporated Sundries") != normalize_company_name("Sundries")
+
+
+def test_normalisation_is_idempotent():
+    """Running it twice must not strip more than running it once — otherwise
+    keys built at different points in the pipeline disagree."""
+    from dedup import normalize_company_name
+
+    for name in ("Acme Corp, LLC", "Widget Co., Ltd.", "Plain Name"):
+        once = normalize_company_name(name)
+        assert normalize_company_name(once) == once, name
+
+
+def test_vs_dedup_ignores_a_stale_persisted_company_norm():
+    """vanillasoft_leads.company_norm was computed by normalize_company_name at
+    IMPORT time and stored. Any change to that function — like the suffix fix
+    above — leaves 18k+ persisted keys that no freshly-normalised name can ever
+    match, and dedup silently stops catching them.
+
+    The lookup must therefore re-derive the key from company_name rather than
+    trust the stored column. A persisted derived value cannot be trusted when
+    the deriving function is still evolving.
+    """
+    from export_dedup import get_previously_exported
+
+    db = MagicMock(name="db")
+    db.get_exported_company_ids.return_value = {}
+    db.get_vs_dedup_index.return_value = [{
+        "company_name": "Acme Corp, LLC",
+        "company_norm": "acme corp",          # what the OLD function produced
+        "phone_business": "", "phone_mobile": "", "phone_home": "",
+        "zip": "75201", "state": "TX", "lead_status": "New",
+        "added_date": "2026-07-01",
+    }]
+
+    lookup = get_previously_exported(db, days_back=365)
+
+    from dedup import normalize_company_name
+    fresh_key = normalize_company_name("Acme Corporation")
+    assert fresh_key in lookup["vs_by_name"], (
+        f"stale stored key blocked the match; index holds "
+        f"{list(lookup['vs_by_name'])} but a fresh name normalises to {fresh_key!r}"
+    )
+
+
+def test_vs_dedup_falls_back_to_the_stored_norm_when_the_name_is_missing():
+    """Messy imports do occur — a row with no company_name must still index."""
+    from export_dedup import get_previously_exported
+
+    db = MagicMock(name="db")
+    db.get_exported_company_ids.return_value = {}
+    db.get_vs_dedup_index.return_value = [{
+        "company_name": "", "company_norm": "legacy key",
+        "phone_business": "", "phone_mobile": "", "phone_home": "",
+        "zip": "", "state": "", "lead_status": "", "added_date": "2026-07-01",
+    }]
+
+    lookup = get_previously_exported(db, days_back=365)
+
+    assert "legacy key" in lookup["vs_by_name"]

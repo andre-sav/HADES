@@ -63,8 +63,16 @@ def get_previously_exported(db, days_back: int = 365,
     vs_by_phone: dict[str, dict] = {}          # person-level: standalone proof
     vs_by_company_phone: dict[str, dict] = {}  # company-level: needs ZIP
     for entry in db.get_vs_dedup_index(days_back=days_back):
-        if entry.get("company_norm"):
-            vs_by_name.setdefault(entry["company_norm"], []).append(entry)
+        # Re-derive the key rather than trusting the stored company_norm.
+        # That column was computed by normalize_company_name at IMPORT time,
+        # so any change to that function (the suffix-stripping fix, the HTML
+        # entity fix) strands every persisted key: no freshly-normalised name
+        # can match them, and VS dedup silently stops catching those leads
+        # across 18k+ rows. Fall back to the stored value only when the row
+        # has no company_name to derive from (HADES-7qi).
+        key = normalize_company_name(entry.get("company_name") or "") or entry.get("company_norm")
+        if key:
+            vs_by_name.setdefault(key, []).append(entry)
         # Two indexes, because a match on the VS "Business" column is only
         # company-level evidence and needs ZIP corroboration (N2-07).
         for key in _VS_PERSON_PHONE_KEYS:
