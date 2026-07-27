@@ -834,8 +834,15 @@ def file_mtime_iso(path) -> str | None:
         return None
 
 
-def parse_manual_zip_list(text) -> tuple[list[str], list[str]]:
-    """Parse a pasted ZIP list into (usable, skipped), deduped, order preserved.
+def parse_manual_zip_list(text) -> tuple[list[str], list[str], list[tuple[str, str]]]:
+    """Parse a pasted ZIP list into (usable, skipped, adjusted).
+
+    `adjusted` carries (as typed -> as used) for every entry normalisation
+    CHANGED, so the page can show the transformation instead of applying it
+    silently. That matters most for 4-digit input: padding "1001" to "01001" is
+    right for a spreadsheet that ate a New England leading zero, but an
+    operator halfway through typing "75201" gets "07520" — a real ZIP in New
+    Jersey. Recovering the value and naming it beats choosing one silently.
 
     Manual-ZIP mode used to keep only tokens that were exactly five digits and
     silently drop the rest, so a paste from freemaptools or a spreadsheet lost
@@ -846,10 +853,11 @@ def parse_manual_zip_list(text) -> tuple[list[str], list[str]]:
     tokens are reported back so the page can name them.
     """
     if not text:
-        return [], []
+        return [], [], []
 
     usable: list[str] = []
     skipped: list[str] = []
+    adjusted: list[tuple[str, str]] = []
     seen: set[str] = set()
     for token in str(text).replace("\n", ",").split(","):
         token = token.strip()
@@ -857,9 +865,11 @@ def parse_manual_zip_list(text) -> tuple[list[str], list[str]]:
             continue
         normalized = normalize_zip(token)
         if normalized and len(normalized) == 5:
+            if normalized != token:
+                adjusted.append((token, normalized))
             if normalized not in seen:
                 seen.add(normalized)
                 usable.append(normalized)
         else:
             skipped.append(token)
-    return usable, skipped
+    return usable, skipped, adjusted

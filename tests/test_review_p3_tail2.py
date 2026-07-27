@@ -124,7 +124,7 @@ def test_manual_zips_recovers_the_shapes_normalize_zip_understands():
     forms. Dropping them loses search coverage the operator asked for."""
     from utils import parse_manual_zip_list
 
-    valid, skipped = parse_manual_zip_list("75201, 75201-1234, 1001, 94116")
+    valid, skipped, _adj = parse_manual_zip_list("75201, 75201-1234, 1001, 94116")
 
     assert valid == ["75201", "01001", "94116"], valid
     assert skipped == []
@@ -133,7 +133,7 @@ def test_manual_zips_recovers_the_shapes_normalize_zip_understands():
 def test_manual_zips_reports_what_it_could_not_use():
     from utils import parse_manual_zip_list
 
-    valid, skipped = parse_manual_zip_list("75201, notazip, 94116, XX")
+    valid, skipped, _adj = parse_manual_zip_list("75201, notazip, 94116, XX")
 
     assert valid == ["75201", "94116"], valid
     assert skipped == ["notazip", "XX"], skipped
@@ -142,7 +142,7 @@ def test_manual_zips_reports_what_it_could_not_use():
 def test_manual_zips_deduplicates_while_preserving_order():
     from utils import parse_manual_zip_list
 
-    valid, _ = parse_manual_zip_list("75201, 75201-9999, 94116, 75201")
+    valid, _skip, _adj = parse_manual_zip_list("75201, 75201-9999, 94116, 75201")
 
     assert valid == ["75201", "94116"], valid
 
@@ -150,7 +150,7 @@ def test_manual_zips_deduplicates_while_preserving_order():
 def test_manual_zips_accepts_newlines_and_whitespace():
     from utils import parse_manual_zip_list
 
-    valid, skipped = parse_manual_zip_list(" 75201 \n94116\n\n 60601 ")
+    valid, skipped, _adj = parse_manual_zip_list(" 75201 \n94116\n\n 60601 ")
 
     assert valid == ["75201", "94116", "60601"], valid
     assert skipped == []
@@ -159,8 +159,8 @@ def test_manual_zips_accepts_newlines_and_whitespace():
 def test_manual_zips_on_empty_input():
     from utils import parse_manual_zip_list
 
-    assert parse_manual_zip_list("") == ([], [])
-    assert parse_manual_zip_list(None) == ([], [])
+    assert parse_manual_zip_list("") == ([], [], [])
+    assert parse_manual_zip_list(None) == ([], [], [])
 
 
 # --------------------------------------------------------------------------
@@ -309,3 +309,73 @@ def test_vs_dedup_falls_back_to_the_stored_norm_when_the_name_is_missing():
     lookup = get_previously_exported(db, days_back=365)
 
     assert "legacy key" in lookup["vs_by_name"]
+
+
+def test_vs_zip_corroboration_normalises_both_sides():
+    """vanillasoft_leads.zip is normalize_zip() output PERSISTED at import
+    time, and the franchise-safety corroboration compares it against a freshly
+    normalised contact ZIP. Same trap as company_norm: a change to
+    normalize_zip strands the stored side, the ZIP check stops corroborating,
+    and the dedup match is rejected — a duplicate lead ships.
+
+    Measured exposure today is nil (all 293k stored ZIPs are 5-digit and
+    re-normalise to themselves), but the class has now bitten twice, so the
+    comparison normalises both sides rather than trusting the stored value.
+    """
+    from export_dedup import _match_vs_lead
+
+    entry = {"zip": "1001", "phone_business": "5551112222"}  # un-normalised
+    contact = {"zipCode": "01001", "phone": "555-111-2222"}
+
+    match = _match_vs_lead(
+        contact, vs_by_name={}, vs_by_phone={},
+        vs_by_company_phone={"5551112222": entry},
+    )
+
+    assert match is entry, "a differently-formatted stored ZIP blocked corroboration"
+
+
+def test_vs_name_branch_also_normalises_the_stored_zip():
+    """Three call sites compare the stored ZIP; the name branch is the one a
+    regex sweep missed. Sibling paths need enumerating, not pattern-matching."""
+    from export_dedup import _match_vs_lead
+    from dedup import normalize_company_name
+
+    entry = {"zip": "1001", "company_name": "Acme"}
+    match = _match_vs_lead(
+        {"companyName": "Acme", "zipCode": "01001"},
+        vs_by_name={normalize_company_name("Acme"): [entry]},
+        vs_by_phone={}, vs_by_company_phone={},
+    )
+
+    assert match is entry
+
+
+def test_a_genuinely_different_zip_still_blocks_the_match():
+    """The corroboration must keep working — normalising both sides must not
+    turn the franchise guard into a rubber stamp."""
+    from export_dedup import _match_vs_lead
+    from dedup import normalize_company_name
+
+    entry = {"zip": "90210", "company_name": "Acme"}
+    match = _match_vs_lead(
+        {"companyName": "Acme", "zipCode": "01001"},
+        vs_by_name={normalize_company_name("Acme"): [entry]},
+        vs_by_phone={}, vs_by_company_phone={},
+    )
+
+    assert match is None, "different ZIPs must not corroborate"
+
+
+def test_manual_zips_reports_entries_it_had_to_reinterpret():
+    """Padding "1001" to "01001" is right for a spreadsheet that ate a leading
+    zero — but an operator halfway through typing "75201" gets "07520", a real
+    ZIP in New Jersey. The transformation has to be visible, not silent."""
+    from utils import parse_manual_zip_list
+
+    valid, skipped, adjusted = parse_manual_zip_list("75201, 1001, 75201-1234")
+
+    assert valid == ["75201", "01001"], valid
+    assert ("1001", "01001") in adjusted
+    assert ("75201-1234", "75201") in adjusted
+    assert not any(raw == "75201" for raw, _ in adjusted), "unchanged entries must not be listed"

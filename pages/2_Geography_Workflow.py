@@ -752,7 +752,13 @@ if has_operator:
         # NAME anything genuinely unusable — the old filter kept only exact
         # 5-digit tokens and said nothing, so a paste of 50 ZIPs could search
         # 47 with no indication (HADES-7qi).
-        zip_codes, _skipped_zips = parse_manual_zip_list(manual_zips)
+        zip_codes, _skipped_zips, _adjusted_zips = parse_manual_zip_list(manual_zips)
+        if _adjusted_zips:
+            st.caption(
+                "Interpreted "
+                + ", ".join(f"`{raw}` as **{used}**" for raw, used in _adjusted_zips[:6])
+                + ("…" if len(_adjusted_zips) > 6 else "")
+            )
         if _skipped_zips:
             st.warning(
                 f"Skipped {len(_skipped_zips)} entr"

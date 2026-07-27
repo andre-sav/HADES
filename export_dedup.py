@@ -89,6 +89,19 @@ def get_previously_exported(db, days_back: int = 365,
             "vs_by_company_phone": vs_by_company_phone}
 
 
+def _entry_zip(entry: dict) -> str | None:
+    """Normalise a STORED vanillasoft_leads.zip before comparing it.
+
+    That column is normalize_zip() output persisted at import time, so it is a
+    derived value frozen at whatever the function did then. Comparing it raw
+    against a freshly normalised contact ZIP means any future change to
+    normalize_zip silently stops the franchise-safety corroboration from
+    matching, and a duplicate lead ships. Cheap to re-derive; the class has
+    already bitten once via company_norm (HADES-7qi).
+    """
+    return normalize_zip(entry.get("zip") or "")
+
+
 def _match_vs_lead(contact: dict, vs_by_name: dict, vs_by_phone: dict,
                    vs_by_company_phone: dict | None = None) -> dict | None:
     """Match a contact against VanillaSoft history.
@@ -118,19 +131,19 @@ def _match_vs_lead(contact: dict, vs_by_name: dict, vs_by_phone: dict,
             if not ph:
                 continue
             entry = vs_by_company_phone.get(ph)
-            if entry and entry.get("zip") == czip:
+            if entry and _entry_zip(entry) == czip:
                 return entry
         for f in _COMPANY_PHONE_FIELDS:
             ph = normalize_phone(contact.get(f))
             entry = vs_by_phone.get(ph) if ph else None
-            if entry and entry.get("zip") == czip:
+            if entry and _entry_zip(entry) == czip:
                 return entry
 
     if vs_by_name and czip:
         normalized = normalize_company_name(contact.get("companyName", "") or "")
         if normalized:
             for entry in vs_by_name.get(normalized, []):
-                if entry.get("zip") and entry["zip"] == czip:
+                if _entry_zip(entry) == czip:
                     return entry
     return None
 
