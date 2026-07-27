@@ -119,7 +119,10 @@ def collect_verdicts(db) -> tuple[list[dict], dict]:
 
     # 4. mass-delete signature in the mutation log
     try:
-        verdicts.append(evaluate_mutation_burst(db.get_recent_mutations(limit=500)))
+        # Scope to deletes (N2 tail): the newest-N-of-any-op window let
+        # ordinary inserts push a real delete burst out of view.
+        verdicts.append(evaluate_mutation_burst(
+            db.get_recent_mutations(limit=500, op="delete")))
     except Exception as exc:
         logger.warning("mutation burst check failed: %r", exc, exc_info=True)
         verdicts.append({"severity": "unknown",

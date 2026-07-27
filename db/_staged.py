@@ -174,10 +174,24 @@ class StagedExportsMixin:
             )
             count = rows[0][0] if rows else 0
             if count:
+                # The single most destructive, irreversible operation in the
+                # system was the ONE write path the audit trail could not see
+                # (N2 tail). Record which ids are about to vanish, before they do.
+                doomed = self.execute(
+                    f"SELECT id FROM {table} "
+                    "WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)",
+                    (f"-{days} days",),
+                )
                 self.execute_write(
                     f"DELETE FROM {table} "
                     "WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)",
                     (f"-{days} days",),
+                )
+                self.log_mutation(
+                    table, ",".join(str(r[0]) for r in doomed), "delete",
+                    before={"purged_ids": [r[0] for r in doomed],
+                            "count": count, "window_days": days},
+                    after=None, actor="purge-job",
                 )
             result[table] = count
         return result

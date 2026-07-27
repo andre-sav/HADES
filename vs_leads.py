@@ -19,12 +19,16 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from dedup import normalize_company_name
-from utils import normalize_zip
+from utils import normalize_phone_key, normalize_zip
 
 logger = logging.getLogger(__name__)
 
 _ADDED_DATE_FORMAT = "%m/%d/%Y %I:%M:%S %p"
 _HADES_MARKER = re.compile(r"HADES-", re.IGNORECASE)
+
+# Sorts after any real date, so a row whose Added Date could not be parsed
+# stays inside the dedup window rather than silently falling out of it.
+_UNKNOWN_DATE_SENTINEL = "9999-12-31 00:00:00"
 
 
 @dataclass
@@ -32,6 +36,7 @@ class VsParse:
     rows: list[dict] = field(default_factory=list)
     total_rows: int = 0
     skipped_unmatchable: int = 0
+    skipped_no_id: int = 0
     hades_count: int = 0
     bad_dates: int = 0
 
@@ -39,14 +44,10 @@ class VsParse:
 def normalize_phone(raw: str | None) -> str:
     """Reduce a phone to a 10-digit match key ('' when not a usable phone).
 
-    An 11-digit number with a leading 1 is a country-coded US number.
+    Thin alias for utils.normalize_phone_key so the VS and in-session dedup
+    paths cannot drift apart on what counts as a valid number (N2 tail).
     """
-    if not raw:
-        return ""
-    digits = re.sub(r"\D", "", str(raw))
-    if len(digits) == 11 and digits.startswith("1"):
-        digits = digits[1:]
-    return digits if len(digits) == 10 else ""
+    return normalize_phone_key(raw)
 
 
 def _text_stream(file, filename: str | None):
@@ -100,6 +101,14 @@ def _parse_row(raw: dict, result: VsParse) -> dict | None:
     def cell(key: str) -> str:
         return (raw.get(key) or "").strip()
 
+    # contact_id is the PRIMARY KEY and the upsert is INSERT OR REPLACE, so
+    # every blank id collides on "" and each row silently overwrites the last
+    # (N2 tail). Skip and count instead of collapsing thousands of rows to one.
+    contact_id = cell("ContactID")
+    if not contact_id:
+        result.skipped_no_id += 1
+        return None
+
     company = cell("Company")
     phones = {
         "phone_business": normalize_phone(cell("Business")),
@@ -110,7 +119,12 @@ def _parse_row(raw: dict, result: VsParse) -> dict | None:
         result.skipped_unmatchable += 1
         return None
 
-    added_date = ""
+    # An unparseable date must NOT become "" — get_vs_dedup_index filters on
+    # `added_date >= datetime(...)`, and "" loses that lexicographic
+    # comparison, so the row would drop out of the dedup window forever and
+    # its company could be re-contacted (N2 tail). Fail safe: treat unknown
+    # as recent so the row keeps protecting against duplicates.
+    added_date = _UNKNOWN_DATE_SENTINEL
     raw_date = cell("Added Date")
     if raw_date:
         try:
@@ -124,7 +138,7 @@ def _parse_row(raw: dict, result: VsParse) -> dict | None:
         result.hades_count += 1
 
     return {
-        "contact_id": cell("ContactID"),
+        "contact_id": contact_id,
         "company_name": company,
         "company_norm": normalize_company_name(company),
         **phones,

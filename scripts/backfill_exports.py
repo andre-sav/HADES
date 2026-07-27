@@ -31,6 +31,9 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making API calls")
     args = parser.parse_args()
 
+    from observability import init_sentry
+    init_sentry(component="backfill-exports")  # no-op without SENTRY_DSN
+
     from turso_db import get_database
     db = get_database()
 

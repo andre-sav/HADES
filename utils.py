@@ -575,6 +575,18 @@ def normalize_phone(phone: str) -> str:
     return digits
 
 
+def normalize_phone_key(phone) -> str:
+    """Canonical phone MATCH KEY: 10 digits, or "" when not a usable number.
+
+    Distinct from normalize_phone(), which returns raw digits and backs
+    format_phone(). Matching needs a stricter contract — a 3- or 7-digit
+    fragment must never become a dedup key and collide by coincidence.
+    One implementation so every dedup path agrees on validity (N2 tail).
+    """
+    digits = normalize_phone(str(phone) if phone is not None else "")
+    return digits if len(digits) == 10 else ""
+
+
 def format_phone(phone: str) -> str:
     """Format phone number as (XXX) XXX-XXXX."""
     if not phone:
