@@ -153,7 +153,8 @@ class SchemaMixin:
                 pushed_at TEXT,
                 push_results_json TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                deleted_at TIMESTAMP
+                deleted_at TIMESTAMP,
+                operator_name TEXT
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_staged_created ON staged_exports(created_at)",
@@ -273,6 +274,9 @@ class SchemaMixin:
             # Soft delete (HADES-l3n) — recoverable for 90 days
             ("operators", "deleted_at", "ALTER TABLE operators ADD COLUMN deleted_at TIMESTAMP"),
             ("staged_exports", "deleted_at", "ALTER TABLE staged_exports ADD COLUMN deleted_at TIMESTAMP"),
+            # Attribution that outlives the operator row (review N2-09): the
+            # 90-day purge hard-deletes operators, orphaning operator_id.
+            ("staged_exports", "operator_name", "ALTER TABLE staged_exports ADD COLUMN operator_name TEXT"),
         ]
 
         for table, column, statement in migrations:

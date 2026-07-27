@@ -115,9 +115,15 @@ SENTRY_DSN = "https://...@...ingest.sentry.io/..."  # Error monitoring (optional
 idempotent and a no-op without `SENTRY_DSN`. Called from `utils.require_auth()`
 (every page's first call — Streamlit runs pages as independent scripts, so an
 `app.py`-only init would miss them) and from each headless script's `main()`,
-tagged by `component`. Privacy: `send_default_pii=False` **and**
-`include_local_variables=False` — stack frames here hold lead dicts with names,
-phones and emails; a `before_send` hook also redacts credential-shaped keys.
+tagged by `component`. Privacy, in layers: `send_default_pii=False` (no
+IP/cookies) and `include_local_variables=False` (stack frames here hold lead
+dicts with names, phones and emails) are the primary controls. On top of those,
+`before_send` + `before_breadcrumb` scrub credential-shaped keys AND contact PII
+(emails, phone numbers, name-shaped fields) from the paths that actually carry
+free text — the default `LoggingIntegration` turns every `logger.error` into an
+event and every `logger.info/warning` into a breadcrumb, message text included.
+*(An earlier version scrubbed only `event["extra"]`, which nothing in this
+codebase ever populates — it was dead code; review N2-03.)*
 `SENTRY_DSN` must be set in **three** places to be fully live: Streamlit Cloud
 secrets (UI), GitHub Actions secrets (crons — already wired into all three
 workflow YAMLs), and `.streamlit/secrets.toml` for local use.
