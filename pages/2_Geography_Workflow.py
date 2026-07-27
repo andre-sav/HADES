@@ -56,6 +56,7 @@ from utils import (
     get_default_target_contacts,
     surface_data_anomaly,
     file_mtime_iso,
+    parse_manual_zip_list,
 )
 from monitoring import (
     evaluate_data_freshness,
@@ -747,8 +748,18 @@ if has_operator:
         )
 
         # Parse inputs for manual mode
-        raw_zips = [z.strip() for z in manual_zips.replace("\n", ",").split(",") if z.strip()]
-        zip_codes = [z for z in raw_zips if z.isdigit() and len(z) == 5]
+        # Recover ZIP+4 and zero-dropped forms rather than dropping them, and
+        # NAME anything genuinely unusable — the old filter kept only exact
+        # 5-digit tokens and said nothing, so a paste of 50 ZIPs could search
+        # 47 with no indication (HADES-7qi).
+        zip_codes, _skipped_zips = parse_manual_zip_list(manual_zips)
+        if _skipped_zips:
+            st.warning(
+                f"Skipped {len(_skipped_zips)} entr"
+                f"{'y' if len(_skipped_zips) == 1 else 'ies'} that are not "
+                f"recognisable ZIP codes: {', '.join(_skipped_zips[:8])}"
+                + ("…" if len(_skipped_zips) > 8 else "")
+            )
         radius = 0  # No radius for manual ZIP list
         center_zip_clean = None  # Not applicable in manual mode
         is_valid_zip = False  # Not applicable in manual mode

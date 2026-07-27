@@ -5,9 +5,13 @@ name: ZoomInfo Health Check
 
 on:
   schedule:
-    # 12:00 UTC = 8:00 AM ET — runs each morning before business hours so a
-    # credit/entitlement problem is flagged before the team pulls lists.
-    - cron: '0 12 * * *'
+    # 11:00 UTC — deliberately ONE HOUR AHEAD of intent-poll (12:00 UTC).
+    # Both were previously at 12:00, which defeated the point: GitHub gives no
+    # ordering guarantee between workflows, so the check meant to flag a
+    # credit/entitlement problem BEFORE the team pulls lists was racing the
+    # pipeline it guards, and both hit the ZoomInfo API at the same instant.
+    # tests/test_review_p3_tail2.py asserts the ordering (HADES-7qi).
+    - cron: '0 11 * * *'
   workflow_dispatch: {}
 
 concurrency:

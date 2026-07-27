@@ -832,3 +832,34 @@ def file_mtime_iso(path) -> str | None:
         ).isoformat()
     except OSError:
         return None
+
+
+def parse_manual_zip_list(text) -> tuple[list[str], list[str]]:
+    """Parse a pasted ZIP list into (usable, skipped), deduped, order preserved.
+
+    Manual-ZIP mode used to keep only tokens that were exactly five digits and
+    silently drop the rest, so a paste from freemaptools or a spreadsheet lost
+    ZIP+4 and zero-dropped entries without saying so — the operator asked for
+    N ZIPs and got fewer, with no notice (HADES-7qi).
+
+    Anything normalize_zip can recover is recovered; only genuinely unusable
+    tokens are reported back so the page can name them.
+    """
+    if not text:
+        return [], []
+
+    usable: list[str] = []
+    skipped: list[str] = []
+    seen: set[str] = set()
+    for token in str(text).replace("\n", ",").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        normalized = normalize_zip(token)
+        if normalized and len(normalized) == 5:
+            if normalized not in seen:
+                seen.add(normalized)
+                usable.append(normalized)
+        else:
+            skipped.append(token)
+    return usable, skipped

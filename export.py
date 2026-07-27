@@ -12,6 +12,9 @@ from utils import VANILLASOFT_COLUMNS, ZOOMINFO_TO_VANILLASOFT, format_phone
 
 logger = logging.getLogger(__name__)
 
+# Persisted round-robin position for Contact Owner assignment (HADES-7qi).
+OWNER_CURSOR_KEY = "export_owner_cursor"
+
 
 def contact_has_core_data(contact: dict) -> bool:
     """Return True if a contact carries real, usable field data.
@@ -295,13 +298,37 @@ def export_leads_to_csv(
     writer = csv.DictWriter(output, fieldnames=VANILLASOFT_COLUMNS, extrasaction="ignore")
     writer.writeheader()
 
+    # Round-robin resumes where the last export stopped. Restarting at
+    # agents[0] every time gave the front of the list systematically more
+    # leads: three exports of 3 leads against 5 agents assigned a, b, c three
+    # times over and never touched d or e (HADES-7qi).
+    owner_offset = 0
+    if agents and db is not None:
+        try:
+            owner_offset = int(db.get_sync_value(OWNER_CURSOR_KEY) or 0)
+        except (TypeError, ValueError):
+            owner_offset = 0  # corrupt cursor must not break the export
+        except Exception:
+            logger.warning("Could not read Contact Owner cursor", exc_info=True)
+
     for i, lead in enumerate(leads):
         # Round-robin Contact Owner assignment (guard against empty list)
-        contact_owner = agents[i % len(agents)] if agents and len(agents) > 0 else ""
+        contact_owner = (
+            agents[(owner_offset + i) % len(agents)] if agents and len(agents) > 0 else ""
+        )
         row = build_vanillasoft_row(
             lead, operator, data_source, batch_id=batch_id, contact_owner=contact_owner
         )
         writer.writerow(row)
+
+    # Advance the cursor so the NEXT export continues the rotation. Written
+    # after the rows are built: a failure mid-build should not skip agents.
+    if agents and db is not None and leads:
+        try:
+            db.set_sync_value(OWNER_CURSOR_KEY, str((owner_offset + len(leads)) % len(agents)))
+        except Exception:
+            # Fairness is best-effort; never fail an export over it.
+            logger.warning("Could not persist Contact Owner cursor", exc_info=True)
 
     # utf-8-sig BOM: the sales floor opens these in Excel, which renders
     # BOM-less UTF-8 as mojibake (the import side reads utf-8-sig for the
