@@ -98,17 +98,30 @@ def compute_conversion_rates(db) -> dict:
         if r.get("outcome") == "delivery":
             emp_buckets[bucket]["delivered"] += 1
 
-    # Compute rates and scale
-    emp_rates = [v["delivered"] / v["total"] for v in emp_buckets.values() if v["total"] > 0]
-    if emp_rates:
-        emp_min, emp_max = min(emp_rates), max(emp_rates)
-        for v in emp_buckets.values():
-            if v["total"] > 0:
-                v["rate"] = v["delivered"] / v["total"]
-                v["score"] = min_max_scale(v["rate"], emp_min, emp_max)
-            else:
-                v["rate"] = 0.0
-                v["score"] = SCORE_MIN
+    # Compute rates, then scale using ONLY sufficiently-sampled buckets.
+    #
+    # Per-SIC rates have applied MIN_RECORDS from the start; the employee
+    # buckets applied nothing, so a bucket holding a single delivered lead
+    # scored 1.0 — the maximum — and, because the min-max range is derived from
+    # the bucket rates themselves, dragged the other two buckets with it. One
+    # record moved a well-sampled bucket from 100 to 73 in test. These scores
+    # are written into icp.yaml and drive 20% of the geography composite
+    # (HADES-7qi).
+    for v in emp_buckets.values():
+        v["rate"] = (v["delivered"] / v["total"]) if v["total"] > 0 else 0.0
+
+    reliable_emp = [v for v in emp_buckets.values() if v["total"] >= MIN_RECORDS]
+    if reliable_emp:
+        emp_min = min(v["rate"] for v in reliable_emp)
+        emp_max = max(v["rate"] for v in reliable_emp)
+    for v in emp_buckets.values():
+        # None, not SCORE_MIN: "we cannot say" is different from "this is bad",
+        # and SCORE_MIN would silently propose downgrading a thin bucket.
+        v["score"] = (
+            min_max_scale(v["rate"], emp_min, emp_max)
+            if reliable_emp and v["total"] >= MIN_RECORDS
+            else None
+        )
 
     # --- Overall ---
     total_d = sum(1 for r in rows if r.get("outcome") == "delivery")
@@ -168,7 +181,10 @@ def compare_to_current(rates: dict, config_path: str | None = None) -> list[dict
     # Employee comparisons
     bucket_to_range = {"50-100": (50, 100), "101-500": (101, 500), "501+": (501, 999999)}
     for bucket, v in rates.get("employee_scores", {}).items():
-        if v["total"] == 0:
+        # An under-sampled bucket carries no score, so there is nothing to
+        # suggest — offering one would put a number backed by a handful of
+        # leads in front of an operator with an Apply button.
+        if v["total"] == 0 or v.get("score") is None:
             continue
         min_emp, max_emp = bucket_to_range[bucket]
         # Find matching current score
