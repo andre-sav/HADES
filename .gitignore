@@ -52,3 +52,16 @@ _bmad-output/
 .dolt/
 *.db
 .beads-credential-key
+
+# Lead exports — these carry real contact PII (names, phones, emails) and must
+# never reach the repo. The Geography/Intent workflows write them to cwd.
+/HADES-geography-*.csv
+/HADES-intent-*.csv
+
+# Manual UI test screenshots
+/system-test/
+
+# Flattened-codebase snapshots for external review. Regenerate on demand; a
+# stale copy polluted a CodeRabbit pass with findings that were already fixed.
+/HADES_CODEBASE_FLAT.md
+/REVIEW_PROMPT.md
