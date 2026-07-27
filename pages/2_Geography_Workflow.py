@@ -49,7 +49,9 @@ from utils import (
     get_default_phone_fields,
     get_default_radius,
     get_default_target_contacts,
+    surface_data_anomaly,
 )
+from monitoring import evaluate_lead_states, evaluate_radius_invariants
 from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, distance_between_zips
 from expand_search import (
     expand_search,
@@ -63,6 +65,7 @@ from expand_search import (
     DEFAULT_START_EMPLOYEE_MAX,
 )
 from ui_components import (
+    data_anomaly_banner,
     inject_base_styles,
     page_header,
     step_indicator,
@@ -241,6 +244,9 @@ page_header(
     caption="Find contacts within an operator's service territory",
     right_content=(status_badge("info", f"{credits:,} credits"), "This week"),
 )
+
+# Runtime invariant violations from the radius search or enrichment (HADES-av6).
+data_anomaly_banner()
 
 # =============================================================================
 # LAST RUN INDICATOR
@@ -652,6 +658,11 @@ if has_operator:
 
         if is_valid_zip:
             calculated_zips = get_zips_in_radius(center_zip_clean, radius)
+            surface_data_anomaly(
+                evaluate_radius_invariants(center_zip_clean, radius, calculated_zips),
+                context=f"radius search {center_zip_clean} @ {radius}mi",
+                store=st.session_state,
+            )
             zip_codes = [z["zip"] for z in calculated_zips]
             states = get_states_from_zips(calculated_zips)
             state_counts = get_state_counts_from_zips(calculated_zips)
@@ -1142,6 +1153,16 @@ if has_operator:
         """Process expand_search result and populate session state."""
         st.session_state.geo_expansion_result = result
         _rl = st.session_state.get("geo_run_logger")
+
+        # Expansion sweeps run on a background thread and cannot touch session
+        # state, so their invariant verdicts travel back in the result dict.
+        # Raise the same banner here, on the script thread (HADES-av6).
+        for _violation in result.get("invariant_violations") or []:
+            surface_data_anomaly(
+                {"severity": "warning", "message": _violation, "violations": []},
+                context="expansion radius search",
+                store=st.session_state,
+            )
 
         if result.get("error"):
             st.error(f"Search failed: {result['error']}")
@@ -1730,6 +1751,19 @@ if (st.session_state.geo_selection_confirmed and st.session_state.geo_selected_c
                     enriched = client.enrich_contacts_batch(
                         person_ids=person_ids,
                         output_fields=DEFAULT_ENRICH_OUTPUT_FIELDS,
+                    )
+                    # Auto-expansion can widen the radius across a state line, so
+                    # the expectation is every state actually searched — using
+                    # only the initial set would flag legitimate border leads.
+                    _expected_states = (
+                        (st.session_state.get("geo_expansion_result") or {}).get("states_searched")
+                        or (st.session_state.get("geo_last_search_params") or {}).get("states")
+                        or []
+                    )
+                    surface_data_anomaly(
+                        evaluate_lead_states(enriched, _expected_states),
+                        context="contact enrichment",
+                        store=st.session_state,
                     )
                     st.session_state.geo_enriched_contacts = enriched
                     st.session_state.geo_enrichment_done = True

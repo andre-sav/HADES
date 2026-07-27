@@ -17,11 +17,12 @@ from zoominfo_client import (
 )
 from scoring import score_geography_leads, get_priority_label
 from export import export_leads_to_csv
-from utils import get_sic_codes, get_employee_minimum, get_employee_maximum
+from utils import get_sic_codes, get_employee_minimum, get_employee_maximum, surface_data_anomaly
+from monitoring import evaluate_radius_invariants
 from geo import get_zips_in_radius, get_states_from_zips
 from cost_tracker import CostTracker
 from turso_db import get_database
-from ui_components import inject_base_styles, page_header
+from ui_components import inject_base_styles, page_header, data_anomaly_banner
 
 st.set_page_config(page_title="Pipeline Test (Dev)", page_icon="🧪", layout="wide")
 
@@ -36,6 +37,7 @@ from utils import require_auth
 require_auth()
 
 page_header("Pipeline Test", "Verify the full ZoomInfo pipeline with a single contact (1 credit)")
+data_anomaly_banner()
 
 # --- Session State ---
 if "test_request_confirmed" not in st.session_state:
@@ -73,6 +75,11 @@ states = []
 
 if test_zip and len(test_zip) == 5 and test_zip.isdigit():
     calculated_zips = get_zips_in_radius(test_zip, test_radius)
+    surface_data_anomaly(
+        evaluate_radius_invariants(test_zip, test_radius, calculated_zips),
+        context=f"pipeline-test radius search {test_zip} @ {test_radius}mi",
+        store=st.session_state,
+    )
     zip_codes = [z["zip"] for z in calculated_zips]
     states = get_states_from_zips(calculated_zips)
     valid_config = bool(zip_codes and states)

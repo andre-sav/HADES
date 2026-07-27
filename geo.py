@@ -7,6 +7,14 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data"
 
+# Most ZIPs a single (lat, lng) may legitimately be shared by. Genuine overlap
+# is rare — a PO-box ZIP sitting on its parent's internal point — while the
+# session-51 corruption put 452 SoCal ZIPs on one coordinate. Enforced at
+# rebuild time by scripts/rebuild_zip_centroids.py and at runtime by
+# monitoring.evaluate_radius_invariants; both import it from here so the two
+# gates cannot drift apart.
+MAX_SHARED_COORD = 3
+
 
 @lru_cache(maxsize=1)
 def load_zip_centroids() -> dict[str, tuple[float, float, str]]:

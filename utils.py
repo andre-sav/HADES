@@ -4,6 +4,7 @@ Includes config loading, phone cleaning, and column mapping.
 """
 
 import hmac
+import logging
 import re
 import time
 from pathlib import Path
@@ -11,6 +12,57 @@ from functools import lru_cache
 
 import streamlit as st
 import yaml
+
+logger = logging.getLogger(__name__)
+
+# What the operator sees. Deliberately terse: the detail belongs in the log,
+# where it can be read in full, not in a banner over a lead list.
+DATA_ANOMALY_BANNER = "Data anomaly detected — see logs"
+
+
+def surface_data_anomaly(verdict: dict, *, context: str, store=None) -> bool:
+    """Log a non-ok invariant verdict and raise the operator-facing banner flag.
+
+    Returns True when something was surfaced. Never raises and never halts the
+    workflow — an invariant violation means the results are suspect, not that
+    the operator should be blocked from working with them.
+
+    ``store`` is the mapping the banner flag is written to (a page passes
+    ``st.session_state``). Headless and background-thread callers pass None:
+    Streamlit's session state is not safe to touch off the script thread, so
+    they log only and hand the verdict back through their result dict instead.
+    """
+    if not verdict or verdict.get("severity", "ok") == "ok":
+        return False
+
+    # Streamlit reruns a page on every widget interaction, so an anomaly that
+    # persists would otherwise log — and page Sentry — on each rerun. Suppress
+    # the repeat log while keeping the banner up.
+    signature = (context, verdict.get("severity"), verdict.get("message"))
+    already_logged = False
+    if store is not None:
+        try:
+            seen = store.setdefault("_data_anomaly_seen", set())
+            already_logged = signature in seen
+            seen.add(signature)
+        except Exception:
+            logger.warning("Could not record data anomaly signature", exc_info=True)
+
+    if not already_logged:
+        violations = verdict.get("violations") or []
+        logger.error(
+            "Data anomaly (%s) in %s: %s%s",
+            verdict.get("severity", "unknown"),
+            context,
+            verdict.get("message", ""),
+            "".join(f"\n  - {v}" for v in violations),
+        )
+    if store is not None:
+        try:
+            store["data_anomaly"] = DATA_ANOMALY_BANNER
+        except Exception:  # a read-only or absent session state must not break the page
+            logger.warning("Could not set data anomaly banner flag", exc_info=True)
+    return True
 
 
 # --- Authentication Gate ---

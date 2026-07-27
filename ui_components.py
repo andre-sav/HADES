@@ -2643,3 +2643,25 @@ def format_contact_label(contact: dict, is_best: bool = False, show_location_typ
     line2 = " · ".join(parts)
 
     return f"{line1}\n{line2}" if line2 else line1
+
+
+def data_anomaly_banner() -> None:
+    """Surface a runtime invariant violation raised by utils.surface_data_anomaly.
+
+    Deliberately non-blocking (HADES-av6): a violation means the results on
+    screen are suspect, not that the operator should be locked out of working
+    with them. The detail lives in the logs — a banner over a lead list is the
+    wrong place for a list of offending ZIP codes.
+
+    Dismissing clears the flag for this session; a fresh violation re-raises it.
+    """
+    message = st.session_state.get("data_anomaly")
+    if not message:
+        return
+    col_msg, col_dismiss = st.columns([6, 1])
+    with col_msg:
+        st.error(f"⚠️ {message}")
+    with col_dismiss:
+        if st.button("Dismiss", key="_dismiss_data_anomaly"):
+            st.session_state.pop("data_anomaly", None)
+            st.rerun()
