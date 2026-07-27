@@ -315,3 +315,105 @@ def test_freshness_window_is_tunable():
 
     assert evaluate_scheduled_job_freshness(stamp, now=now, max_age_hours=48)["severity"] == "ok"
     assert evaluate_scheduled_job_freshness(stamp, now=now, max_age_hours=24)["severity"] != "ok"
+
+
+# --------------------------------------------------------------------------
+# 7. SIC lookup was exact-string — every messy shape scored the default
+# --------------------------------------------------------------------------
+
+def _a_real_sic() -> tuple[str, int]:
+    """A SIC code that genuinely carries an explicit score in icp.yaml."""
+    from utils import load_config
+    scores = load_config()["onsite_likelihood"]["sic_scores"]
+    key = sorted(scores)[0]
+    return key, scores[key]
+
+
+def test_sic_lookup_tolerates_the_documented_messy_shapes():
+    """on-site likelihood is 25% of BOTH composites, so a missed lookup does
+    not fail — it silently mis-scores the lead at the default 40. ZoomInfo
+    sends SIC as an int, suffixed ("3599-01"), whitespace-padded and
+    zero-padded; all of them missed the exact-string lookup.
+    """
+    from utils import get_onsite_likelihood_score
+
+    key, expected = _a_real_sic()
+
+    assert get_onsite_likelihood_score(key) == expected
+    assert get_onsite_likelihood_score(int(key)) == expected
+    assert get_onsite_likelihood_score(f"{key}-01") == expected
+    assert get_onsite_likelihood_score(f"  {key}  ") == expected
+    assert get_onsite_likelihood_score(f"{key}.0") == expected
+    assert get_onsite_likelihood_score(key.zfill(5)) == expected
+
+
+def test_unknown_sic_still_falls_back_to_the_default():
+    from utils import get_onsite_likelihood_score, load_config
+
+    default = load_config()["onsite_likelihood"]["default"]
+
+    assert get_onsite_likelihood_score("9999") == default
+    assert get_onsite_likelihood_score("") == default
+    assert get_onsite_likelihood_score(None) == default
+    assert get_onsite_likelihood_score("not a sic") == default
+
+
+# --------------------------------------------------------------------------
+# 8. Scoring weights were never validated to sum to 1.0
+# --------------------------------------------------------------------------
+
+def test_shipped_weights_sum_to_one():
+    """Calibration rewrites icp.yaml, so this is a live drift risk, not a
+    hypothetical one. Weights that do not sum to 1 rescale every composite
+    silently — nothing errors, the numbers are just wrong."""
+    from utils import validate_scoring_weights
+
+    for workflow in ("intent", "geography"):
+        verdict = validate_scoring_weights(workflow)
+        assert verdict["severity"] == "ok", verdict
+
+
+def test_weight_drift_is_detected():
+    from utils import validate_scoring_weights
+
+    verdict = validate_scoring_weights(
+        "intent", weights={"signal_strength": 0.5, "onsite_likelihood": 0.25}
+    )
+
+    assert verdict["severity"] != "ok"
+    assert "0.75" in verdict["message"], verdict
+
+
+def test_empty_weights_are_reported_not_treated_as_valid():
+    from utils import validate_scoring_weights
+
+    verdict = validate_scoring_weights("intent", weights={})
+
+    assert verdict["severity"] != "ok", verdict
+
+
+# --------------------------------------------------------------------------
+# 9. score_intent_contacts had no 100-clamp
+# --------------------------------------------------------------------------
+
+def test_intent_contact_score_is_clamped_to_100():
+    """calculate_intent_score and calculate_geography_score both clamp with
+    min(100, ...); score_intent_contacts rounded the raw composite. With
+    weights that drift above 1.0 — which nothing validated — it could emit
+    scores over 100 and break every downstream priority band."""
+    from scoring import score_intent_contacts
+
+    contacts = [{
+        "id": "p1", "companyId": "c1", "companyName": "Acme",
+        "jobTitle": "Chief Executive Officer",
+        "contactAccuracyScore": "100",
+        "mobilePhone": "555-111-2222", "directPhone": "555-333-4444",
+    }]
+    company_scores = {"c1": {"_score": 100}}
+
+    scored = score_intent_contacts(
+        contacts, company_scores,
+        weights={"company_intent": 0.9, "authority": 0.9, "accuracy": 0.9, "phone": 0.9},
+    )
+
+    assert scored[0]["_score"] <= 100, scored[0]["_score"]

@@ -240,16 +240,73 @@ def get_freshness_multiplier(age_days: int) -> tuple[float, str]:
     return 0.0, "Stale"
 
 
-def get_onsite_likelihood_score(sic_code: str) -> int:
+def normalize_sic(raw) -> str:
+    """Normalize a messy SIC code to its canonical 4-digit string.
+
+    ZoomInfo sends SIC codes as ints, with industry suffixes ("3599-01"), as
+    float-ish strings ("3599.0"), whitespace-padded and zero-padded. An
+    exact-string lookup missed every one of those, and the miss is silent —
+    the lead just scores the default. Returns "" when nothing usable is found.
+    """
+    if raw is None:
+        return ""
+    match = re.match(r"\s*0*(\d{1,4})", str(raw))
+    return match.group(1).zfill(4) if match else ""
+
+
+def get_onsite_likelihood_score(sic_code) -> int:
     """Get on-site likelihood score for a SIC code.
 
     Looks up per-SIC scores derived from HLM delivery data.
     Falls back to default score for unknown SICs.
+
+    The lookup normalizes both sides: on-site likelihood is 25% of BOTH the
+    intent and geography composites, so a missed match does not fail loudly —
+    it silently mis-scores the lead at the default.
     """
     config = load_config()
     onsite = config.get("onsite_likelihood", {})
     sic_scores = onsite.get("sic_scores", {})
-    return sic_scores.get(sic_code, onsite.get("default", 40))
+    default = onsite.get("default", 40)
+
+    normalized = normalize_sic(sic_code)
+    if not normalized:
+        return default
+    # Config keys are normalized too — YAML parses unquoted 4-digit codes as
+    # ints, so a quoted/unquoted edit to icp.yaml must not change behaviour.
+    for key, value in sic_scores.items():
+        if normalize_sic(key) == normalized:
+            return value
+    return default
+
+
+def validate_scoring_weights(workflow_type: str, weights: dict | None = None) -> dict:
+    """Check that a workflow's scoring weights sum to 1.0.
+
+    Calibration rewrites config/icp.yaml, so weight drift is a live risk rather
+    than a hypothetical one — and it fails silently: nothing errors, every
+    composite is simply rescaled. Returns the standard verdict dict.
+    """
+    weights = get_scoring_weights(workflow_type) if weights is None else weights
+    if not weights:
+        return {
+            "severity": "critical",
+            "message": (
+                f"Scoring weights for {workflow_type!r} are missing or empty — "
+                "every composite falls back to hardcoded defaults."
+            ),
+        }
+
+    total = sum(float(v) for v in weights.values())
+    if abs(total - 1.0) <= 0.01:
+        return {"severity": "ok", "message": f"{workflow_type} weights sum to {total:.2f}."}
+    return {
+        "severity": "critical",
+        "message": (
+            f"Scoring weights for {workflow_type!r} sum to {total:.2f}, not 1.00 — "
+            f"every composite score is rescaled by that factor. Weights: {weights}"
+        ),
+    }
 
 
 def get_employee_scale_score(employee_count: int) -> int:

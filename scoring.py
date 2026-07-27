@@ -408,6 +408,7 @@ def merge_numeric_company_keys(
 def score_intent_contacts(
     contacts: list[dict],
     company_scores: dict[str, dict],
+    weights: dict | None = None,
 ) -> list[dict]:
     """
     Score contacts found at intent companies.
@@ -428,7 +429,7 @@ def score_intent_contacts(
         List of contacts with scoring fields added, sorted by score descending.
     """
     logger.info("Scoring %d intent contacts against %d companies", len(contacts), len(company_scores))
-    weights = get_scoring_weights("intent_contact")
+    weights = get_scoring_weights("intent_contact") if weights is None else weights
     scored = []
 
     for contact in contacts:
@@ -479,7 +480,11 @@ def score_intent_contacts(
 
         scored_contact = {
             **contact,
-            "_score": round(composite),
+            # Clamp for parity with calculate_intent_score and
+            # calculate_geography_score — both already do this. Without it,
+            # weights summing above 1.0 emit scores over 100 and every
+            # downstream priority band misreads them.
+            "_score": min(100, round(composite)),
             "_company_intent_score": company_intent_score,
             "_authority_score": authority_score,
             "_accuracy_score": accuracy_score,
