@@ -8,7 +8,7 @@ from functools import lru_cache
 
 from rapidfuzz.fuzz import token_sort_ratio
 
-from utils import load_config, normalize_phone
+from utils import load_config, normalize_phone, normalize_phone_key
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ def get_dedup_key(lead: dict) -> str:
     # priority): required_fields is an OR, so raw contacts often carry ONLY
     # directPhone/mobilePhone — keying on 'phone' alone collapsed the key to
     # '|companyname' (N-04).
-    phone = normalize_phone(
+    phone = normalize_phone_key(
         lead.get("directPhone", "") or lead.get("mobilePhone", "")
         or lead.get("phone", "") or lead.get("Business", "") or ""
     )

@@ -29,6 +29,9 @@ def main() -> int:
                         help="Parse and report stats without writing to the DB")
     args = parser.parse_args()
 
+    from observability import init_sentry
+    init_sentry(component="import-vs-leads")  # no-op without SENTRY_DSN
+
     path = Path(args.csv_path).expanduser()
     if not path.exists():
         print(f"ERROR: file not found: {path}")

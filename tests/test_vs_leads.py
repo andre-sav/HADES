@@ -112,10 +112,14 @@ class TestParseVsExport:
         result = parse_vs_export(make_csv(row))
         assert result.rows[0]["company_name"] == "Beta Inc"
 
-    def test_bad_added_date_kept_with_empty_date(self):
+    def test_bad_added_date_kept_with_far_future_sentinel(self):
+        """An unparseable date must NOT become "" — get_vs_dedup_index filters
+        on `added_date >= datetime(...)` and "" loses that lexicographic
+        comparison, dropping the row out of the dedup window forever. Fail
+        safe: sort as recent so the row keeps blocking duplicates."""
         row = '"7","Gamma LLC","TX","75201","","not a date","2145550100","","","","",""'
         result = parse_vs_export(make_csv(row))
-        assert result.rows[0]["added_date"] == ""
+        assert result.rows[0]["added_date"] == "9999-12-31 00:00:00"
         assert result.bad_dates == 1
 
     def test_utf8_sig_bom_handled(self):

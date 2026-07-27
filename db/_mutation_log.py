@@ -81,14 +81,26 @@ class MutationLogMixin:
                            op, table_name, row_id, exc_info=True)
 
     def get_recent_mutations(self, limit: int = 20,
-                             table_name: str | None = None) -> list[dict]:
-        """Recent mutations, newest first, optionally scoped to one table."""
+                             table_name: str | None = None,
+                             op: str | None = None) -> list[dict]:
+        """Recent mutations, newest first, optionally scoped to a table and/or op.
+
+        `op` matters for the burst detector: feeding it the newest N rows of
+        ANY op let ordinary inserts push a real delete burst out of the
+        window (N2 tail).
+        """
         query = ("SELECT id, ts, actor, table_name, row_id, op, before_json, after_json "
                  "FROM mutation_log")
-        params: tuple = ()
+        clauses, params_list = [], []
         if table_name:
-            query += " WHERE table_name = ?"
-            params = (table_name,)
+            clauses.append("table_name = ?")
+            params_list.append(table_name)
+        if op:
+            clauses.append("op = ?")
+            params_list.append(op)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        params: tuple = tuple(params_list)
         query += " ORDER BY id DESC LIMIT ?"
         params = params + (limit,)
         rows = self.execute(query, params)
