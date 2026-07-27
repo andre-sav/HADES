@@ -185,10 +185,16 @@ if not intent_leads and not geo_leads:
                 # leaving a leftover session operator attached would export
                 # this batch under the wrong operator's name/team (review
                 # N-05, same class as the session-46 wrong-state incident).
-                op = None
-                if export_row.get("operator_id"):
-                    op = db.get_operator(export_row["operator_id"])
-                st.session_state["geo_operator"] = op
+                # Only the GEOGRAPHY workflow owns geo_operator. Writing it
+                # for an intent batch (which never carries an operator_id)
+                # nulled the Geography page's own selection cross-page and
+                # tripped its operator-change reset, discarding an in-progress
+                # search (review N2-05).
+                if export_row["workflow_type"] == "geography":
+                    op = None
+                    if export_row.get("operator_id"):
+                        op = db.get_operator(export_row["operator_id"])
+                    st.session_state["geo_operator"] = op
                 st.rerun()
 
         st.markdown("---")

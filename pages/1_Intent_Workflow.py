@@ -1212,9 +1212,20 @@ if (
                                 numeric_id = company.get("id") or contact.get("companyId")
                                 resolved_name = company.get("name") or contact.get("companyName", "")
                                 if numeric_id:
-                                    numeric_map[hid] = int(numeric_id)
-                                    db.save_company_id(hid, int(numeric_id), resolved_name)
-                                    logger.info("Resolved %s (ID %s)", resolved_name, numeric_id)
+                                    # Per-contact guard (review N2-06): batching
+                                    # replaced a per-company loop, so an
+                                    # unguarded int() on one malformed id left
+                                    # EVERY remaining company unresolved.
+                                    try:
+                                        _nid = int(numeric_id)
+                                    except (TypeError, ValueError):
+                                        logger.warning(
+                                            "Skipping unparseable companyId %r for %s",
+                                            numeric_id, resolved_name)
+                                        continue
+                                    numeric_map[hid] = _nid
+                                    db.save_company_id(hid, _nid, resolved_name)
+                                    logger.info("Resolved %s (ID %s)", resolved_name, _nid)
                         except Exception as e:
                             logger.warning("Batch company ID resolution failed: %s", e)
                             st.caption(f"Company ID resolution failed: {e}")

@@ -1937,6 +1937,7 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
             # Best-effort close — a DB failure here must not replace the
             # deliberate graceful halt with an unhandled crash AND leave the
             # run stuck 'running', the exact state this block prevents.
+            _run_closed = True
             try:
                 db.complete_pipeline_run(
                     _run_id, "failed", _rl.to_summary(),
@@ -1945,8 +1946,13 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                 )
             except Exception:
                 logger.warning("Could not close pipeline run", exc_info=True)
-            st.session_state.geo_run_logger = None
-            st.session_state.geo_run_id = None
+                _run_closed = False
+            # Only drop the session reference once the row is actually closed
+            # (review N2-13) — clearing it after a failed close left the run
+            # stuck 'running' with nothing left to retry it with.
+            if _run_closed:
+                st.session_state.geo_run_logger = None
+                st.session_state.geo_run_id = None
         st.stop()
     # The all-empty branch above ends in st.stop(), so a plain `if` here is
     # the partial-empty case.

@@ -185,32 +185,45 @@ def evaluate_linkage_drop(current_fraction: float, baseline_fraction: float | No
     }
 
 
-def evaluate_export_volume(today_count: int, history: list[int],
+def evaluate_export_volume(measured_count: int, history: list[int],
                            *, min_samples: int = 10, sigmas: float = 2.0) -> dict:
-    """Flag today's export volume collapsing versus recent history.
+    """Flag a completed day's export volume collapsing versus history.
 
-    Uses a 2σ floor, with two guards: too few samples can't support the
-    claim, and a zero-variance history would otherwise fire on any dip.
+    Callers must pass a COMPLETED day (see data_anomaly_check): the daily
+    job runs at 07:00 UTC, so the in-progress day is always empty and would
+    alarm every morning (N2-04).
+
+    Uses a 2σ floor, with guards: too few samples can't support the claim,
+    a zero-variance history would otherwise fire on any dip, and the floor
+    is clamped above zero so a high-variance history can't disable it.
     """
     import statistics
 
     if len(history) < min_samples:
         return {"severity": "ok",
-                "message": f"Exports today: {today_count} (history too short to judge)."}
+                "message": f"Exports (last completed day): {measured_count} "
+                           "— history too short to judge."}
 
     mean = statistics.fmean(history)
     stdev = statistics.pstdev(history)
     floor = mean - sigmas * stdev if stdev > 0 else mean * 0.5
+    # Clamp above zero (N2-14): a history with genuine zero-volume days makes
+    # stdev exceed mean/sigmas, driving the floor negative — every possible
+    # count then clears it and detection is silently disabled. A floor at or
+    # below zero means "only an actual zero is anomalous".
+    if floor <= 0:
+        floor = 0.5
 
-    if today_count >= floor:
+    if measured_count >= floor:
         return {"severity": "ok",
-                "message": f"Exports today: {today_count} (30-day mean {mean:.1f})."}
+                "message": (f"Exports (last completed day): {measured_count} "
+                            f"(30-day mean {mean:.1f}).")}
 
-    severity = "critical" if today_count == 0 and mean > 0 else "warning"
+    severity = "critical" if measured_count == 0 and mean > 0 else "warning"
     return {
         "severity": severity,
-        "message": (f"Exports today: {today_count}, far below the 30-day mean "
-                    f"{mean:.1f} (floor {floor:.1f})."),
+        "message": (f"Exports (last completed day): {measured_count}, far below "
+                    f"the 30-day mean {mean:.1f} (floor {floor:.1f})."),
     }
 
 
