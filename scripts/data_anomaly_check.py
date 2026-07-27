@@ -40,11 +40,17 @@ from monitoring import (  # noqa: E402
     evaluate_mutation_burst,
     summarise_verdicts,
 )
+from utils import utc_now_str  # noqa: E402
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("data_anomaly_check")
 
+# Liveness stamp. GitHub disables scheduled workflows after 60 days of repo
+# inactivity and every cron stops at once with no alert, because the alert
+# channel IS a failing run. Stamping each completion lets the Pipeline Health
+# page detect the schedule dying by absence (HADES-7qi).
+LAST_RUN_KEY = "anomaly_last_run_utc"
 BASELINE_OPERATORS = "anomaly_baseline_operators"
 BASELINE_ZOHO_LINKED = "anomaly_baseline_zoho_linked"
 
@@ -162,6 +168,7 @@ def main() -> int:
 
     # Baselines advance even when an anomaly fired: otherwise a one-off drop
     # would re-alert every day against a stale high-water mark.
+    new_baselines[LAST_RUN_KEY] = utc_now_str()
     for key, value in new_baselines.items():
         try:
             db.set_sync_value(key, value)

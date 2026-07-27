@@ -52,7 +52,8 @@ from scoring import (
     build_stale_guidance,
     merge_numeric_company_keys,
 )
-from dedup import dedupe_leads
+from dedup import dedupe_leads, get_dedup_days_back
+from export_dedup import get_previously_exported, partition_companies_for_enrichment
 from export import merge_contact, merge_company_data, contact_has_core_data
 from cost_tracker import CostTracker
 from expand_search import build_contacts_by_company
@@ -1167,6 +1168,71 @@ if (
                 st.write("Resolving company IDs...")
                 search_status.update(label=f"Phase 1: Resolving {len(company_ids)} company IDs...")
                 cached = db.get_company_ids_bulk(company_ids)
+
+                # Cross-session dedup BEFORE any credit is spent (HADES-7qi).
+                # The headless pipeline filters previously-exported companies
+                # ahead of enrichment; this page used to filter only at export
+                # time, so every already-exported company was enriched and then
+                # discarded downstream — real credits for nothing.
+                _dedup_days = get_dedup_days_back()
+                _skipped_exported = []
+                try:
+                    _lookup = get_previously_exported(db, days_back=_dedup_days)
+                    selected_companies, _skipped_exported = partition_companies_for_enrichment(
+                        selected_companies, cached, _lookup
+                    )
+                    company_ids = list(selected_companies.keys())
+                except Exception:
+                    # Dedup is an optimisation here, not a correctness gate —
+                    # export still filters. Never block contact-finding on it,
+                    # but say so rather than failing silently.
+                    logger.warning("Pre-enrichment dedup skipped", exc_info=True)
+                    st.warning(
+                        "Could not check previously-exported companies — "
+                        "continuing, but some contacts may be filtered at export."
+                    )
+
+                if _skipped_exported:
+                    st.info(
+                        f"Skipping {len(_skipped_exported)} of "
+                        f"{len(_skipped_exported) + len(company_ids)} companies "
+                        f"already exported in the last {_dedup_days} days — "
+                        "no credits spent on them."
+                    )
+                    if _rl := st.session_state.get("intent_run_logger"):
+                        _rl.info(
+                            f"Pre-enrichment dedup: skipped {len(_skipped_exported)} "
+                            "previously-exported companies"
+                        )
+
+                if not company_ids:
+                    search_status.update(
+                        label="All selected companies were already exported", state="complete"
+                    )
+                    st.warning(
+                        "Every selected company has already been exported in the last "
+                        f"{_dedup_days} days. Nothing to enrich — pick different "
+                        "companies, or export the earlier batch again from CSV Export."
+                    )
+                    # Convention C6 (docs/HARDENING_LEDGER.md): a guard that
+                    # halts must close out side state first, or the run is left
+                    # in a non-terminal status and re-fires on the next rerun.
+                    _stop_run_id = st.session_state.get("intent_run_id")
+                    _stop_rl = st.session_state.get("intent_run_logger")
+                    if _stop_run_id:
+                        try:
+                            db.complete_pipeline_run(
+                                _stop_run_id, "completed",
+                                _stop_rl.to_summary() if _stop_rl else {},
+                                None, 0, 0,
+                                "All selected companies already exported — nothing to enrich",
+                            )
+                        except Exception:
+                            logger.warning("Could not close pipeline run", exc_info=True)
+                        st.session_state.intent_run_id = None
+                        st.session_state.intent_run_logger = None
+                    st.stop()
+
                 numeric_map = {}  # hashed_id → numeric_id
 
                 # Use cached IDs where available

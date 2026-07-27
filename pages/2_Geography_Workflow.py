@@ -144,6 +144,7 @@ defaults = {
     "geo_enriched_contacts": None,  # Enriched contacts (credits used)
     "geo_enrichment_done": False,
     "geo_company_enrich_done": False,  # Company Enrich (SIC/industry/employee)
+    "geo_company_enrich_attempts": 0,  # bounded retry after a transient failure
     "geo_usage_logged": False,  # Prevent double-logging on refresh
     # API Request confirmation
     "geo_request_previewed": False,  # Whether user has seen the full request
@@ -210,6 +211,8 @@ def _reset_geo_search_state():
     st.session_state.geo_exported = False
     st.session_state.geo_leads_staged = False
     st.session_state.geo_company_enrich_done = False
+    st.session_state.geo_company_enrich_attempts = 0
+    st.session_state.pop("geo_company_enrich_degraded", None)
     st.session_state.geo_params_hash = None
     st.session_state.geo_query_params = None
     st.session_state.geo_dedup_result = None
@@ -1896,13 +1899,36 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                     if _rl:
                         _rl.info(f"Company Enrich: {len(company_data)} merged")
                         _rl.set_metric("companies_enriched", len(company_data))
+                    st.session_state.geo_company_enrich_done = True
+                    st.session_state.pop("geo_company_enrich_degraded", None)
                 except Exception as e:
+                    # Do NOT mark done here. Company Enrich fills sicCode,
+                    # industry and employeeCount, which drive ~60% of the
+                    # geography composite — marking a transient 429 as "done"
+                    # forfeited them for the whole session and left scoring
+                    # quietly running on defaults while still passing the
+                    # core-data guard (HADES-7qi).
                     logger.warning("Company Enrich failed (non-fatal): %s", e, exc_info=True)
                     if _rl:
                         _rl.warn(f"Company Enrich failed: {e}")
-                st.session_state.geo_company_enrich_done = True
+                    _attempts = st.session_state.get("geo_company_enrich_attempts", 0) + 1
+                    st.session_state.geo_company_enrich_attempts = _attempts
+                    st.session_state.geo_company_enrich_degraded = str(e)
+                    if _attempts >= 3:
+                        # Bounded: stop retrying on every rerun once it is
+                        # clearly not transient, but stay loud about it.
+                        st.session_state.geo_company_enrich_done = True
             else:
                 st.session_state.geo_company_enrich_done = True
+
+    # Degraded scoring must be visible, not just logged — the operator is about
+    # to act on these scores.
+    if st.session_state.get("geo_company_enrich_degraded"):
+        st.warning(
+            "Company Enrich failed, so SIC code, industry and employee count are "
+            "missing. Scores are degraded — employee scale and on-site likelihood "
+            "fell back to defaults. Re-run the search to retry."
+        )
 
     # Score the enriched contacts
     scored = score_geography_leads(

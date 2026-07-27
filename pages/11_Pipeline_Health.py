@@ -19,6 +19,7 @@ from ui_components import (
     SPACING,
     FONT_SIZES,
 )
+from monitoring import evaluate_scheduled_job_freshness
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,27 @@ def _track_health(label, status, detail):
     """Track status for critical alert banner."""
     _health_statuses.append({"label": label, "status": status, "detail": detail})
 
+
+# 0. Scheduled-job liveness.
+#
+# Distinct from "Last Activity" below, which tracks LEAD work and is already
+# red whenever the ZoomInfo entitlement is down. This asks a different
+# question: is the cron infrastructure running at all? GitHub disables
+# scheduled workflows after 60 days of repository inactivity — every job stops
+# at once and nothing alerts, because the alert channel is a failing run and
+# there are no runs. The daily anomaly check stamps its completion, so a dead
+# schedule shows up here as a stale stamp (HADES-7qi).
+try:
+    _sched_verdict = evaluate_scheduled_job_freshness(
+        db.get_sync_value("anomaly_last_run_utc")
+    )
+except Exception:
+    logger.warning("Could not read scheduled-job liveness", exc_info=True)
+    _sched_verdict = {"severity": "unknown", "message": "Could not read the last-run stamp."}
+
+_sched_status = {"ok": "green", "critical": "red"}.get(_sched_verdict["severity"], "gray")
+health_indicator("Scheduled Jobs", _sched_status, _sched_verdict["message"])
+_track_health("Scheduled Jobs", _sched_status, _sched_verdict["message"])
 
 # 1. Last Activity (manual queries OR automated pipeline runs)
 last_intent = db.get_last_query("intent")

@@ -462,3 +462,71 @@ def evaluate_lead_states(leads, expected_states) -> dict:
         ),
         "violations": _cap(violations),
     }
+
+
+# ---------------------------------------------------------------------------
+# Scheduled-job liveness (HADES-7qi)
+#
+# GitHub silently disables scheduled workflows in a repository with no activity
+# for 60 days. Every cron stops at once and NOTHING alerts, because the alert
+# channel is a failing run and there are no runs. The outage is pure silence,
+# so it has to be detected by absence: the daily job stamps its own completion
+# and this evaluator flags the stamp going stale.
+#
+# It works when the rest of the system is quiet — which matters, because with
+# the ZoomInfo entitlement lapsed there are no leads and no queries, so a
+# "last activity" indicator is already red for unrelated reasons and cannot
+# distinguish "no work to do" from "the schedule is dead".
+# ---------------------------------------------------------------------------
+
+def evaluate_scheduled_job_freshness(
+    last_run: str | None,
+    *,
+    now=None,
+    max_age_hours: float = 48.0,
+    label: str = "Daily data-anomaly check",
+) -> dict:
+    """Flag a scheduled job whose last-run stamp has gone stale.
+
+    An absent or unparseable stamp is "unknown", never "ok" — the same rule the
+    usage evaluator follows. A signal you cannot read is not a healthy signal.
+    """
+    from datetime import datetime, timezone
+
+    if not last_run:
+        return {
+            "severity": "unknown",
+            "message": f"{label}: never recorded a run — cannot tell if the schedule is live.",
+        }
+
+    text = str(last_run).strip().replace("T", " ").replace("Z", "")
+    try:
+        stamp = datetime.fromisoformat(text)
+    except ValueError:
+        return {
+            "severity": "unknown",
+            "message": f"{label}: last-run stamp {last_run!r} is unreadable.",
+        }
+
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+
+    age_hours = (current - stamp).total_seconds() / 3600.0
+    if age_hours <= max_age_hours:
+        return {
+            "severity": "ok",
+            "message": f"{label}: last ran {age_hours:.0f}h ago.",
+        }
+
+    return {
+        "severity": "critical",
+        "message": (
+            f"{label}: last ran {age_hours:.0f}h ago (limit {max_age_hours:.0f}h). "
+            "Scheduled workflows may have been disabled — GitHub turns them off "
+            "after 60 days of repository inactivity, and a stopped schedule "
+            "raises no alert of its own."
+        ),
+    }

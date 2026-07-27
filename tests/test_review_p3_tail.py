@@ -185,3 +185,133 @@ def test_plain_multi_row_insert_still_batches_into_one_round_trip():
     assert db._conn.execute.call_count == 1, db._conn.execute.call_args_list
     sql = db._conn.execute.call_args_list[0].args[0]
     assert sql.count("(?, ?)") == 2, sql
+
+
+# --------------------------------------------------------------------------
+# 5. Intent UI spent credits before cross-session dedup
+# --------------------------------------------------------------------------
+
+def _lookup_with(name=None, company_id=None):
+    from dedup import normalize_company_name
+    lookup = {"by_id": {}, "by_name": {}, "vs_by_name": {}, "vs_by_phone": {}}
+    if name:
+        lookup["by_name"][normalize_company_name(name)] = {
+            "company_name": name, "exported_at": "2026-07-01", "workflow_type": "intent",
+        }
+    if company_id:
+        lookup["by_id"][str(company_id)] = {
+            "company_name": "x", "exported_at": "2026-07-01", "workflow_type": "intent",
+        }
+    return lookup
+
+
+def test_previously_exported_company_is_dropped_before_enrichment():
+    """The headless pipeline filters before enriching; the UI filtered only at
+    export time, so every already-exported company was enriched — real credits
+    spent on leads that were then discarded.
+    """
+    from export_dedup import partition_companies_for_enrichment
+
+    companies = {
+        "hid_a": {"companyName": "Acme Vending"},
+        "hid_b": {"companyName": "Fresh Co"},
+    }
+
+    keep, skip = partition_companies_for_enrichment(
+        companies, cached_ids={}, lookup=_lookup_with(name="Acme Vending")
+    )
+
+    assert set(keep) == {"hid_b"}, keep
+    assert len(skip) == 1 and skip[0]["companyName"] == "Acme Vending"
+
+
+def test_cached_numeric_id_is_used_for_matching_when_available():
+    """Companies whose numeric ID is already cached can match by ID, which is
+    stronger than the name fallback."""
+    from export_dedup import partition_companies_for_enrichment
+
+    keep, skip = partition_companies_for_enrichment(
+        {"hid_a": {"companyName": "Totally Different Name"}},
+        cached_ids={"hid_a": {"numeric_id": "12345"}},
+        lookup=_lookup_with(company_id="12345"),
+    )
+
+    assert keep == {}, keep
+    assert len(skip) == 1
+
+
+def test_nothing_previously_exported_keeps_everything():
+    from export_dedup import partition_companies_for_enrichment
+
+    companies = {"hid_a": {"companyName": "Acme"}, "hid_b": {"companyName": "Beta"}}
+
+    keep, skip = partition_companies_for_enrichment(companies, {}, _lookup_with())
+
+    assert keep == companies
+    assert skip == []
+
+
+def test_partition_preserves_the_original_lead_objects():
+    """The kept map feeds straight into enrichment — it must not lose fields."""
+    from export_dedup import partition_companies_for_enrichment
+
+    companies = {"hid_a": {"companyName": "Acme", "recommendedContacts": [{"id": "p1"}]}}
+
+    keep, _ = partition_companies_for_enrichment(companies, {}, _lookup_with())
+
+    assert keep["hid_a"]["recommendedContacts"] == [{"id": "p1"}]
+
+
+# --------------------------------------------------------------------------
+# 6. Scheduled-job liveness — GitHub disables crons after 60 days idle
+# --------------------------------------------------------------------------
+
+def test_recent_scheduled_run_is_ok():
+    from monitoring import evaluate_scheduled_job_freshness
+
+    now = datetime(2026, 7, 27, 12, 0, tzinfo=timezone.utc)
+    verdict = evaluate_scheduled_job_freshness("2026-07-27 07:00:00", now=now)
+
+    assert verdict["severity"] == "ok", verdict
+
+
+def test_stale_scheduled_run_is_flagged():
+    """GitHub silently disables scheduled workflows after 60 days of repo
+    inactivity. No run means no failure means no alert — the outage is pure
+    silence, so it has to be detected by absence rather than by an error.
+    """
+    from monitoring import evaluate_scheduled_job_freshness
+
+    now = datetime(2026, 7, 27, 12, 0, tzinfo=timezone.utc)
+    verdict = evaluate_scheduled_job_freshness("2026-07-24 07:00:00", now=now)
+
+    assert verdict["severity"] != "ok"
+    assert "77" in verdict["message"] or "3 day" in verdict["message"], verdict
+
+
+def test_never_run_is_unknown_not_ok():
+    """No stamp at all must not read as healthy — an unreadable signal is
+    'unknown', never 'ok' (the monitoring.py convention)."""
+    from monitoring import evaluate_scheduled_job_freshness
+
+    verdict = evaluate_scheduled_job_freshness(None)
+
+    assert verdict["severity"] == "unknown", verdict
+
+
+def test_unparseable_stamp_is_unknown():
+    from monitoring import evaluate_scheduled_job_freshness
+
+    verdict = evaluate_scheduled_job_freshness("not a date")
+
+    assert verdict["severity"] == "unknown", verdict
+
+
+def test_freshness_window_is_tunable():
+    from monitoring import evaluate_scheduled_job_freshness
+
+    now = datetime(2026, 7, 27, 12, 0, tzinfo=timezone.utc)
+    stamp = "2026-07-26 07:00:00"  # 29h old
+
+    assert evaluate_scheduled_job_freshness(stamp, now=now, max_age_hours=48)["severity"] == "ok"
+    assert evaluate_scheduled_job_freshness(stamp, now=now, max_age_hours=24)["severity"] != "ok"

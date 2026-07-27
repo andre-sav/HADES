@@ -235,3 +235,47 @@ def apply_export_dedup(
         "total_before_filter": total_before,
         "days_back": days_back,
     }
+
+
+def partition_companies_for_enrichment(
+    companies: dict,
+    cached_ids: dict,
+    lookup: dict,
+) -> tuple[dict, list[dict]]:
+    """Split selected intent companies into (worth enriching, already exported).
+
+    The headless pipeline filters previously-exported companies BEFORE
+    enrichment; the Intent UI only filtered at export time, so every company
+    already exported inside the dedup window was enriched — real credits spent
+    on leads that were then discarded downstream (HADES-7qi).
+
+    Matching runs before numeric company IDs exist for most companies, so it
+    leans on `filter_previously_exported`'s normalized-name fallback (including
+    its franchise-safety rules) and uses the numeric ID only where the company
+    ID cache already has one, which is a stronger match.
+
+    Args:
+        companies: {hashed_company_id: lead dict} the operator selected.
+        cached_ids: {hashed_company_id: {"numeric_id": ...}} from the ID cache.
+        lookup: the dict returned by `get_previously_exported`.
+
+    Returns:
+        (kept, skipped) — `kept` is the same {hashed_id: lead} shape with the
+        original lead objects intact so it can feed enrichment directly;
+        `skipped` is a list of the lead dicts, each tagged by
+        `filter_previously_exported` with its `_previously_exported` metadata.
+    """
+    candidates = []
+    for hashed_id, lead in companies.items():
+        candidate = dict(lead)
+        candidate["_hashed_company_id"] = hashed_id
+        cached = cached_ids.get(hashed_id) or {}
+        if cached.get("numeric_id"):
+            candidate["companyId"] = cached["numeric_id"]
+        candidates.append(candidate)
+
+    new_candidates, skipped = filter_previously_exported(candidates, lookup)
+
+    kept_ids = {c.get("_hashed_company_id") for c in new_candidates}
+    kept = {hid: lead for hid, lead in companies.items() if hid in kept_ids}
+    return kept, skipped
