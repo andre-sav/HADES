@@ -1,7 +1,58 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
-**Date:** 2026-07-19
-**Status:** Hardening campaign MERGED to main and deployed (CI green for the first time since May). HADES-dio VS dedup built + live (18,223 non-HADES leads in the dedup window). Whole-project review done; first review fix on PR #1 (open, tests green). ZoomInfo API entitlement lapsed account-wide — ALL lead generation down pending account-manager action. 958 tests passing.
+**Date:** 2026-07-26
+**Status:** **Code backlog empty.** 12 PRs merged, `main` green, 0 open PRs, 1100 tests passing (953 → 1100 this session). Whole-project review fully retired; both data-loss infrastructure P1s and all remaining P2s shipped. App verified live and booting cleanly after all 12 merges. **ZoomInfo API entitlement still lapsed — ALL lead generation down pending an account-manager call.**
+
+## Session Summary (2026-07-19 → 07-26, close)
+
+### What Was Done — 12 PRs, all merged
+
+| PR | Bead | What |
+|---|---|---|
+| #1 | HADES-tfp | N-07/N-08: guarded 7 `complete_pipeline_run` calls in exception handlers (review named 3; swept 4 more sibling generic-except sites); budget-skip `alert_failed` → exit 2; Run-Now surfaces soft outcomes |
+| #2 | HADES-96q | N-02/05/09: `utils.utc_now_str()` canonical UTC timestamp across all 3 `exported_at` writers; staged-reload operator attribution; `_loaded_staged_batch_id` leak |
+| #3 | HADES-c6q | N-03/04: dedup key phone fallback chain (`directPhone`→`mobilePhone`→…) + `str()` ID coercion at 4 sites |
+| #4 | HADES-7r2 | N-06: `enrich_companies` fail-loud parity with `enrich_contacts` |
+| #5 | HADES-znl | N-01/10: `execute_many` rollback on non-stale failure + honors `transaction()` |
+| #6 | HADES-mcx, 1d3, jkd | Uniform-score guard (`scores_all_identical`) + degraded-batch alert delivery flag |
+| #7 | HADES-obn | N-11..N-17 umbrella: status-0 recoverable, warning-alert gate, retention purges, **atomic `claim_pipeline_run`** (TOCTOU), batched UI resolution, honest credit counts, `classify_deal_stage` |
+| #8 | HADES-5w0 | **Sentry** error monitoring (`observability.py`) |
+| #9 | HADES-6if | **mutation_log** audit trail + Pipeline Health panel |
+| #10 | HADES-l3n | **Soft-delete** for operators/staged_exports + 90-day sweeper + weekly workflow |
+| #11 | HADES-e7j | **Daily data-anomaly detection** + workflow + tuning playbook |
+| #12 | HADES-fpd | Export operator freshness (`resolve_export_operator`) — fpd closed at REDUCED scope |
+
+**Layered data-loss defense now complete:** Sentry (detect) → mutation_log (forensics) → soft-delete (undo) → anomaly check (drift warning).
+
+### Key decisions worth knowing
+- **HADES-fpd closed WITHOUT caching, deliberately.** R-27 came from code reading, not a user complaint; operator confirmed no one reports the page as slow; all timings were laptop-measured. Blocking constraint recorded: `zoho_sync.py` writes operators via **raw SQL from a separate GitHub Actions process**, so no in-process invalidation can ever observe it — TTL is the only possible bound. Full analysis: `docs/plans/2026-07-26-fpd-caching-invalidation.md`. Investigating it surfaced a **live staleness bug** (session-state operator snapshot → VanillaSoft), which is what PR #12 actually fixes.
+- **Soft-delete design:** `delete_operator` no longer nullifies `staged_exports.operator_id` (severing it would make restore only partly recoverable). `operator_name` UNIQUE means a soft-deleted row reserves its name — made safe via `find_deleted_operator_by_name()` rather than a risky live table rebuild.
+- **Sentry privacy:** `include_local_variables=False` alongside `send_default_pii=False` — stack frames hold lead PII. Live-verified a real capture envelope carried the message and **no** lead fields.
+- **Pre-commit hook was broken:** its gates used `if cmd | tail -N`, and in POSIX sh a pipeline's status is `tail`'s (always 0) — **the pytest gate had never blocked a failing commit.** Rewrote it (no pipes, + ruff before pytest). NOTE: `.git/hooks/` is untracked, so this fix is **local to this machine only**.
+
+### Known issues / operational state
+- **HADES-m29 (P1, USER):** ZoomInfo API entitlement lapsed account-wide. Re-verified 07-24: auth succeeds, every endpoint incl. the free `/lookup/usage` returns 403 "contact your Account Manager for purchasing options". Not credit exhaustion — will NOT self-clear. Blocks Geography too, not just intent.
+- **`deleted_at` migration NOT yet applied to production.** `_run_migrations` only runs inside `init_schema()`, which is reached *after* `require_auth()`'s `st.stop()`. The app was found **asleep** (explains why). Woken and verified booting 07-26, but a **login** is still required to apply it — or trigger `data-anomaly-check` / `purge-soft-deleted` manually (both call `init_schema`).
+- **HADES-jdi (P1, USER):** `ZOHO_*` secrets missing from GitHub Actions — Zoho sync red daily.
+- **`SENTRY_DSN` unset** in all three locations — monitoring is built but dark.
+- Test suite makes a **live SMTP call to Gmail** on every run (spawn-task chip filed, not yet actioned).
+- Stale `HADES_CODEBASE_FLAT.md` + `REVIEW_PROMPT.md` in repo root should be deleted (they polluted a CodeRabbit pass with already-fixed findings).
+
+### Deploy verification (07-26)
+App at `hades-hlm.streamlit.app` was asleep; woken via browser MCP. **Cold boot succeeded** — reinstalled from `requirements.txt` incl. the new `sentry-sdk`, rendered the auth gate, all 10 pages in the sidebar, **zero console errors**. Confirms 12 merges did not break the build. Auth-gated smoke test (radius search on ZIP 20147 → expect VA) still outstanding — requires a login.
+
+### Test Count
+**1100 passing** (953 → 1100 this session; every fix TDD'd).
+
+### Beads
+17 closed this session (dio, tfp, 96q, c6q, 7r2, znl, obn, mcx, jkd, 1d3, l3n, e7j, fpd, 6if, 5w0, plus stale 4u2/6ic cleaned up). ~15 open, all P3/P4 polish or user-blocked.
+
+### What Needs Doing Next Session
+1. **USER: ZoomInfo entitlement call (HADES-m29)** — nothing else matters until leads flow again.
+2. **USER: sign in to the app** — applies the `deleted_at` migration; then one radius search on ZIP 20147 (expect VA) to finish the smoke test.
+3. **USER: `SENTRY_DSN`** ×3 locations; **`ZOHO_*`** GitHub secrets (HADES-jdi).
+4. Fix the test suite's live Gmail SMTP call.
+5. Delete the stale flat-file artifacts from the repo root.
 
 
 ## Session Summary (2026-07-13 → 07-19, long-running session, close)
