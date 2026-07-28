@@ -264,7 +264,7 @@ class ZoomInfoClient:
                 return None
             return Fernet(key.encode() if isinstance(key, str) else key)
         except Exception as e:
-            logger.debug(f"Could not initialize Fernet: {e}")
+            logger.warning(f"Could not initialize Fernet — token will not be encrypted at rest: {e}")
             return None
 
     def _load_persisted_token(self) -> None:
@@ -281,7 +281,7 @@ class ZoomInfoClient:
                 data = json.loads(decrypted.decode())
             else:
                 # No encryption key — cannot read encrypted data, skip
-                logger.debug("No ZOOMINFO_TOKEN_KEY — cannot decrypt persisted token")
+                logger.warning("No ZOOMINFO_TOKEN_KEY — cannot decrypt persisted token; re-authenticating every run")
                 return
 
             token = data.get("jwt")
@@ -292,7 +292,7 @@ class ZoomInfoClient:
                     self.access_token = token
                     self.token_expires_at = expires_at
         except Exception as e:
-            logger.debug(f"Could not load persisted token: {e}")
+            logger.warning(f"Could not load persisted token — re-authenticating: {e}")
 
     def _persist_token(self) -> None:
         """Encrypt and save current token to database."""
@@ -312,7 +312,7 @@ class ZoomInfoClient:
             encrypted = fernet.encrypt(plaintext.encode()).decode()
             self._token_store.set_sync_value("zoominfo_token", encrypted)
         except Exception as e:
-            logger.debug(f"Could not persist token: {e}")
+            logger.warning(f"Could not persist token — every run will re-authenticate: {e}")
 
     def _authenticate(self) -> None:
         """Obtain OAuth access token."""

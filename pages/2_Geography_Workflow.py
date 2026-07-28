@@ -630,16 +630,32 @@ if has_operator:
             if zip_codes:
                 _centroids = load_zip_centroids()
                 _zip_data = []
+                _unresolved_template_zips: list[str] = []
                 for z in zip_codes:
                     if z in _centroids:
                         _lat, _lng, _st = _centroids[z]
                         _zip_data.append({"zip": z, "state": _st, "lat": _lat, "lng": _lng})
                     else:
-                        _zip_data.append({"zip": z, "state": "?"})
+                        # Fall back to the ZIP-prefix oracle rather than "?" —
+                        # that placeholder flowed into get_states_from_zips and
+                        # was sent to ZoomInfo as a state filter value, which
+                        # no state matches (HADES-7qi).
+                        _fallback_state = get_state_from_zip(z)
+                        if _fallback_state:
+                            _zip_data.append({"zip": z, "state": _fallback_state})
+                        else:
+                            _unresolved_template_zips.append(z)
                 states = get_states_from_zips(_zip_data)
                 state_counts = get_state_counts_from_zips(_zip_data)
                 state_display = ", ".join(f"{s} ({state_counts[s]})" for s in states)
                 st.success(f"📍 Template: **{_selected_template_name}** — {len(zip_codes)} ZIPs, {radius}mi radius · States: {state_display}")
+                if _unresolved_template_zips:
+                    st.warning(
+                        f"{len(_unresolved_template_zips)} ZIP(s) in this template "
+                        "are not in the centroid data and have no derivable state, "
+                        "so they are excluded from the state filter: "
+                        + ", ".join(_unresolved_template_zips[:8])
+                    )
                 calculated_zips = _zip_data
             else:
                 states = []

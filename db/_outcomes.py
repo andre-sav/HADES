@@ -1,5 +1,9 @@
 """Lead outcome tracking operations."""
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 
 class OutcomesMixin:
@@ -22,6 +26,25 @@ class OutcomesMixin:
 
         cid = lead.get("companyId") or co.get("id", "")
         pid = lead.get("personId") or lead.get("id", "")
+
+        # Idempotency for this table rests on the UNIQUE index
+        # (batch_id, person_id) combined with INSERT OR IGNORE. SQLite treats
+        # NULLs as distinct in a unique index, so a row without a person_id is
+        # NOT protected — re-running an export would duplicate it.
+        #
+        # Measured 2026-07-27: 0 of 612 rows across 55 batches have a NULL
+        # person_id, so every export path currently sets one and the gap is
+        # latent. Migrating the index is not worth the risk for a condition
+        # that has never occurred; making it VISIBLE is, so a future export
+        # path that stops setting person_id is not silently un-deduplicated
+        # (HADES-7qi).
+        if not pid:
+            logger.warning(
+                "Outcome row for %r in batch %s has no person_id — the "
+                "(batch_id, person_id) unique index cannot deduplicate it, so "
+                "a re-export will insert a duplicate.",
+                lead.get("companyName") or co.get("name") or "?", batch_id,
+            )
 
         return (
             batch_id,

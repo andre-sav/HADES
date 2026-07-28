@@ -3,12 +3,22 @@
 import json
 from datetime import datetime, timedelta, timezone
 
+from utils import get_cache_config
+
 
 class CacheMixin:
     """Query result caching with TTL."""
 
     def get_cached_results(self, cache_id: str) -> list[dict] | None:
-        """Get cached query results if not expired."""
+        """Get cached query results if not expired.
+
+        Honours `cache.enabled` in icp.yaml. Serving from a cache the operator
+        has switched off is the dangerous half of the bug: stale results are
+        exactly what someone sets that flag to escape (HADES-7qi).
+        """
+        if not get_cache_config().get("enabled", True):
+            return None
+
         # datetime() normalizes both the SQLite-native format written now and
         # legacy local 'T'-ISO rows — a raw string compare kept expired rows
         # "fresh" through their whole expiry date ('T' > ' ', HADES-8s5).
@@ -22,9 +32,21 @@ class CacheMixin:
         return json.loads(rows[0][0])
 
     def cache_results(
-        self, cache_id: str, workflow_type: str, query_params: dict, leads: list[dict], ttl_days: int = 7
+        self, cache_id: str, workflow_type: str, query_params: dict,
+        leads: list[dict], ttl_days: int | None = None,
     ) -> None:
-        """Cache query results."""
+        """Cache query results.
+
+        `ttl_days` defaults to `cache.ttl_days` from icp.yaml rather than a
+        hardcoded literal — the config key existed but nothing read it, so
+        editing it did nothing. An explicit argument still wins.
+        """
+        cfg = get_cache_config()
+        if not cfg.get("enabled", True):
+            return
+        if ttl_days is None:
+            ttl_days = cfg.get("ttl_days", 7)
+
         # SQLite-native format (UTC, space separator, seconds precision) so
         # comparisons against datetime('now') are exact (HADES-8s5).
         expires_at = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).strftime("%Y-%m-%d %H:%M:%S")

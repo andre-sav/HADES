@@ -83,7 +83,7 @@ HADES/
 │   ├── import_vs_leads.py        # Bulk-import VS contact export for dedup
 │   └── _credentials.py           # Credential loader (env → toml → st.secrets)
 ├── .github/workflows/
-│   └── intent-poll.yml           # Daily intent poll (Mon-Fri 7AM ET)
+│   └── intent-poll.yml           # Daily intent poll (Mon-Fri 12:00 UTC = 7 AM ET winter / 8 AM EDT)
 ├── tests/                # 704 tests (pytest)
 └── docs/
     └── stories/          # User stories with acceptance criteria
