@@ -173,12 +173,16 @@ cache:
 # These emails are assigned to records evenly across each export batch
 # NOTE: These emails are checked into version control.
 # For public/shared repos, move to .streamlit/secrets.toml as CALL_CENTER_AGENTS.
+# Updated 2026-07-28 per Mike (mike@hlmii.com): "Should only include just the
+# following agents." Removed caroline@, dodie@, chelsie@; added tabatha@ and
+# dimpelnpatel1978@gmail.com. Kept lowercase to match the existing convention
+# and how VanillaSoft matches Contact Owner — the request capitalised the first
+# letter of each, which is cosmetic in an email address.
 call_center_agents:
   - "courtney@hlmii.com"
   - "caitlyn@hlmii.com"
-  - "caroline@hlmii.com"
-  - "dodie@hlmii.com"
-  - "chelsie@hlmii.com"
+  - "tabatha@hlmii.com"
+  - "dimpelnpatel1978@gmail.com"
 
 # Intent Topics
 intent_topics:
