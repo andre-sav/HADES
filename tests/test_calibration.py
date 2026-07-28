@@ -5,7 +5,6 @@ import os
 from unittest.mock import MagicMock
 
 # Mock Streamlit before importing modules
-sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
 import yaml

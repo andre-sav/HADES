@@ -26,3 +26,32 @@ def _no_outbound_smtp(monkeypatch):
     monkeypatch.setattr(smtplib, "SMTP", MagicMock(name="SMTP"))
     monkeypatch.setattr(smtplib, "SMTP_SSL", MagicMock(name="SMTP_SSL"))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_real_streamlit_secrets(monkeypatch):
+    """Neutralise st.secrets for every test.
+
+    `.streamlit/secrets.toml` on a developer machine holds LIVE production
+    values — Turso URL and token, ZoomInfo and Zoho secrets, a GitHub token —
+    and real streamlit reads it happily. Anything under test that reaches
+    st.secrets therefore gets production credentials and can connect to
+    production.
+
+    Until HADES-w1k this was prevented only by accident: fifteen test modules
+    assigned sys.modules["streamlit"] = MagicMock() at import time, and
+    whichever pytest imported first shadowed the real package session-wide.
+    Modules that did not do it were never protected. Removing those mocks made
+    two credential tests return the real production Turso URL, which is how the
+    gap surfaced.
+
+    Blocking it here, like SMTP above, means a future test cannot reintroduce
+    the exposure by forgetting a patch. A test that genuinely needs populated
+    secrets should patch the symbol it reads (see
+    test_run_intent_pipeline.TestCredentialLoading.test_streamlit_secrets_fallback,
+    which swaps the whole module inside a `with patch.dict` block).
+    """
+    import streamlit
+
+    monkeypatch.setattr(streamlit, "secrets", {}, raising=False)
+    yield

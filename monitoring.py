@@ -16,6 +16,13 @@ worth surfacing, never silently treated as healthy.
 from __future__ import annotations
 
 from export import contact_has_core_data
+from geo import MAX_SHARED_COORD, haversine_distance
+from utils import get_state_from_zip, parse_db_timestamp, safe_company
+
+# Cap on how many individual violations a verdict enumerates. A wholesale
+# corruption produces thousands; the log line has to stay readable, and the
+# count in the message carries the magnitude.
+_MAX_LISTED_VIOLATIONS = 10
 
 # Limit types ZoomInfo reports; recordLimit is the one that maps to enrichment
 # credits, but any breaching limit is worth an alert.
@@ -282,3 +289,311 @@ def summarise_verdicts(verdicts: list[dict]) -> dict:
     problems = [v["message"] for v in verdicts if v.get("severity") != "ok"]
     message = "\n".join(problems) if problems else "All data-health checks passed."
     return {"severity": severity, "message": message, "verdicts": verdicts}
+
+
+# ---------------------------------------------------------------------------
+# Geography search output invariants (HADES-av6)
+#
+# These audit the RESULT of a radius search, not its inputs. The session-51
+# centroid corruption (452 SoCal ZIPs collapsed onto Torrance) ran silently for
+# months because every input looked fine.
+#
+# Each check needs an oracle independent of what it audits. Recomputing
+# haversine over the same centroid table that produced the rows is
+# self-referential — collapsed ZIPs report distance 0.0 and pass. So the
+# distance check (which does catch units errors, bounding-box filter bugs and
+# wrong-centre cache bugs) is paired with two independent signals: coordinate-
+# sharing density, and the ZIP-prefix-derived state from utils.
+# ---------------------------------------------------------------------------
+
+def _cap(violations: list[str]) -> list[str]:
+    """Truncate a violation list, recording how many were dropped."""
+    if len(violations) <= _MAX_LISTED_VIOLATIONS:
+        return violations
+    hidden = len(violations) - _MAX_LISTED_VIOLATIONS
+    return violations[:_MAX_LISTED_VIOLATIONS] + [f"... and {hidden} more"]
+
+
+def evaluate_radius_invariants(
+    center_zip: str,
+    radius_miles: float,
+    results,
+    *,
+    tolerance_miles: float = 0.5,
+    max_shared_coord: int = MAX_SHARED_COORD,
+) -> dict:
+    """Audit the output of geo.get_zips_in_radius().
+
+    Returns the standard verdict dict plus a "violations" list. An empty result
+    set is "ok" — an unknown centre ZIP legitimately returns nothing, and that
+    case is already surfaced to the operator by the page.
+
+    Severity is "critical" only for a centroid collapse, which means the
+    underlying dataset is corrupt and every search is affected; the rest are
+    "warning" (this search returned something suspect).
+    """
+    rows = list(results or [])
+    if not rows:
+        return {"severity": "ok", "message": "No ZIPs returned.", "violations": []}
+
+    violations: list[str] = []
+    collapsed = False
+
+    # 1. The centre must be present. get_zips_in_radius() always returns it at
+    #    0.0 miles when the ZIP resolves, so its absence means the result set
+    #    belongs to a different search (a caching or state-reuse bug).
+    by_zip = {str(r.get("zip")): r for r in rows}
+    center_row = by_zip.get(str(center_zip))
+    if center_row is None:
+        violations.append(
+            f"centre ZIP {center_zip} missing from its own {len(rows)}-ZIP result set"
+        )
+
+    # 2. Distances must agree with the coordinates, and stay inside the radius.
+    if center_row is not None:
+        c_lat, c_lng = center_row.get("lat"), center_row.get("lng")
+        limit = radius_miles + tolerance_miles
+        for row in rows:
+            lat, lng = row.get("lat"), row.get("lng")
+            if None in (lat, lng, c_lat, c_lng):
+                violations.append(f"{row.get('zip')}: missing coordinates")
+                continue
+            actual = haversine_distance(c_lat, c_lng, lat, lng)
+            claimed = row.get("distance_miles")
+            if actual > limit:
+                violations.append(
+                    f"{row.get('zip')}: {actual:.1f}mi from centre, outside the "
+                    f"{radius_miles}mi radius"
+                )
+            elif claimed is not None and abs(actual - float(claimed)) > tolerance_miles:
+                violations.append(
+                    f"{row.get('zip')}: reports {claimed}mi but its coordinates "
+                    f"are {actual:.1f}mi from centre"
+                )
+
+    # 3. Centroid collapse — the session-51 signature.
+    buckets: dict[tuple, list[str]] = {}
+    for row in rows:
+        buckets.setdefault((row.get("lat"), row.get("lng")), []).append(
+            str(row.get("zip"))
+        )
+    for (lat, lng), zips in buckets.items():
+        if len(zips) > max_shared_coord:
+            collapsed = True
+            violations.append(
+                f"{len(zips)} ZIPs share coordinate ({lat}, {lng}): "
+                f"{', '.join(sorted(zips)[:5])}"
+                + ("..." if len(zips) > 5 else "")
+            )
+
+    # 4. State must agree with the ZIP prefix — derived independently of the
+    #    centroid CSV, so it survives a corrupted or swapped dataset.
+    for row in rows:
+        zip_code = str(row.get("zip") or "")
+        expected = get_state_from_zip(zip_code)
+        actual_state = (row.get("state") or "").strip().upper()
+        if expected and actual_state and expected != actual_state:
+            violations.append(
+                f"{zip_code}: dataset says {actual_state}, ZIP prefix implies {expected}"
+            )
+
+    if not violations:
+        return {
+            "severity": "ok",
+            "message": f"{len(rows)} ZIPs within {radius_miles}mi of {center_zip}.",
+            "violations": [],
+        }
+
+    return {
+        "severity": "critical" if collapsed else "warning",
+        "message": (
+            f"Radius search from {center_zip} ({radius_miles}mi) returned "
+            f"{len(rows)} ZIPs with {len(violations)} invariant violation(s)."
+        ),
+        "violations": _cap(violations),
+    }
+
+
+def evaluate_lead_states(leads, expected_states) -> dict:
+    """Audit enriched leads against the states the search was scoped to.
+
+    The oracle is independent by construction: the state comes back from
+    ZoomInfo, the expectation is derived from our own ZIP list. A mismatch
+    means the API ignored a filter or the wrong result set was reused.
+
+    A blank state is NOT a violation — messy data is expected, and hollow
+    records are evaluate_enrichment_batch()'s job. An empty expected set is
+    "ok" too: manual-ZIP mode may not derive states, and there is nothing to
+    judge against.
+    """
+    expected = {str(s).strip().upper() for s in (expected_states or []) if str(s).strip()}
+    rows = list(leads or [])
+    if not expected or not rows:
+        return {
+            "severity": "ok",
+            "message": "No state expectation to check against.",
+            "violations": [],
+        }
+
+    violations: list[str] = []
+    checked = 0
+    for lead in rows:
+        raw = lead.get("state") or safe_company(lead).get("state") or ""
+        state = str(raw).strip().upper()
+        if not state:
+            continue  # blank is the enrichment-quality check's concern
+        checked += 1
+        if state not in expected:
+            company = safe_company(lead).get("name") or lead.get("companyName") or "?"
+            violations.append(f"{company}: state {state} outside {sorted(expected)}")
+
+    if not violations:
+        return {
+            "severity": "ok",
+            "message": f"{checked} leads all within {sorted(expected)}.",
+            "violations": [],
+        }
+
+    return {
+        "severity": "warning",
+        "message": (
+            f"{len(violations)} of {checked} leads fall outside the searched "
+            f"states {sorted(expected)}."
+        ),
+        "violations": _cap(violations),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Scheduled-job liveness (HADES-7qi)
+#
+# GitHub silently disables scheduled workflows in a repository with no activity
+# for 60 days. Every cron stops at once and NOTHING alerts, because the alert
+# channel is a failing run and there are no runs. The outage is pure silence,
+# so it has to be detected by absence: the daily job stamps its own completion
+# and this evaluator flags the stamp going stale.
+#
+# It works when the rest of the system is quiet — which matters, because with
+# the ZoomInfo entitlement lapsed there are no leads and no queries, so a
+# "last activity" indicator is already red for unrelated reasons and cannot
+# distinguish "no work to do" from "the schedule is dead".
+# ---------------------------------------------------------------------------
+
+def _parse_utc_timestamp(raw):
+    """Parse any timestamp shape this codebase writes, as UTC. None if unusable.
+
+    Three shapes reach these evaluators: `utils.utc_now_str()` writes
+    space-separated seconds, Zoho writes offset-aware ISO with microseconds,
+    and SQLite's CURRENT_TIMESTAMP writes bare text with no offset.
+
+    Delegates to `utils.parse_db_timestamp` rather than reimplementing the
+    parse — that function exists because reading a naive stamp as local time
+    (or blowing up on aware-minus-naive) is what pinned the home-page
+    freshness badge to "Unknown" forever, HADES-eke. Two copies of this rule
+    would drift, and the drift would be silent.
+    """
+    if raw is None:
+        return None
+    return parse_db_timestamp(raw if isinstance(raw, str) else str(raw))
+
+
+def _as_utc_now(now):
+    from datetime import datetime, timezone
+
+    current = now or datetime.now(timezone.utc)
+    return current.replace(tzinfo=timezone.utc) if current.tzinfo is None else current
+
+
+def evaluate_data_freshness(
+    last_updated,
+    *,
+    now=None,
+    warn_days: float = 1.0,
+    critical_days: float = 7.0,
+    label: str = "Data",
+) -> dict:
+    """Age a data source and grade it green / amber / red (HADES-1w2).
+
+    Built because the Geography page told operators their list was "synced from
+    Zoho CRM" while it had in fact been frozen for 159 days — the sync cron was
+    failing on missing secrets, and that signal went to a GitHub Actions email
+    rather than to the dropdown anyone was choosing from.
+
+    Absent or unreadable is "unknown", never "ok". A source that cannot say
+    when it was last updated has not proved it is fresh.
+    """
+    if not last_updated:
+        return {
+            "severity": "unknown",
+            "age_days": None,
+            "message": f"{label}: never synced — freshness unknown.",
+        }
+
+    stamp = _parse_utc_timestamp(last_updated)
+    if stamp is None:
+        return {
+            "severity": "unknown",
+            "age_days": None,
+            "message": f"{label}: timestamp {last_updated!r} is unreadable — freshness unknown.",
+        }
+
+    # Clamp negative ages: clock skew between Turso and the app must not flip a
+    # fresh source to critical.
+    age_days = max(0, int((_as_utc_now(now) - stamp).total_seconds() // 86400))
+
+    if age_days >= critical_days:
+        severity = "critical"
+    elif age_days >= warn_days:
+        severity = "warning"
+    else:
+        severity = "ok"
+
+    if severity == "ok":
+        message = f"{label}: updated today."
+    else:
+        message = f"{label}: last updated {age_days} days ago."
+    return {"severity": severity, "age_days": age_days, "message": message}
+
+
+def evaluate_scheduled_job_freshness(
+    last_run: str | None,
+    *,
+    now=None,
+    max_age_hours: float = 48.0,
+    label: str = "Daily data-anomaly check",
+) -> dict:
+    """Flag a scheduled job whose last-run stamp has gone stale.
+
+    An absent or unparseable stamp is "unknown", never "ok" — the same rule the
+    usage evaluator follows. A signal you cannot read is not a healthy signal.
+    """
+    if not last_run:
+        return {
+            "severity": "unknown",
+            "message": f"{label}: never recorded a run — cannot tell if the schedule is live.",
+        }
+
+    stamp = _parse_utc_timestamp(last_run)
+    if stamp is None:
+        return {
+            "severity": "unknown",
+            "message": f"{label}: last-run stamp {last_run!r} is unreadable.",
+        }
+
+    current = _as_utc_now(now)
+    age_hours = (current - stamp).total_seconds() / 3600.0
+    if age_hours <= max_age_hours:
+        return {
+            "severity": "ok",
+            "message": f"{label}: last ran {age_hours:.0f}h ago.",
+        }
+
+    return {
+        "severity": "critical",
+        "message": (
+            f"{label}: last ran {age_hours:.0f}h ago (limit {max_age_hours:.0f}h). "
+            "Scheduled workflows may have been disabled — GitHub turns them off "
+            "after 60 days of repository inactivity, and a stopped schedule "
+            "raises no alert of its own."
+        ),
+    }

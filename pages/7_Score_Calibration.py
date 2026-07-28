@@ -229,6 +229,25 @@ with tab_calibration:
             if emp_comps:
                 for comp in emp_comps:
                     _render_calibration_item(comp, "emp")
+            else:
+                # Explain the absence. Buckets below the sample threshold carry
+                # no score (HADES-7qi), and a silently empty section reads as
+                # "nothing to change" rather than "not enough data to say".
+                _thin = {
+                    b: v.get("total", 0)
+                    for b, v in rates.get("employee_scores", {}).items()
+                    if v.get("score") is None and v.get("total", 0) > 0
+                }
+                if _thin:
+                    st.caption(
+                        "No employee-scale suggestions: every bucket is below the "
+                        "minimum sample size, so a rate here would be noise. "
+                        + ", ".join(f"{b} has {n} record{'s' if n != 1 else ''}"
+                                    for b, n in _thin.items())
+                        + ". Existing scores left unchanged."
+                    )
+                else:
+                    st.caption("No employee-scale outcome data yet.")
 
             # Apply button
             st.markdown("---")

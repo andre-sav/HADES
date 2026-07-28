@@ -83,7 +83,7 @@ HADES/
 │   ├── import_vs_leads.py        # Bulk-import VS contact export for dedup
 │   └── _credentials.py           # Credential loader (env → toml → st.secrets)
 ├── .github/workflows/
-│   └── intent-poll.yml           # Daily intent poll (Mon-Fri 7AM ET)
+│   └── intent-poll.yml           # Daily intent poll (Mon-Fri 12:00 UTC = 7 AM ET winter / 8 AM EDT)
 ├── tests/                # 704 tests (pytest)
 └── docs/
     └── stories/          # User stories with acceptance criteria
@@ -187,6 +187,82 @@ After a push, sanity-check:
       build log for install failures.
 
 Force restart (any reason): Streamlit Cloud dashboard → app → Manage → **Reboot app**.
+
+## Disaster recovery — Turso point-in-time restore (HADES-9p9)
+
+> ⚠️ **This procedure has NOT been rehearsed.** An untested restore is not a
+> restore. Steps 0 and 6 below are outstanding; treat the timings as unverified
+> until someone has run it once on a throwaway database.
+
+Turso ships PITR on **every** plan, so no custom backup is needed. Backups are
+taken automatically at COMMIT. Retention depends on the plan:
+
+| Plan | Restore window |
+|---|---|
+| Free | **24 hours** |
+| Developer | 10 days |
+| Scaler | 30 days |
+| Pro | 90 days |
+
+**Step 0 (do this now, not during an incident): confirm which plan this account
+is on.** `turso db show hades-pipeline` after `turso auth login`.
+
+**If the answer is Free, the retention gap is the finding, not the procedure.**
+`data_anomaly_check` runs at 07:00 UTC and deliberately measures the *last
+completed* day, so damage done early on day N is not reported until 07:00 on
+day N+1 — a detection latency of up to ~31 hours. A 24-hour restore window
+closes **before** the alarm goes off: the system would be detecting corruption
+it can no longer undo. On Developer (10 days) or higher the two windows overlap
+comfortably. Nothing else in the recovery design matters as much as which side
+of that line this account is on — record the answer on HADES-njr.
+
+### The trap specific to HADES
+
+PITR **cannot restore in place.** It creates a *new* database with a *new* URL
+and a *new* auth token. HADES reads that pair from **three** independent places:
+
+1. **Streamlit Cloud** → Settings → Secrets (the UI reads it — `db/__init__.py`)
+2. **GitHub Actions** repo secrets — used by **five** workflows:
+   `intent-poll`, `zoho-operator-sync`, `data-anomaly-check`,
+   `purge-soft-deleted`, `zoominfo-health-check`
+3. **`.streamlit/secrets.toml`** locally, for manual scripts
+
+Update one and miss another and you get **split brain**: the UI reads the
+restored database while the crons keep writing to the damaged one. Two of those
+crons mutate data — `zoho-operator-sync` rewrites operators nightly and
+`purge-soft-deleted` issues DELETEs — so the damaged copy keeps diverging while
+looking healthy. Disabling the crons is therefore step 1, not an afterthought.
+
+### Restore runbook
+
+1. **Stop the writers first.** GitHub → Actions → for each of the five
+   workflows above → `···` → **Disable workflow**. Then Streamlit Cloud →
+   Manage app → **Reboot** is *not* enough; if operators may still be using the
+   UI, take the app down or tell them to stop.
+2. **Pick the timestamp.** RFC-3339 UTC, a minute or two *before* the damage.
+   Note PITR has a **~15-second gap** immediately before the target — writes in
+   that window may not survive, so do not aim for the last possible second.
+3. **Create the restored copy** (this does not touch the original):
+   ```bash
+   turso db create hades-pipeline-restore \
+     --from-db hades-pipeline --timestamp 2026-07-27T13:45:00Z
+   ```
+4. **Verify before cutting over.** `turso db shell hades-pipeline-restore` and
+   check the damage is absent and recent good data is present. Row counts worth
+   sanity-checking: `operators`, `vanillasoft_leads`, `staged_exports`.
+   `mutation_log` is the forensic trail for *what* happened (HADES-6if).
+5. **Cut over all three locations** in the list above with the new URL and a
+   fresh token (`turso db tokens create hades-pipeline-restore`). Missing one is
+   the split-brain failure.
+6. **Re-enable the five workflows**, then run `data-anomaly-check` manually —
+   its baselines live in `sync_metadata` and will have travelled back in time
+   with the restore, so expect one noisy run.
+
+**Costs / gotchas:** the restored database counts against the plan's database
+quota; the original is *not* deleted automatically (delete it only once the
+restore is confirmed good — it is the sole copy of anything written after the
+timestamp); and every credential is new, so nothing that hardcodes the old URL
+will fail loudly, it will simply keep talking to the old database.
 
 ## ZoomInfo Contact Search API
 

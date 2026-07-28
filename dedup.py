@@ -3,6 +3,7 @@ Deduplication logic for phone numbers and cross-workflow leads.
 """
 
 import logging
+import html
 import re
 from functools import lru_cache
 
@@ -45,12 +46,37 @@ def normalize_company_name(name: str) -> str:
     if not name:
         return ""
 
-    # Lowercase
-    normalized = name.lower().strip()
+    # Decode HTML entities FIRST. ZoomInfo returns escaped names, and
+    # punctuation-stripping turns an undecoded "&amp;" into the token "amp" —
+    # "Smith &amp; Sons" vs "Smith & Sons" then scores 81.8, under the 85
+    # fuzzy threshold, and a known duplicate is pushed as a new lead.
+    normalized = html.unescape(name)
 
-    # Strip common suffixes
-    for suffix in COMPANY_SUFFIXES:
-        normalized = re.sub(suffix, "", normalized, flags=re.IGNORECASE)
+    # Lowercase
+    normalized = normalized.lower().strip()
+
+    # Strip common suffixes, repeatedly until nothing more comes off.
+    #
+    # A single pass in list order is order-dependent, because every pattern is
+    # $-anchored: "acme corp, llc" loses " llc", leaving "acme corp," — but the
+    # "corp" pattern sits EARLIER in the list and has already been passed, so
+    # it never gets stripped. That scored 61.5 against "Acme Corporation" and
+    # pushed a known duplicate as a new lead (HADES-7qi).
+    #
+    # Trailing commas/periods are cleared between passes so the next anchored
+    # pattern can see the end of the string.
+    for _ in range(len(COMPANY_SUFFIXES)):  # bounded; converges long before this
+        previous = normalized
+        candidate = normalized.strip().rstrip(",.").strip()
+        for suffix in COMPANY_SUFFIXES:
+            stripped = re.sub(suffix, "", candidate, flags=re.IGNORECASE)
+            # Never strip a name down to nothing: an empty key would collide
+            # with every other empty key in the dedup map.
+            if stripped.strip():
+                candidate = stripped
+        normalized = candidate
+        if normalized == previous:
+            break
 
     # Remove punctuation except spaces
     normalized = re.sub(r"[^\w\s]", "", normalized)

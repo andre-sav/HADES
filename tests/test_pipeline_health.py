@@ -4,12 +4,9 @@ Tests for Pipeline Health page helpers.
 Run with: pytest tests/test_pipeline_health.py -v
 """
 
-import sys
-from unittest.mock import MagicMock
 from datetime import datetime, timedelta
 
 # Mock streamlit before importing
-sys.modules["streamlit"] = MagicMock()
 
 # Import the real time_ago from utils (tests the actual implementation)
 from utils import time_ago

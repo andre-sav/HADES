@@ -7,11 +7,6 @@ leaks raw API messages into user_message, these tests will catch it.
 """
 
 import re
-import sys
-from unittest.mock import MagicMock
-
-# Mock streamlit before importing modules that depend on it
-sys.modules.setdefault("streamlit", MagicMock())
 
 from errors import (
     PipelineError,

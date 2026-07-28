@@ -4,13 +4,11 @@ Tests for ZoomInfo API client.
 Run with: pytest tests/test_zoominfo_client.py -v
 """
 
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Mock streamlit before importing
-sys.modules["streamlit"] = MagicMock()
 
 from zoominfo_client import (
     ZoomInfoClient,

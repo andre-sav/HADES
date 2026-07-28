@@ -4,15 +4,33 @@ Tests for ui_components module - workflow_run_state and export_validation_checkl
 Run with: pytest tests/test_ui_components.py -v
 """
 
-import sys
 from unittest.mock import MagicMock
 
-# Mock streamlit before importing
+import pytest
+
+import ui_components
+from ui_components import workflow_run_state, export_validation_checklist, narrative_metric, company_card_header, score_breakdown, expansion_timeline, format_contact_label
+
+# These functions read st.session_state, which real streamlit refuses to serve
+# outside a script run — so streamlit genuinely has to be stubbed here.
+#
+# It is stubbed by patching ui_components' own module global rather than by
+# assigning sys.modules["streamlit"], which is what the other 13 test modules
+# used to do. That assignment is never undone, so whichever test module pytest
+# imported first won the whole session: every repo module imported afterwards
+# bound THAT mock as its `st`. It broke tests/test_page_imports.py in two ways
+# (a MagicMock is not a package, so `import streamlit.components.v1` raised;
+# a mocked st.stop() does not halt) and would break any future test needing
+# real streamlit semantics. See HADES-w1k.
 mock_st = MagicMock()
 mock_st.session_state = {}
-sys.modules["streamlit"] = mock_st
 
-from ui_components import workflow_run_state, export_validation_checklist, narrative_metric, company_card_header, score_breakdown, expansion_timeline, format_contact_label
+
+@pytest.fixture(autouse=True)
+def _stub_streamlit(monkeypatch):
+    """Point ui_components at the stub for one test, then restore it."""
+    monkeypatch.setattr(ui_components, "st", mock_st)
+    yield mock_st
 
 
 class TestWorkflowRunState:

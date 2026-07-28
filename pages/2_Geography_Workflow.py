@@ -8,12 +8,17 @@ import html as html_mod
 import json
 import logging
 import threading
+from pathlib import Path
 
 import streamlit as st
 from keyboard_shortcuts import inject_ctrl_enter_shortcut
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+_ROOT = Path(__file__).resolve().parents[1]
+ZIP_CENTROID_PATH = _ROOT / "data" / "zip_centroids.csv"
+ICP_CONFIG_PATH = _ROOT / "config" / "icp.yaml"
 import pandas as pd
 from datetime import datetime
 
@@ -49,6 +54,14 @@ from utils import (
     get_default_phone_fields,
     get_default_radius,
     get_default_target_contacts,
+    surface_data_anomaly,
+    file_mtime_iso,
+    parse_manual_zip_list,
+)
+from monitoring import (
+    evaluate_data_freshness,
+    evaluate_lead_states,
+    evaluate_radius_invariants,
 )
 from geo import get_zips_in_radius, get_states_from_zips, get_state_counts_from_zips, load_zip_centroids, distance_between_zips
 from expand_search import (
@@ -63,6 +76,8 @@ from expand_search import (
     DEFAULT_START_EMPLOYEE_MAX,
 )
 from ui_components import (
+    data_anomaly_banner,
+    freshness_caption,
     inject_base_styles,
     page_header,
     step_indicator,
@@ -141,6 +156,7 @@ defaults = {
     "geo_enriched_contacts": None,  # Enriched contacts (credits used)
     "geo_enrichment_done": False,
     "geo_company_enrich_done": False,  # Company Enrich (SIC/industry/employee)
+    "geo_company_enrich_attempts": 0,  # bounded retry after a transient failure
     "geo_usage_logged": False,  # Prevent double-logging on refresh
     # API Request confirmation
     "geo_request_previewed": False,  # Whether user has seen the full request
@@ -207,6 +223,8 @@ def _reset_geo_search_state():
     st.session_state.geo_exported = False
     st.session_state.geo_leads_staged = False
     st.session_state.geo_company_enrich_done = False
+    st.session_state.geo_company_enrich_attempts = 0
+    st.session_state.pop("geo_company_enrich_degraded", None)
     st.session_state.geo_params_hash = None
     st.session_state.geo_query_params = None
     st.session_state.geo_dedup_result = None
@@ -241,6 +259,9 @@ page_header(
     caption="Find contacts within an operator's service territory",
     right_content=(status_badge("info", f"{credits:,} credits"), "This week"),
 )
+
+# Runtime invariant violations from the radius search or enrichment (HADES-av6).
+data_anomaly_banner()
 
 # =============================================================================
 # LAST RUN INDICATOR
@@ -418,6 +439,29 @@ if operator_mode == "Select existing":
                 f"Type any name to search all {len(operators):,} operators — synced from Zoho CRM."
             )
 
+        # How old is that Zoho sync? The caption above has always claimed the
+        # list is "synced from Zoho CRM" without saying when — and on
+        # 2026-07-27 every operator was 159 days stale because the sync cron
+        # had been failing on missing secrets (HADES-jdi). The failure alerted
+        # to a GitHub Actions email; nothing reached the person choosing from
+        # this dropdown (HADES-1w2, insurance M8).
+        try:
+            _op_freshness = evaluate_data_freshness(
+                db.get_sync_value("zoho_operators_last_sync"),
+                label="Operators synced from Zoho",
+            )
+            freshness_caption(
+                _op_freshness,
+                # Only tell them what to do when there is something to do.
+                suffix=(
+                    "— the Zoho sync is not running; these details may be out of date"
+                    if _op_freshness["severity"] in ("warning", "critical", "unknown")
+                    else ""
+                ),
+            )
+        except Exception:
+            logger.warning("Could not render operator freshness", exc_info=True)
+
         operator_options = {}
         if recent_ops:
             for op in recent_ops:
@@ -586,16 +630,32 @@ if has_operator:
             if zip_codes:
                 _centroids = load_zip_centroids()
                 _zip_data = []
+                _unresolved_template_zips: list[str] = []
                 for z in zip_codes:
                     if z in _centroids:
                         _lat, _lng, _st = _centroids[z]
                         _zip_data.append({"zip": z, "state": _st, "lat": _lat, "lng": _lng})
                     else:
-                        _zip_data.append({"zip": z, "state": "?"})
+                        # Fall back to the ZIP-prefix oracle rather than "?" —
+                        # that placeholder flowed into get_states_from_zips and
+                        # was sent to ZoomInfo as a state filter value, which
+                        # no state matches (HADES-7qi).
+                        _fallback_state = get_state_from_zip(z)
+                        if _fallback_state:
+                            _zip_data.append({"zip": z, "state": _fallback_state})
+                        else:
+                            _unresolved_template_zips.append(z)
                 states = get_states_from_zips(_zip_data)
                 state_counts = get_state_counts_from_zips(_zip_data)
                 state_display = ", ".join(f"{s} ({state_counts[s]})" for s in states)
                 st.success(f"📍 Template: **{_selected_template_name}** — {len(zip_codes)} ZIPs, {radius}mi radius · States: {state_display}")
+                if _unresolved_template_zips:
+                    st.warning(
+                        f"{len(_unresolved_template_zips)} ZIP(s) in this template "
+                        "are not in the centroid data and have no derivable state, "
+                        "so they are excluded from the state filter: "
+                        + ", ".join(_unresolved_template_zips[:8])
+                    )
                 calculated_zips = _zip_data
             else:
                 states = []
@@ -611,6 +671,19 @@ if has_operator:
                 value=default_zip,
                 placeholder="Enter center ZIP code",
                 help="All ZIP codes within the radius will be searched",
+            )
+            # Where the radius maths actually comes from. The session-51
+            # collapse ran for months partly because nothing named the data
+            # source or its age (HADES-1w2).
+            freshness_caption(
+                evaluate_data_freshness(
+                    file_mtime_iso(ZIP_CENTROID_PATH),
+                    label="Centroid data (Census 2024 ZCTA)",
+                    warn_days=400, critical_days=800,
+                ),
+                # mtime is when THIS COPY landed — a deploy resets it. Say so,
+                # or "updated today" reads as "someone edited the data today".
+                suffix="· file timestamp, resets on deploy",
             )
 
         with col2:
@@ -652,6 +725,11 @@ if has_operator:
 
         if is_valid_zip:
             calculated_zips = get_zips_in_radius(center_zip_clean, radius)
+            surface_data_anomaly(
+                evaluate_radius_invariants(center_zip_clean, radius, calculated_zips),
+                context=f"radius search {center_zip_clean} @ {radius}mi",
+                store=st.session_state,
+            )
             zip_codes = [z["zip"] for z in calculated_zips]
             states = get_states_from_zips(calculated_zips)
             state_counts = get_state_counts_from_zips(calculated_zips)
@@ -686,8 +764,24 @@ if has_operator:
         )
 
         # Parse inputs for manual mode
-        raw_zips = [z.strip() for z in manual_zips.replace("\n", ",").split(",") if z.strip()]
-        zip_codes = [z for z in raw_zips if z.isdigit() and len(z) == 5]
+        # Recover ZIP+4 and zero-dropped forms rather than dropping them, and
+        # NAME anything genuinely unusable — the old filter kept only exact
+        # 5-digit tokens and said nothing, so a paste of 50 ZIPs could search
+        # 47 with no indication (HADES-7qi).
+        zip_codes, _skipped_zips, _adjusted_zips = parse_manual_zip_list(manual_zips)
+        if _adjusted_zips:
+            st.caption(
+                "Interpreted "
+                + ", ".join(f"`{raw}` as **{used}**" for raw, used in _adjusted_zips[:6])
+                + ("…" if len(_adjusted_zips) > 6 else "")
+            )
+        if _skipped_zips:
+            st.warning(
+                f"Skipped {len(_skipped_zips)} entr"
+                f"{'y' if len(_skipped_zips) == 1 else 'ies'} that are not "
+                f"recognisable ZIP codes: {', '.join(_skipped_zips[:8])}"
+                + ("…" if len(_skipped_zips) > 8 else "")
+            )
         radius = 0  # No radius for manual ZIP list
         center_zip_clean = None  # Not applicable in manual mode
         is_valid_zip = False  # Not applicable in manual mode
@@ -835,6 +929,17 @@ if has_operator:
     # Industry Filters
     with st.expander("Industry Filters", expanded=False):
         st.caption(f"Employees: {get_employee_minimum():,} - {get_employee_maximum():,}")
+        # Calibration rewrites icp.yaml, and on Streamlit Cloud that write
+        # lands on an ephemeral FS — so "when did this copy last change"
+        # is a real question when scores look wrong (HADES-zw1, HADES-1w2).
+        freshness_caption(
+            evaluate_data_freshness(
+                file_mtime_iso(ICP_CONFIG_PATH),
+                label="ICP config",
+                warn_days=90, critical_days=365,
+            ),
+            suffix="· file timestamp, resets on deploy",
+        )
 
         default_sic_codes = get_sic_codes()
         sic_options = get_sic_codes_with_descriptions()
@@ -1142,6 +1247,16 @@ if has_operator:
         """Process expand_search result and populate session state."""
         st.session_state.geo_expansion_result = result
         _rl = st.session_state.get("geo_run_logger")
+
+        # Expansion sweeps run on a background thread and cannot touch session
+        # state, so their invariant verdicts travel back in the result dict.
+        # Raise the same banner here, on the script thread (HADES-av6).
+        for _violation in result.get("invariant_violations") or []:
+            surface_data_anomaly(
+                {"severity": "warning", "message": _violation, "violations": []},
+                context="expansion radius search",
+                store=st.session_state,
+            )
 
         if result.get("error"):
             st.error(f"Search failed: {result['error']}")
@@ -1731,6 +1846,19 @@ if (st.session_state.geo_selection_confirmed and st.session_state.geo_selected_c
                         person_ids=person_ids,
                         output_fields=DEFAULT_ENRICH_OUTPUT_FIELDS,
                     )
+                    # Auto-expansion can widen the radius across a state line, so
+                    # the expectation is every state actually searched — using
+                    # only the initial set would flag legitimate border leads.
+                    _expected_states = (
+                        (st.session_state.get("geo_expansion_result") or {}).get("states_searched")
+                        or (st.session_state.get("geo_last_search_params") or {}).get("states")
+                        or []
+                    )
+                    surface_data_anomaly(
+                        evaluate_lead_states(enriched, _expected_states),
+                        context="contact enrichment",
+                        store=st.session_state,
+                    )
                     st.session_state.geo_enriched_contacts = enriched
                     st.session_state.geo_enrichment_done = True
                     _rl = st.session_state.get("geo_run_logger")
@@ -1862,13 +1990,36 @@ if st.session_state.geo_enrichment_done and st.session_state.geo_enriched_contac
                     if _rl:
                         _rl.info(f"Company Enrich: {len(company_data)} merged")
                         _rl.set_metric("companies_enriched", len(company_data))
+                    st.session_state.geo_company_enrich_done = True
+                    st.session_state.pop("geo_company_enrich_degraded", None)
                 except Exception as e:
+                    # Do NOT mark done here. Company Enrich fills sicCode,
+                    # industry and employeeCount, which drive ~60% of the
+                    # geography composite — marking a transient 429 as "done"
+                    # forfeited them for the whole session and left scoring
+                    # quietly running on defaults while still passing the
+                    # core-data guard (HADES-7qi).
                     logger.warning("Company Enrich failed (non-fatal): %s", e, exc_info=True)
                     if _rl:
                         _rl.warn(f"Company Enrich failed: {e}")
-                st.session_state.geo_company_enrich_done = True
+                    _attempts = st.session_state.get("geo_company_enrich_attempts", 0) + 1
+                    st.session_state.geo_company_enrich_attempts = _attempts
+                    st.session_state.geo_company_enrich_degraded = str(e)
+                    if _attempts >= 3:
+                        # Bounded: stop retrying on every rerun once it is
+                        # clearly not transient, but stay loud about it.
+                        st.session_state.geo_company_enrich_done = True
             else:
                 st.session_state.geo_company_enrich_done = True
+
+    # Degraded scoring must be visible, not just logged — the operator is about
+    # to act on these scores.
+    if st.session_state.get("geo_company_enrich_degraded"):
+        st.warning(
+            "Company Enrich failed, so SIC code, industry and employee count are "
+            "missing. Scores are degraded — employee scale and on-site likelihood "
+            "fell back to defaults. Re-run the search to retry."
+        )
 
     # Score the enriched contacts
     scored = score_geography_leads(

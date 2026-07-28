@@ -24,13 +24,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from utils import ZIP_PREFIX_TO_STATE, ZIP_EXCEPTIONS_TO_STATE  # noqa: E402
+from geo import MAX_SHARED_COORD  # noqa: E402  (shared with the runtime check)
 
 GAZETTEER_URL = (
     "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/"
     "2024_Gazetteer/2024_Gaz_zcta_national.zip"
 )
 OUTPUT = ROOT / "data" / "zip_centroids.csv"
-MAX_SHARED_COORD = 3  # in-state collision threshold; legitimate overlap is rare
 
 
 def fetch_gazetteer() -> list[dict]:

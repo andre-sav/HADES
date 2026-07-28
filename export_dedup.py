@@ -63,8 +63,16 @@ def get_previously_exported(db, days_back: int = 365,
     vs_by_phone: dict[str, dict] = {}          # person-level: standalone proof
     vs_by_company_phone: dict[str, dict] = {}  # company-level: needs ZIP
     for entry in db.get_vs_dedup_index(days_back=days_back):
-        if entry.get("company_norm"):
-            vs_by_name.setdefault(entry["company_norm"], []).append(entry)
+        # Re-derive the key rather than trusting the stored company_norm.
+        # That column was computed by normalize_company_name at IMPORT time,
+        # so any change to that function (the suffix-stripping fix, the HTML
+        # entity fix) strands every persisted key: no freshly-normalised name
+        # can match them, and VS dedup silently stops catching those leads
+        # across 18k+ rows. Fall back to the stored value only when the row
+        # has no company_name to derive from (HADES-7qi).
+        key = normalize_company_name(entry.get("company_name") or "") or entry.get("company_norm")
+        if key:
+            vs_by_name.setdefault(key, []).append(entry)
         # Two indexes, because a match on the VS "Business" column is only
         # company-level evidence and needs ZIP corroboration (N2-07).
         for key in _VS_PERSON_PHONE_KEYS:
@@ -79,6 +87,19 @@ def get_previously_exported(db, days_back: int = 365,
     return {"by_id": by_id, "by_name": by_name,
             "vs_by_name": vs_by_name, "vs_by_phone": vs_by_phone,
             "vs_by_company_phone": vs_by_company_phone}
+
+
+def _entry_zip(entry: dict) -> str | None:
+    """Normalise a STORED vanillasoft_leads.zip before comparing it.
+
+    That column is normalize_zip() output persisted at import time, so it is a
+    derived value frozen at whatever the function did then. Comparing it raw
+    against a freshly normalised contact ZIP means any future change to
+    normalize_zip silently stops the franchise-safety corroboration from
+    matching, and a duplicate lead ships. Cheap to re-derive; the class has
+    already bitten once via company_norm (HADES-7qi).
+    """
+    return normalize_zip(entry.get("zip") or "")
 
 
 def _match_vs_lead(contact: dict, vs_by_name: dict, vs_by_phone: dict,
@@ -110,19 +131,19 @@ def _match_vs_lead(contact: dict, vs_by_name: dict, vs_by_phone: dict,
             if not ph:
                 continue
             entry = vs_by_company_phone.get(ph)
-            if entry and entry.get("zip") == czip:
+            if entry and _entry_zip(entry) == czip:
                 return entry
         for f in _COMPANY_PHONE_FIELDS:
             ph = normalize_phone(contact.get(f))
             entry = vs_by_phone.get(ph) if ph else None
-            if entry and entry.get("zip") == czip:
+            if entry and _entry_zip(entry) == czip:
                 return entry
 
     if vs_by_name and czip:
         normalized = normalize_company_name(contact.get("companyName", "") or "")
         if normalized:
             for entry in vs_by_name.get(normalized, []):
-                if entry.get("zip") and entry["zip"] == czip:
+                if _entry_zip(entry) == czip:
                     return entry
     return None
 
@@ -235,3 +256,47 @@ def apply_export_dedup(
         "total_before_filter": total_before,
         "days_back": days_back,
     }
+
+
+def partition_companies_for_enrichment(
+    companies: dict,
+    cached_ids: dict,
+    lookup: dict,
+) -> tuple[dict, list[dict]]:
+    """Split selected intent companies into (worth enriching, already exported).
+
+    The headless pipeline filters previously-exported companies BEFORE
+    enrichment; the Intent UI only filtered at export time, so every company
+    already exported inside the dedup window was enriched — real credits spent
+    on leads that were then discarded downstream (HADES-7qi).
+
+    Matching runs before numeric company IDs exist for most companies, so it
+    leans on `filter_previously_exported`'s normalized-name fallback (including
+    its franchise-safety rules) and uses the numeric ID only where the company
+    ID cache already has one, which is a stronger match.
+
+    Args:
+        companies: {hashed_company_id: lead dict} the operator selected.
+        cached_ids: {hashed_company_id: {"numeric_id": ...}} from the ID cache.
+        lookup: the dict returned by `get_previously_exported`.
+
+    Returns:
+        (kept, skipped) — `kept` is the same {hashed_id: lead} shape with the
+        original lead objects intact so it can feed enrichment directly;
+        `skipped` is a list of the lead dicts, each tagged by
+        `filter_previously_exported` with its `_previously_exported` metadata.
+    """
+    candidates = []
+    for hashed_id, lead in companies.items():
+        candidate = dict(lead)
+        candidate["_hashed_company_id"] = hashed_id
+        cached = cached_ids.get(hashed_id) or {}
+        if cached.get("numeric_id"):
+            candidate["companyId"] = cached["numeric_id"]
+        candidates.append(candidate)
+
+    new_candidates, skipped = filter_previously_exported(candidates, lookup)
+
+    kept_ids = {c.get("_hashed_company_id") for c in new_candidates}
+    kept = {hid: lead for hid, lead in companies.items() if hid in kept_ids}
+    return kept, skipped

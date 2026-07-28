@@ -25,6 +25,12 @@ from utils import get_sic_codes, get_employee_minimum, get_employee_maximum
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# One page cap for every contact-search path. Three call sites hardcoded 5
+# while search_contacts_all_pages defaulted to 10, so whichever path forgot to
+# pass it swept twice as deep and reported a different "N found" for the same
+# query. `_search_was_truncated` flags when the cap actually bites (HADES-7qi).
+DEFAULT_SEARCH_MAX_PAGES = 5
+
 # Set up console handler if not already configured
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -264,7 +270,7 @@ class ZoomInfoClient:
                 return None
             return Fernet(key.encode() if isinstance(key, str) else key)
         except Exception as e:
-            logger.debug(f"Could not initialize Fernet: {e}")
+            logger.warning(f"Could not initialize Fernet — token will not be encrypted at rest: {e}")
             return None
 
     def _load_persisted_token(self) -> None:
@@ -281,7 +287,7 @@ class ZoomInfoClient:
                 data = json.loads(decrypted.decode())
             else:
                 # No encryption key — cannot read encrypted data, skip
-                logger.debug("No ZOOMINFO_TOKEN_KEY — cannot decrypt persisted token")
+                logger.warning("No ZOOMINFO_TOKEN_KEY — cannot decrypt persisted token; re-authenticating every run")
                 return
 
             token = data.get("jwt")
@@ -292,7 +298,7 @@ class ZoomInfoClient:
                     self.access_token = token
                     self.token_expires_at = expires_at
         except Exception as e:
-            logger.debug(f"Could not load persisted token: {e}")
+            logger.warning(f"Could not load persisted token — re-authenticating: {e}")
 
     def _persist_token(self) -> None:
         """Encrypt and save current token to database."""
@@ -312,7 +318,7 @@ class ZoomInfoClient:
             encrypted = fernet.encrypt(plaintext.encode()).decode()
             self._token_store.set_sync_value("zoominfo_token", encrypted)
         except Exception as e:
-            logger.debug(f"Could not persist token: {e}")
+            logger.warning(f"Could not persist token — every run will re-authenticate: {e}")
 
     def _authenticate(self) -> None:
         """Obtain OAuth access token."""
@@ -957,7 +963,7 @@ class ZoomInfoClient:
     def search_contacts_all_pages(
         self,
         params: ContactQueryParams,
-        max_pages: int = 10,
+        max_pages: int = DEFAULT_SEARCH_MAX_PAGES,
         progress_callback=None,
     ) -> list[dict]:
         """

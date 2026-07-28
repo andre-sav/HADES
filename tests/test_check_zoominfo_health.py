@@ -8,7 +8,6 @@ import sys
 from unittest.mock import MagicMock, patch
 
 # Mock Streamlit and libsql before importing modules
-sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
 import scripts.check_zoominfo_health as health

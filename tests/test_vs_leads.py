@@ -10,7 +10,6 @@ import sys
 from unittest.mock import MagicMock
 
 
-sys.modules.setdefault("streamlit", MagicMock())
 sys.modules.setdefault("libsql_experimental", MagicMock())
 
 from vs_leads import VsParse, normalize_phone, parse_vs_export

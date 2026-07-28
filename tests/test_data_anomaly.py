@@ -8,7 +8,6 @@ filter change. Pure logic — the scheduled script wires DB reads into these.
 import sys
 from unittest.mock import MagicMock
 
-sys.modules.setdefault("streamlit", MagicMock())
 sys.modules.setdefault("libsql_experimental", MagicMock())
 
 from monitoring import (

@@ -4,11 +4,8 @@ Tests for the pipeline error hierarchy.
 Run with: pytest tests/test_errors.py -v
 """
 
-import sys
-from unittest.mock import MagicMock
 
 # Mock streamlit before importing modules that depend on it
-sys.modules["streamlit"] = MagicMock()
 
 from errors import (
     PipelineError,

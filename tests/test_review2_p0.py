@@ -9,7 +9,6 @@ import sqlite3
 import sys
 from unittest.mock import MagicMock
 
-sys.modules.setdefault("streamlit", MagicMock())
 sys.modules.setdefault("libsql_experimental", MagicMock())
 
 from dedup import find_duplicates, get_dedup_key, merge_lead_lists, dedupe_leads

@@ -4,11 +4,8 @@ Tests for title preference tracking.
 Run with: pytest tests/test_title_prefs.py -v
 """
 
-import sys
-from unittest.mock import MagicMock
 
 # Mock streamlit before importing
-sys.modules["streamlit"] = MagicMock()
 
 from db._title_prefs import TitlePrefsMixin, _normalize_title
 

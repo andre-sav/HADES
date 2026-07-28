@@ -4,7 +4,6 @@ import sys
 from unittest.mock import MagicMock
 
 # Mock external dependencies before importing
-sys.modules["streamlit"] = MagicMock()
 sys.modules["libsql_experimental"] = MagicMock()
 
 from export_dedup import (

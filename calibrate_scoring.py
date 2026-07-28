@@ -101,12 +101,38 @@ def main():
     print()
 
     # --- Resolve SIC codes ---
+    #
+    # The override rescue used to run only for DELIVERED rows. That inflates
+    # every rate it touches: the numerator gains the rescued deliveries while
+    # the denominator never gains the corresponding non-delivered rows, and
+    # those inflated rates then set the min-max scale behind the shipped
+    # icp.yaml on-site scores. Applied to every row now (HADES-7qi).
+    #
+    # Note this fixes the CODE asymmetry only. If the override file was itself
+    # compiled by researching delivered companies, the residual bias lives in
+    # the data — which is why the rescue split is printed below rather than
+    # left implicit.
+    rescued_delivered = rescued_not = 0
     for r in rows:
         sic = extract_sic(r.get("vs_sic", ""))
-        if not sic and r["_delivered"]:
-            # Try manual overrides for delivered records without SIC
+        if not sic:
             sic = extract_sic(overrides.get(r.get("company_name", "").strip(), ""))
+            if sic:
+                if r["_delivered"]:
+                    rescued_delivered += 1
+                else:
+                    rescued_not += 1
         r["_sic"] = sic
+
+    if rescued_delivered or rescued_not:
+        rescued_total = rescued_delivered + rescued_not
+        print(f"Manual SIC overrides rescued {rescued_total} rows: "
+              f"{rescued_delivered} delivered, {rescued_not} not delivered")
+        if rescued_not == 0:
+            print("  WARNING: every rescued row is a DELIVERED one. The override "
+                  "set is one-sided, so the rates it feeds are biased upward — "
+                  "treat the resulting SIC scores as an upper bound.")
+        print()
 
     # Check delivered SIC coverage
     delivered_rows = [r for r in rows if r["_delivered"]]

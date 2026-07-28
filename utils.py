@@ -4,6 +4,7 @@ Includes config loading, phone cleaning, and column mapping.
 """
 
 import hmac
+import logging
 import re
 import time
 from pathlib import Path
@@ -11,6 +12,57 @@ from functools import lru_cache
 
 import streamlit as st
 import yaml
+
+logger = logging.getLogger(__name__)
+
+# What the operator sees. Deliberately terse: the detail belongs in the log,
+# where it can be read in full, not in a banner over a lead list.
+DATA_ANOMALY_BANNER = "Data anomaly detected — see logs"
+
+
+def surface_data_anomaly(verdict: dict, *, context: str, store=None) -> bool:
+    """Log a non-ok invariant verdict and raise the operator-facing banner flag.
+
+    Returns True when something was surfaced. Never raises and never halts the
+    workflow — an invariant violation means the results are suspect, not that
+    the operator should be blocked from working with them.
+
+    ``store`` is the mapping the banner flag is written to (a page passes
+    ``st.session_state``). Headless and background-thread callers pass None:
+    Streamlit's session state is not safe to touch off the script thread, so
+    they log only and hand the verdict back through their result dict instead.
+    """
+    if not verdict or verdict.get("severity", "ok") == "ok":
+        return False
+
+    # Streamlit reruns a page on every widget interaction, so an anomaly that
+    # persists would otherwise log — and page Sentry — on each rerun. Suppress
+    # the repeat log while keeping the banner up.
+    signature = (context, verdict.get("severity"), verdict.get("message"))
+    already_logged = False
+    if store is not None:
+        try:
+            seen = store.setdefault("_data_anomaly_seen", set())
+            already_logged = signature in seen
+            seen.add(signature)
+        except Exception:
+            logger.warning("Could not record data anomaly signature", exc_info=True)
+
+    if not already_logged:
+        violations = verdict.get("violations") or []
+        logger.error(
+            "Data anomaly (%s) in %s: %s%s",
+            verdict.get("severity", "unknown"),
+            context,
+            verdict.get("message", ""),
+            "".join(f"\n  - {v}" for v in violations),
+        )
+    if store is not None:
+        try:
+            store["data_anomaly"] = DATA_ANOMALY_BANNER
+        except Exception:  # a read-only or absent session state must not break the page
+            logger.warning("Could not set data anomaly banner flag", exc_info=True)
+    return True
 
 
 # --- Authentication Gate ---
@@ -188,16 +240,73 @@ def get_freshness_multiplier(age_days: int) -> tuple[float, str]:
     return 0.0, "Stale"
 
 
-def get_onsite_likelihood_score(sic_code: str) -> int:
+def normalize_sic(raw) -> str:
+    """Normalize a messy SIC code to its canonical 4-digit string.
+
+    ZoomInfo sends SIC codes as ints, with industry suffixes ("3599-01"), as
+    float-ish strings ("3599.0"), whitespace-padded and zero-padded. An
+    exact-string lookup missed every one of those, and the miss is silent —
+    the lead just scores the default. Returns "" when nothing usable is found.
+    """
+    if raw is None:
+        return ""
+    match = re.match(r"\s*0*(\d{1,4})", str(raw))
+    return match.group(1).zfill(4) if match else ""
+
+
+def get_onsite_likelihood_score(sic_code) -> int:
     """Get on-site likelihood score for a SIC code.
 
     Looks up per-SIC scores derived from HLM delivery data.
     Falls back to default score for unknown SICs.
+
+    The lookup normalizes both sides: on-site likelihood is 25% of BOTH the
+    intent and geography composites, so a missed match does not fail loudly —
+    it silently mis-scores the lead at the default.
     """
     config = load_config()
     onsite = config.get("onsite_likelihood", {})
     sic_scores = onsite.get("sic_scores", {})
-    return sic_scores.get(sic_code, onsite.get("default", 40))
+    default = onsite.get("default", 40)
+
+    normalized = normalize_sic(sic_code)
+    if not normalized:
+        return default
+    # Config keys are normalized too — YAML parses unquoted 4-digit codes as
+    # ints, so a quoted/unquoted edit to icp.yaml must not change behaviour.
+    for key, value in sic_scores.items():
+        if normalize_sic(key) == normalized:
+            return value
+    return default
+
+
+def validate_scoring_weights(workflow_type: str, weights: dict | None = None) -> dict:
+    """Check that a workflow's scoring weights sum to 1.0.
+
+    Calibration rewrites config/icp.yaml, so weight drift is a live risk rather
+    than a hypothetical one — and it fails silently: nothing errors, every
+    composite is simply rescaled. Returns the standard verdict dict.
+    """
+    weights = get_scoring_weights(workflow_type) if weights is None else weights
+    if not weights:
+        return {
+            "severity": "critical",
+            "message": (
+                f"Scoring weights for {workflow_type!r} are missing or empty — "
+                "every composite falls back to hardcoded defaults."
+            ),
+        }
+
+    total = sum(float(v) for v in weights.values())
+    if abs(total - 1.0) <= 0.01:
+        return {"severity": "ok", "message": f"{workflow_type} weights sum to {total:.2f}."}
+    return {
+        "severity": "critical",
+        "message": (
+            f"Scoring weights for {workflow_type!r} sum to {total:.2f}, not 1.00 — "
+            f"every composite score is rescaled by that factor. Weights: {weights}"
+        ),
+    }
 
 
 def get_employee_scale_score(employee_count: int) -> int:
@@ -519,10 +628,38 @@ def normalize_zip(raw: str | int | None) -> str | None:
     digits = re.sub(r"[^0-9]", "", str(raw))
     if len(digits) < 3:
         return None
+    # An 8-digit value is a ZIP+4 whose leading zero was eaten (Excel and CSV
+    # exports both do this to the 0xxxx New England ZIPs). "10011234" is
+    # 01001-1234, Agawam MA — truncating to the first five would call it 10011,
+    # Manhattan. That is a wrong-state lead, not a formatting nit, and every
+    # downstream state derivation follows it. Pad back to 9 first.
+    if len(digits) == 8:
+        digits = digits.zfill(9)
     # Take first 5 digits (handles ZIP+4 variants)
     digits = digits[:5]
     # Pad with leading zeros (handles 4-digit CT/NJ/MA ZIPs)
     return digits.zfill(5)
+
+
+def parse_numeric(raw, default: int | None = None) -> int | None:
+    """Coerce a messy ZoomInfo numeric field to an int.
+
+    ZoomInfo sends numerics as strings and decorates them: `contactAccuracyScore`
+    arrives as `"95%"`, `signalScore` as `"85"`, `distance` as `"5.0 miles"`.
+    A bare `int()` raises on all of those and an `isinstance(x, (int, float))`
+    guard silently rejects them, which is worse — the field looks absent and the
+    caller falls back to a coarse default without saying so.
+
+    Returns `default` when nothing numeric can be found.
+    """
+    if raw is None or isinstance(raw, bool):
+        return default
+    try:
+        return int(float(raw))
+    except (ValueError, TypeError):
+        pass
+    match = re.search(r"\d+(?:\.\d+)?", str(raw))
+    return int(float(match.group())) if match else default
 
 
 def get_state_from_zip(zip_code: str) -> str | None:
@@ -676,3 +813,63 @@ ZOOMINFO_TO_VANILLASOFT = {
     "companyZipCode": "ZIP code",       # Enrich returns companyZipCode
     "companyStreet": "Address",         # Enrich returns companyStreet
 }
+
+
+def file_mtime_iso(path) -> str | None:
+    """Last-modified time of a file as a UTC ISO string, or None if absent.
+
+    Backs the centroid/ICP freshness captions (HADES-1w2). Note this reports
+    when the file was last WRITTEN, which on Streamlit Cloud is the deploy
+    time, not the moment someone edited it upstream — an honest answer to
+    "how old is the copy this app is running", which is the question that
+    matters when results look wrong.
+    """
+    from datetime import datetime, timezone
+
+    try:
+        return datetime.fromtimestamp(
+            Path(path).stat().st_mtime, tz=timezone.utc
+        ).isoformat()
+    except OSError:
+        return None
+
+
+def parse_manual_zip_list(text) -> tuple[list[str], list[str], list[tuple[str, str]]]:
+    """Parse a pasted ZIP list into (usable, skipped, adjusted).
+
+    `adjusted` carries (as typed -> as used) for every entry normalisation
+    CHANGED, so the page can show the transformation instead of applying it
+    silently. That matters most for 4-digit input: padding "1001" to "01001" is
+    right for a spreadsheet that ate a New England leading zero, but an
+    operator halfway through typing "75201" gets "07520" — a real ZIP in New
+    Jersey. Recovering the value and naming it beats choosing one silently.
+
+    Manual-ZIP mode used to keep only tokens that were exactly five digits and
+    silently drop the rest, so a paste from freemaptools or a spreadsheet lost
+    ZIP+4 and zero-dropped entries without saying so — the operator asked for
+    N ZIPs and got fewer, with no notice (HADES-7qi).
+
+    Anything normalize_zip can recover is recovered; only genuinely unusable
+    tokens are reported back so the page can name them.
+    """
+    if not text:
+        return [], [], []
+
+    usable: list[str] = []
+    skipped: list[str] = []
+    adjusted: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for token in str(text).replace("\n", ",").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        normalized = normalize_zip(token)
+        if normalized and len(normalized) == 5:
+            if normalized != token:
+                adjusted.append((token, normalized))
+            if normalized not in seen:
+                seen.add(normalized)
+                usable.append(normalized)
+        else:
+            skipped.append(token)
+    return usable, skipped, adjusted

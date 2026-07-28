@@ -1,7 +1,144 @@
 # Session Handoff - ZoomInfo Lead Pipeline
 
 **Date:** 2026-07-27
-**Status:** **Code backlog empty; two full review cycles retired.** 16 PRs merged, `main` green, 0 open PRs, **1149 tests** (953 → 1149 this session). App verified live and booting cleanly. **ZoomInfo API entitlement still lapsed — ALL lead generation down pending an account-manager call.**
+**Status:** **Insurance measures M1/M4/M5/M8 complete; [PR #17](https://github.com/andre-sav/HADES/pull/17) open, green, 33 commits.** **1324 tests** (1149 → 1324). Seven beads closed including the HADES-zz6 hardening epic and the HADES-7qi review tail; two built and waiting on the user. **ZoomInfo entitlement still lapsed — ALL lead generation down.** **Operator data has been frozen for 159 days** (Zoho sync failing on missing secrets) — see the finding below. A production-credential exposure in the test suite was found and fixed. **Five items now need the user**, listed at the top of this section.
+
+## Session Summary (2026-07-27, later — insurance measures, test isolation, PITR, the 7qi tail)
+
+### State at close
+
+`feat/insurance-m1-m4-m5` → **[PR #17](https://github.com/andre-sav/HADES/pull/17)**, open, `MERGEABLE`, CI green. 33 commits, all pushed, working tree clean.
+
+**953 → 1324 tests.** Beads: **129 total, 115 closed, 14 open, 2 blocked.** Every open item is now either blocked on the user, a decision rather than a task, or P4 polish — there is no code tail left to grind on.
+
+| Closed this session | |
+|---|---|
+| `HADES-0h1` | Page-import smoke test (insurance M4) |
+| `HADES-av6` | Geography runtime invariants (insurance M1) |
+| `HADES-1w2` | Data-source freshness badges (insurance M8) |
+| `HADES-w1k` | Test isolation + production-credential exposure |
+| `HADES-0n4` | Phone↔company integrity — closed as NOT VIABLE with measurements |
+| `HADES-zz6` | Silent-failure hardening epic — ledger reconciled, campaign closed |
+| `HADES-7qi` | P3/P4 review tail — 8 batches, 79 tests, remainder carved out |
+
+| Built, open, waiting on the user | |
+|---|---|
+| `HADES-704` | Synthetic check (insurance M5) — schedule shipped DISABLED |
+| `HADES-9p9` | Turso PITR runbook — written, UNREHEARSED |
+
+### ⚠️ WHAT NEEDS THE USER — nothing else here is blocked
+
+1. **ZoomInfo entitlement — `HADES-m29` (P1).** Still gating all lead generation. Account-manager call. Also blocks `HADES-gn0` and `HADES-w2t`.
+2. **`ZOHO_*` GitHub Actions secrets — `HADES-jdi` (P1).** **Severity is worse than the title suggests — see the 159-day finding below.**
+3. **Streamlit Cloud → Settings → Sharing → make the app public** (`HADES-704`). `APP_PASSWORD` remains the gate; this restores the posture CLAUDE.md documents. Then dispatch `Synthetic Check` manually, confirm green, and uncomment the `schedule:` block. Until then the cron would fail every run — 44 emails/day.
+4. **`turso auth login`** (`HADES-9p9`). Then two things become possible immediately: confirm the plan (`turso db show hades-pipeline`), which may change the data-loss design; and rehearse the restore (~10 min, scriptable). `HADES-njr` (P1) is 3-of-4 children closed and blocked solely on this.
+5. **`HADES-ss9` — product decision:** should lead outcomes flow back to Zoho CRM at all? Recommendation is *delete* the dead `sync_outcomes` code unless someone wants it.
+
+### THE FINDING THAT MOST NEEDS ACTING ON
+
+**Operator data has been frozen for 159 days.** Measured against production 2026-07-27:
+
+```
+operators with a sync stamp : 3,041 (all of them)
+most recent synced_at       : 2026-02-18
+```
+
+The Zoho sync cron has been failing on missing secrets since. Operator names, phones, emails, ZIPs and websites ride on **every exported lead**, and nothing in the UI said so — the Geography page's own caption read "synced from Zoho CRM" with no date.
+
+`HADES-jdi` is filed as "workflow failing daily", which reads like a red checkmark. **The detection worked perfectly the whole time** — a failing workflow every single day, exactly as designed. What failed was *routing*: the alert went to a GitHub Actions email while the person choosing from the stale dropdown saw nothing. `HADES-1w2` now renders **"Operators synced from Zoho: last updated 159 days ago"** in red on that dropdown, but the underlying sync still needs fixing.
+
+### THE PATTERN WORTH CARRYING FORWARD
+
+**Four of four beads specified a check that could not detect the incident that motivated it.**
+
+- **`0h1` (M4)** — the motivating plotly crash was already fixed *and* already guarded by `test_requirements_coverage.py`.
+- **`av6` (M1)** — proposed re-running haversine over the results, but `get_zips_in_radius` computes distance from *that same table*, so a collapsed centroid reports 0.0 miles and passes. Self-referential.
+- **`704` (M5)** — proposed `curl app | grep "Sign in to HADES"`; that text is rendered client-side and is never in the HTML curl receives.
+- **`0n4`** — proposed an area-code↔state check for an entity swap where both companies were in the *same city*.
+
+**Mechanism:** each was filed right after an incident, written from the *symptom* rather than the *mechanism*.
+
+**Conventions added to `docs/HARDENING_LEDGER.md` as a result:**
+- **C7** — a detector needs an oracle INDEPENDENT of what it audits **and** a low base rate on real data. Both. `av6` has both (0 violations in 60 real searches); `0n4` had the first but not the second (15% of rows) and was closed.
+- **C8** — a bead proposing a detector must name the incident record and state how the detector fires on it. One line at filing time catches this for free.
+- **C9** — verify a monitor CAN fail before trusting it. Streamlit's `/healthz` returns 200 for hostnames with no app behind them.
+
+### A SECOND PATTERN, FOUND THE HARD WAY
+
+**A persisted derived value cannot be trusted while the deriving function is still evolving.** This bit twice:
+
+- `vanillasoft_leads.company_norm` is `normalize_company_name()` output stored at import time, and `export_dedup` keyed its VS index on it. The HTML-entity fix (batch 1) and the suffix fix (batch 5) would each have stranded 18k+ persisted keys — no freshly-normalised name could match, and VS dedup would silently stop catching those leads.
+- `vanillasoft_leads.zip` is `normalize_zip()` output, compared raw against a freshly normalised contact ZIP in the franchise-safety corroboration. Same trap, different function.
+
+Both now re-derive rather than trusting the stored column. Measured exposure was nil in both cases; the class is what mattered.
+
+### What landed — by bead
+
+#### `HADES-0h1` — page-import smoke test ✅
+
+`tests/test_page_imports.py`. Streamlit runs each `pages/*.py` as an independent script, so module-level errors are invisible to pytest. Two layers: **static** (compiles, resolves every module-level import AND checks each imported name still exists, scope-checks name loads — 100% of every file, executes nothing) and **execution** (runs the page with a streamlit stand-in whose `stop()` raises a sentinel, halting inside `require_auth()` exactly where Cloud halts for a signed-out visitor).
+
+Verified non-redundant by injecting breaks into a real page: a `NameError` below the auth gate is caught by static and correctly *not* by execution.
+
+#### `HADES-av6` — Geography runtime invariants ✅
+
+`monitoring.evaluate_radius_invariants` + `evaluate_lead_states`, `utils.surface_data_anomaly`, `ui_components.data_anomaly_banner`. Independent oracles: coordinate-sharing density and `get_state_from_zip`. Wired into **all three** production callers of `get_zips_in_radius` — the bead named two and missed `expand_search.py`, the path that runs unattended.
+
+Verified quiet: **0 non-ok verdicts across 60 real searches**. Eight are now a CI gate on `data/zip_centroids.csv` itself.
+
+#### `HADES-704` — synthetic check — SCHEDULE DISABLED ⚠️
+
+Probes `/_stcore/health` (the app server's own endpoint), matching a bare `ok` **exactly**. Stdlib-only and deliberately does not import `monitoring.py` — that pulls `utils` → `streamlit`, so a 15-min cron would pip-install the whole app every run and a broken `requirements.txt` would redden the monitor for reasons unrelated to app health.
+
+#### `HADES-w1k` — test isolation, and a credential exposure ✅
+
+**28 test modules** replaced `sys.modules["streamlit"]` at import time — 14 by assignment, **13 via `setdefault` the initial grep missed**, one configured mock. Removing them surfaced something worse: they were load-bearing *by accident*. `.streamlit/secrets.toml` holds live production values, and two credential tests immediately started returning the real production Turso URL.
+
+`conftest.py` now neutralises `st.secrets` for every test. Blast radius was **local-dev only** (CI references no secrets); nothing left the machine, no rotation needed.
+
+#### `HADES-0n4` — closed NOT VIABLE ✅
+
+Business-phone area code vs state: **2.2% FP** (usable) but cannot catch the same-city incident. Phone-collision across company names: right shape, but **44,926 of 293,927 rows (15.3%)** — an alarm on one row in eight. Both dead ends recorded with numbers so they are not re-litigated.
+
+#### `HADES-zz6` — hardening epic closed ✅
+
+All 14 surfaces audited: 12 found+fixed, 2 ruled out clean. **The ledger, not the code, was the stale artifact** — surfaces #3–#14 had been swept by the two review cycles under ~50 differently-named beads and nobody updated the file, so the epic read as an untouched P1 for six weeks. Its "RESUME HERE" pointer was three merges out of date.
+
+#### `HADES-1w2` — freshness badges ✅
+
+`monitoring.evaluate_data_freshness` (pure, green/amber/red, unknown never ok, negative-age clamp), `ui_components.freshness_caption`, `utils.file_mtime_iso`. Three Geography call sites. The two file-backed badges carry "file timestamp, resets on deploy" because mtime on Cloud is deploy time, not edit time.
+
+#### `HADES-7qi` — 8 batches, 79 tests ✅
+
+1. **Data correctness:** `normalize_zip` 8-digit ZIP+4 (`"10011234"` → Manhattan instead of Agawam MA — a wrong-STATE lead); HTML entities never decoded (`&amp;` → token `amp`, ratio 81.8, duplicate pushed); string `signalScore` silently ignored; `_execute_multi_row_insert` dropping everything after VALUES (latent upsert-breaker).
+2. **Credit waste + degraded scoring + dead crons:** intent UI enriched *before* cross-session dedup; company-enrich marked itself done in the `except` branch (a transient 429 forfeited ~60% of the geography composite for the session); GitHub's 60-day cron auto-disable had no detection — now stamped and surfaced as a "Scheduled Jobs" indicator.
+3. **SIC lookup normalisation** (measured impact: **zero** on available data — defensive hardening, not a live correction), weights-sum validation, `score_intent_contacts` 100-clamp.
+4. **Round-robin Contact Owner** restarted at `agents[0]` every export — simulated against the real 5-agent roster, 20 exports of 3 leads used only **3 of 5 agents; two got nothing at all**. Manual-ZIP silent discards. Health-check cron racing the pipeline it guards (both at `0 12`).
+5. **Suffix stripping** single-pass/order-dependent — measured on 190,486 real company names: 51 keys change (0.03%), **zero false merges**, all genuine duplicates previously missed.
+6. **Calibration sampling:** employee buckets had no min-sample filter while per-SIC had `MIN_RECORDS=10`. **One unrelated lead moved a well-sampled bucket from 100 to 73.** Thin buckets now score `None`, not `SCORE_MIN` ("cannot say" ≠ "is bad").
+7. **Small tail:** dead `cache:` config (both keys read by nothing), DST label (dashboard hardcoded 7 AM ET; cron is 12:00 UTC = 8 AM under DST), token-persistence failures at DEBUG, template `"?"` state leaking into the API filter, NULL `person_id` (measured 0 of 612 — logged, not migrated).
+8. **UI/headless drift:** the cron picked different contacts than the operator would (title preferences applied in UI only — logic was inline in the page, hence unshareable); two different page caps; headless failures never reached the `error_log` the Pipeline Health page reads.
+
+**Verified already fixed, struck without code:** `exported_at` two formats (`HADES-96q` did fix it).
+
+### Self-review of the branch
+
+Ran a targeted adversarial pass over the 26-commit branch hunting the persisted-derived-value class. Three findings, **two of them in code written the same day**, and one was a fix reintroducing the exact class it was fixing (`parse_manual_zip_list` silently padding `7520` → `07520`, a real NJ ZIP). Also probed `_has_clause_after_values` against 9 adversarial SQL shapes — 0 mismatches.
+
+One measurement correction worth noting: a first pass reported a 15% zip/state disagreement in `vanillasoft_leads`. That was almost entirely an artifact — the `state` column mixes 2-letter codes, full names (`"Arizona"`) and malformed values (`", NJ"`), so `MA` was being compared to `MASSACHUSETTS`. Corrected: **0.07%, 191 rows.**
+
+### Resolved carry-overs from the previous handoff
+
+- **`deleted_at` migration** — the previous handoff said it was unapplied and needed a login. **It is applied**; both `operators` and `staged_exports` have the column and filter correctly. `data_anomaly_check --dry-run` reaches `init_schema()`.
+- **Live SMTP calls in tests** — fixed; `conftest.py` blocks `smtplib` suite-wide.
+- **Stale `HADES_CODEBASE_FLAT.md` / `REVIEW_PROMPT.md`** — deleted, and `.gitignore`d along with `system-test/` and `HADES-*.csv` lead exports (two were sitting untracked in the repo root containing real contact PII, one `git add -A` from being committed).
+
+### What Needs Doing Next Session
+
+1. **Merge [PR #17](https://github.com/andre-sav/HADES/pull/17)** — green and mergeable, 33 commits.
+2. Chase the five user items above. #3 and #4 are each one action from closing a bead; #2 is five months of stale operator data.
+3. Remaining backlog is P4 polish (`bdr`, `0qu`, `dgr`, `iic`, `2u2`, `3m1`) plus the blocked set (`gn0`, `w2t` behind `m29`).
+4. `HADES-njr` (P1, data-loss architecture) is 3-of-4 children closed — one `turso auth login` from being finishable.
 
 ## Session Summary (2026-07-27, second review cycle — close)
 

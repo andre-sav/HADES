@@ -1,0 +1,73 @@
+name: Synthetic Check
+
+# Post-deploy availability probe (HADES-704, insurance M5).
+#
+# The Executive Summary crash went undetected from deploy until someone happened
+# to click the page. This bounds detection time on an app-level outage — bad
+# deploy, crashed container, sleeping app — regardless of operator activity.
+#
+# Probes /_stcore/health, the Streamlit APP SERVER's own endpoint. Not /healthz:
+# that answers 200 {"status":"ok"} from Streamlit Cloud's edge for any hostname,
+# including apps that do not exist (verified live 2026-07-27), so a check built
+# on it could never fail. See scripts/synthetic_check.py.
+#
+# No pip install: the script is stdlib-only by design, so a broken
+# requirements.txt cannot turn this monitor red for a reason unrelated to app
+# health. Runs in a few seconds.
+#
+# ---------------------------------------------------------------------------
+# ⚠ THE SCHEDULE IS INTENTIONALLY DISABLED.
+#
+# The app currently sits behind Streamlit Cloud viewer auth (SSO): every
+# anonymous request 303-redirects to share.streamlit.io/-/auth/app, so the probe
+# cannot reach it and WOULD FAIL EVERY RUN — 44 failure emails a day.
+#
+# To enable, in this order:
+#   1. Streamlit Cloud -> Settings -> Sharing -> make the app public.
+#      (APP_PASSWORD stays the gate on the app itself; this restores the posture
+#      CLAUDE.md already documents.)
+#   2. Run this workflow manually via workflow_dispatch and confirm it is green.
+#   3. Uncomment the `schedule:` block below.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   # Every 15 minutes, 13:00-23:59 UTC, weekdays. That is 09:00-19:00 ET in
+  #   # summer and 08:00-18:00 ET in winter — GitHub cron has no DST awareness,
+  #   # and the window is deliberately wide enough to cover business hours in
+  #   # both. Polling this often also keeps the app from idling to sleep during
+  #   # the working day.
+  #   - cron: '*/15 13-23 * * 1-5'
+
+concurrency:
+  group: synthetic-check
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Probe the deployed app
+        env:
+          # Override in repo variables if the app URL ever changes, so the
+          # workflow does not need editing.
+          APP_URL: ${{ vars.APP_URL || 'https://hades-hlm.streamlit.app' }}
+        run: python scripts/synthetic_check.py
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: python scripts/notify_failure.py --workflow "Synthetic Check"

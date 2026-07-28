@@ -31,7 +31,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from zoominfo_client import ContactQueryParams
+from zoominfo_client import ContactQueryParams, DEFAULT_SEARCH_MAX_PAGES
 from geo import get_zips_in_radius, get_states_from_zips
 from utils import (
     get_employee_minimum,
@@ -40,7 +40,9 @@ from utils import (
     get_default_management_levels,
     get_default_target_contacts,
     get_default_radius,
+    surface_data_anomaly,
 )
+from monitoring import evaluate_radius_invariants
 
 logger = logging.getLogger(__name__)
 
@@ -273,16 +275,31 @@ def expand_search(
     # result set is partial (the client resets its flag on every sweep).
     _truncation_seen = None
 
+    # Expansion recalculates the ZIP set at each wider radius, so every sweep
+    # needs the same output invariants the initial search gets. This runs on a
+    # background thread where st.session_state is not safe to touch, so the
+    # verdicts ride home in the result dict and the page surfaces them.
+    _invariant_violations: list[str] = []
+    _states_searched: set[str] = set(states or [])
+
     def do_search(radius_miles, accuracy_min, management_levels, employee_max, location_type_override=None):
         """Execute a single search with given parameters."""
         # Recalculate ZIPs if radius changed and we have a center ZIP
         if center_zip and radius_miles != base_params.get("radius"):
             calculated = get_zips_in_radius(center_zip, radius_miles)
+            _verdict = evaluate_radius_invariants(center_zip, radius_miles, calculated)
+            if surface_data_anomaly(
+                _verdict,
+                context=f"expansion radius search {center_zip} @ {radius_miles}mi",
+                store=None,  # background thread — no session state
+            ):
+                _invariant_violations.append(_verdict["message"])
             search_zips = [z["zip"] for z in calculated]
             search_states = get_states_from_zips(calculated)
         else:
             search_zips = zip_codes
             search_states = states
+        _states_searched.update(search_states or [])
 
         # Allow override for combined search (Person-only after PersonAndHQ)
         search_location_type = location_type_override if location_type_override else fixed_params["location_type"]
@@ -303,7 +320,7 @@ def expand_search(
             management_levels=management_levels if management_levels else None,
         )
 
-        contacts = client.search_contacts_all_pages(params, max_pages=5)
+        contacts = client.search_contacts_all_pages(params, max_pages=DEFAULT_SEARCH_MAX_PAGES)
         nonlocal _truncation_seen
         if client.last_search_truncated:
             _truncation_seen = client.last_search_truncated
@@ -371,6 +388,8 @@ def expand_search(
                     "contacts_by_company": build_contacts_by_company(contacts_list),
                     "expansion_log": expansion_log, "expansion_steps": expansion_steps,
                     "stopped": True, "truncated": _truncation_seen,
+            "invariant_violations": list(_invariant_violations),
+            "states_searched": sorted(_states_searched),
                 }
             time.sleep(0.5)  # Rate limit
             log_progress("**Combined search:** Adding Person-only results for maximum coverage...", is_step=True)
@@ -413,6 +432,8 @@ def expand_search(
             "expansion_log": expansion_log,
             "expansion_steps": expansion_steps,
             "truncated": _truncation_seen,
+            "invariant_violations": list(_invariant_violations),
+            "states_searched": sorted(_states_searched),
         }
 
     # Check if target already met before expansion (target = unique companies, not contacts)
@@ -433,6 +454,8 @@ def expand_search(
             "expansion_log": expansion_log,
             "expansion_steps": expansion_steps,
             "truncated": _truncation_seen,
+            "invariant_violations": list(_invariant_violations),
+            "states_searched": sorted(_states_searched),
         }
 
     if len(unique_companies) < target:
@@ -615,7 +638,53 @@ def expand_search(
         "expansion_log": expansion_log,
         "expansion_steps": expansion_steps,
         "truncated": _truncation_seen,
+            "invariant_violations": list(_invariant_violations),
+            "states_searched": sorted(_states_searched),
     }
     if was_cancelled:
         result["stopped"] = True
     return result
+
+
+def select_best_contacts(contacts_by_company: dict, title_prefs: dict | None = None) -> dict:
+    """Pick one contact per company, honouring learned title preferences.
+
+    Extracted so the headless pipeline and the two UI workflows share one rule
+    (HADES-7qi). They had drifted: the UI re-ranked with the operator's title
+    preferences while the cron took contacts[0] on accuracy alone, so the
+    unattended run picked contacts the operator would not have — and nobody
+    could see it, because the path a human validates is the other one.
+
+    Accuracy stays primary; the preference only breaks ties. An unrated title
+    scores 0.5 (neutral) rather than 0, so a title nobody has ranked does not
+    lose to one that was actively skipped.
+
+    Args:
+        contacts_by_company: output of build_contacts_by_company().
+        title_prefs: {normalized title: 0.0-1.0} from db.get_title_preferences().
+
+    Returns:
+        {company_id: contact}
+    """
+    from db._title_prefs import normalize_title
+    from utils import parse_numeric
+
+    selected = {}
+    for company_id, data in contacts_by_company.items():
+        contacts = data.get("contacts") or []
+        if not contacts:
+            continue
+        if title_prefs:
+            def _rank(contact):
+                accuracy = parse_numeric(contact.get("contactAccuracyScore"), default=0)
+                preference = title_prefs.get(
+                    normalize_title(contact.get("jobTitle", "") or ""), 0.5
+                )
+                return (accuracy, preference)
+
+            selected[company_id] = max(contacts, key=_rank)
+        else:
+            # build_contacts_by_company already sorted by accuracy then phone
+            # quality, so the first entry is the established default.
+            selected[company_id] = contacts[0]
+    return selected

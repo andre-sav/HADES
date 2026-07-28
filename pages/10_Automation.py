@@ -2,7 +2,6 @@
 
 import html
 import logging
-from datetime import datetime, timedelta, timezone
 
 import requests
 import streamlit as st
@@ -24,6 +23,8 @@ from ui_components import (
     SPACING,
 )
 
+from automation_schedule import next_scheduled_run
+
 logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Automation", page_icon="⚙️", layout="wide")
@@ -43,30 +44,15 @@ except Exception as e:
 # --- Helpers ---
 
 def _next_scheduled_run() -> tuple[str, str]:
-    """Compute next weekday at 7:00 AM ET. Returns (short_label, countdown)."""
-    try:
-        from zoneinfo import ZoneInfo
-        et = ZoneInfo("America/New_York")
-    except ImportError:
-        et = timezone(timedelta(hours=-5))
+    """Next weekday intent poll, as (short_label, countdown).
 
-    now = datetime.now(et)
-    candidate = now.replace(hour=7, minute=0, second=0, microsecond=0)
-    if candidate <= now:
-        candidate += timedelta(days=1)
-    while candidate.weekday() >= 5:
-        candidate += timedelta(days=1)
-
-    delta = candidate - now
-    hours = int(delta.total_seconds() // 3600)
-    minutes = int((delta.total_seconds() % 3600) // 60)
-
-    day_label = candidate.strftime("%a %b %-d · 7 AM ET")  # "Mon Feb 17 · 7 AM ET"
-    if hours < 24:
-        countdown = f"{hours}h {minutes}m"
-    else:
-        countdown = f"{hours // 24}d {hours % 24}h"
-    return day_label, countdown
+    Delegates to automation_schedule so the hour tracks the actual UTC cron.
+    This used to hardcode 7 AM ET; the cron is 12:00 UTC, which is 8 AM ET
+    under DST — wrong for ~8 months a year, in both the label and the
+    countdown (HADES-7qi).
+    """
+    label, countdown, _run_at = next_scheduled_run()
+    return label, countdown
 
 
 _GH_REPO = st.secrets.get("GITHUB_REPO", "andre-sav/HADES")
@@ -199,7 +185,7 @@ budget_pct = min(100, (weekly_used / weekly_cap * 100)) if weekly_cap else 0
 
 
 # --- Header ---
-page_header("Automation", "Daily intent polling · Mon–Fri 7:00 AM ET")
+page_header("Automation", "Daily intent polling · Mon–Fri, 12:00 UTC (7–8 AM ET, DST-dependent)")
 
 # --- Schedule Toggle ---
 _gh_token = _get_github_token()
@@ -215,7 +201,7 @@ if _gh_token and _wf_state is not None:
             )
         with _toggle_col2:
             if _is_active:
-                st.caption("Daily pipeline runs Mon–Fri at 7:00 AM ET")
+                st.caption("Daily pipeline runs Mon–Fri at 12:00 UTC — 7 AM ET in winter, 8 AM ET under DST")
             else:
                 st.caption("Schedule paused — only manual runs via Run Now")
 
