@@ -25,6 +25,12 @@ from utils import get_sic_codes, get_employee_minimum, get_employee_maximum
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# One page cap for every contact-search path. Three call sites hardcoded 5
+# while search_contacts_all_pages defaulted to 10, so whichever path forgot to
+# pass it swept twice as deep and reported a different "N found" for the same
+# query. `_search_was_truncated` flags when the cap actually bites (HADES-7qi).
+DEFAULT_SEARCH_MAX_PAGES = 5
+
 # Set up console handler if not already configured
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -957,7 +963,7 @@ class ZoomInfoClient:
     def search_contacts_all_pages(
         self,
         params: ContactQueryParams,
-        max_pages: int = 10,
+        max_pages: int = DEFAULT_SEARCH_MAX_PAGES,
         progress_callback=None,
     ) -> list[dict]:
         """

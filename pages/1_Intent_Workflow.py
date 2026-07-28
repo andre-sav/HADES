@@ -37,6 +37,7 @@ from turso_db import get_database
 from errors import PipelineError
 from db._pipeline import RunLogger
 from zoominfo_client import (
+    DEFAULT_SEARCH_MAX_PAGES,
     get_zoominfo_client,
     IntentQueryParams,
     ContactQueryParams,
@@ -56,8 +57,7 @@ from dedup import dedupe_leads, get_dedup_days_back
 from export_dedup import get_previously_exported, partition_companies_for_enrichment
 from export import merge_contact, merge_company_data, contact_has_core_data
 from cost_tracker import CostTracker
-from expand_search import build_contacts_by_company
-from db._title_prefs import normalize_title
+from expand_search import build_contacts_by_company, select_best_contacts
 from utils import (
     get_intent_topics,
     get_sic_codes,
@@ -1335,7 +1335,7 @@ if (
                         search_status.update(label=f"Phase 2: Contact search — page {current_page}/{total_pages}")
                         st.write(f"Contact search: page {current_page}/{total_pages}")
 
-                    contacts = client.search_contacts_all_pages(params, max_pages=5, progress_callback=_contact_page_progress)
+                    contacts = client.search_contacts_all_pages(params, max_pages=DEFAULT_SEARCH_MAX_PAGES, progress_callback=_contact_page_progress)
                     _c_trunc = client.last_search_truncated
                     if _c_trunc:
                         st.warning(
@@ -1370,22 +1370,11 @@ if (
                             _title_prefs = db.get_title_preferences()
                         except Exception:
                             logger.warning("Failed to load title preferences", exc_info=True)
-                        auto_selected = {}
-                        for cid, data in contacts_by_company.items():
-                            if data["contacts"]:
-                                if _title_prefs:
-                                    # Re-rank: accuracy stays primary, title preference breaks ties
-                                    def _rank_key(c):
-                                        raw = c.get("contactAccuracyScore", 0) or 0
-                                        try:
-                                            acc = int(raw)
-                                        except (ValueError, TypeError):
-                                            acc = 0
-                                        return (acc, _title_prefs.get(normalize_title(c.get("jobTitle", "")), 0.5))
-                                    best = max(data["contacts"], key=_rank_key)
-                                    auto_selected[cid] = best
-                                else:
-                                    auto_selected[cid] = data["contacts"][0]
+                        # One selection rule for the UI and the cron alike
+                        # (expand_search.select_best_contacts, HADES-7qi).
+                        auto_selected = select_best_contacts(
+                            contacts_by_company, _title_prefs
+                        )
                         st.session_state.intent_selected_contacts = auto_selected
                         if _title_prefs:
                             logger.info("Auto-select used %d title preferences for ranking", len(_title_prefs))

@@ -41,6 +41,7 @@ from db._pipeline import RunLogger
 from errors import PipelineError
 from turso_db import TursoDatabase
 from zoominfo_client import (
+    DEFAULT_SEARCH_MAX_PAGES,
     ZoomInfoClient,
     IntentQueryParams,
     ContactQueryParams,
@@ -62,12 +63,35 @@ try:  # package import (tests) vs script execution (cron adds scripts/ to path)
 except ImportError:  # pragma: no cover
     from notify_failure import send_alert
 from export_dedup import get_previously_exported, filter_previously_exported
-from expand_search import build_contacts_by_company
+from expand_search import build_contacts_by_company, select_best_contacts
 from cost_tracker import CostTracker
 from utils import (get_call_center_agents, get_sic_codes, get_employee_minimum,
                    get_default_phone_fields, utc_now_str)
 
 logger = logging.getLogger("intent_pipeline")
+
+
+def log_pipeline_error(db, exc: Exception, *, recoverable: bool = False,
+                       user_message: str | None = None) -> None:
+    """Record a headless failure in error_log, which Pipeline Health reads.
+
+    Only pages/ ever wrote to that table, so a failed cron run left the panel
+    empty — the page built to surface failures was blind to precisely the runs
+    nobody was watching (HADES-7qi).
+
+    Never raises: the pipeline is already failing, and a logging problem must
+    not replace the real error with a secondary one.
+    """
+    try:
+        db.log_error(
+            workflow_type="intent",
+            error_type=type(exc).__name__,
+            user_message=user_message or getattr(exc, "user_message", None) or str(exc),
+            technical_message=str(exc),
+            recoverable=recoverable,
+        )
+    except Exception:
+        logger.warning("Could not write to error_log", exc_info=True)
 
 
 def _stamp_numeric_company_ids(leads: list[dict], db) -> None:
@@ -419,7 +443,7 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             required_fields_operator="or",
         )
 
-        contacts = client.search_contacts_all_pages(contact_params, max_pages=5)
+        contacts = client.search_contacts_all_pages(contact_params, max_pages=DEFAULT_SEARCH_MAX_PAGES)
         summary["contacts_found"] = len(contacts)
         _c_trunc = client.last_search_truncated
         if _c_trunc:
@@ -438,12 +462,19 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
             return {"success": True, "csv_content": None, "csv_filename": None,
                     "batch_id": None, "summary": summary, "error": None}
 
-        # Auto-select best contact per company (highest accuracy)
+        # Auto-select best contact per company, honouring the operator's
+        # learned title preferences exactly as the UI does. This used to take
+        # contacts[0] on accuracy alone, so the unattended daily run picked
+        # contacts the operator would not have (HADES-7qi).
         contacts_by_company = build_contacts_by_company(contacts)
-        auto_selected = {}
-        for cid, data in contacts_by_company.items():
-            if data["contacts"]:
-                auto_selected[cid] = data["contacts"][0]
+        try:
+            _title_prefs = db.get_title_preferences()
+        except Exception:
+            logger.warning("Could not load title preferences", exc_info=True)
+            _title_prefs = {}
+        auto_selected = select_best_contacts(contacts_by_company, _title_prefs)
+        if _title_prefs:
+            logger.info("Auto-select used %d title preferences", len(_title_prefs))
 
         selected_contacts = list(auto_selected.values())
 
@@ -643,11 +674,17 @@ def run_pipeline(config: dict, creds: dict, dry_run: bool = False,
         run_logger.error(f"Pipeline failed: {e}", detail=traceback.format_exc())
         summary.update(run_logger.to_summary())
         db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, e.user_message)
+        # Mirror the UI: pages/ record failures here so Pipeline Health can
+        # show them. Headless never did, so unattended failures were invisible
+        # on the page built to surface failures (HADES-7qi).
+        log_pipeline_error(db, e, recoverable=getattr(e, "recoverable", False),
+                           user_message=e.user_message)
         raise
     except Exception as e:
         run_logger.error(f"Pipeline failed: {e}", detail=traceback.format_exc())
         summary.update(run_logger.to_summary())
         db.complete_pipeline_run(run_id, "failed", summary, None, 0, 0, f"Unexpected error: {type(e).__name__}: {e}")
+        log_pipeline_error(db, e, recoverable=False)
         raise
 
 
