@@ -1,0 +1,27 @@
+{
+  "rules_version": "2026-09-18.3",
+  "default_branch": "main",
+  "tracker": {
+    "kind": "beads",
+    "export": ".beads/issues.jsonl"
+  },
+  "tracker_bin": "/Users/boss/.local/bin/bd",
+  "director_marker": ".beads/embeddeddolt",
+  "legacy_assignees": [
+    "andre-sav",
+    "claude",
+    "codex"
+  ],
+  "lane_gate": {
+    "cwd": ".",
+    "install": "",
+    "cmd": "",
+    "time_sensitive": []
+  },
+  "review": null,
+  "director_channel": "a comment on your PR naming the head SHA; the director reads open PRs at its next start",
+  "worktrees_root": "/Users/boss/Projects/HADES-worktrees",
+  "shared_paths": [
+    "SESSION_START.md"
+  ]
+}
