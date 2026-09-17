@@ -1,5 +1,5 @@
 {
-  "rules_version": "2026-09-18.2",
+  "rules_version": "2026-09-18.3",
   "default_branch": "main",
   "tracker": {
     "kind": "beads",

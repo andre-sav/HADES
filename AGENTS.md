@@ -1,6 +1,6 @@
 # Agent Instructions
 
-<!-- multi-session:begin rules_version=2026-09-18.2 — managed block; edit the template in Recursive-Improvement, not here -->
+<!-- multi-session:begin rules_version=2026-09-18.3 — managed block; edit the template in Recursive-Improvement, not here -->
 ## Multi-session rules — READ FIRST
 
 Several agent sessions share this repo at once. The project's deltas, and **what is live today versus pending**,
@@ -9,7 +9,7 @@ are in [`SESSION_START.md`](./SESSION_START.md). The generic rules are in
 
 1. **Your role is your checkout.** Compare `git rev-parse --path-format=absolute --git-dir` with
    `git rev-parse --path-format=absolute --git-common-dir`.
-   You are the **DIRECTOR** only if they are the same string **and** `.beads/embeddeddolt` exists in this checkout:
+   You are the **DIRECTOR** only if they are the same string **and** `.beads/embeddeddolt` exists at the top of this checkout:
    run `/session-start`. If they differ you are in a linked worktree; and in any repo you cloned yourself the marker
    is absent. Either way you are a **LANE**: run `/lane-start`.
 2. **A lane writes only its own worktree, branch and PR.** Worktrees live under `/Users/boss/Projects/HADES-worktrees/<work id>-<short stamp>`,

@@ -1,9 +1,9 @@
 # Session start — ms addendum
 
-<!-- multi-session:status rules_version=2026-09-18.2 -->
+<!-- multi-session:status rules_version=2026-09-18.3 -->
 ## Multi-session rules: what is live here today
 
-Generic rules: `~/Projects/Recursive-Improvement/docs/multi-session/RULES.md`, version 2026-09-18.2.
+Generic rules: `~/Projects/Recursive-Improvement/docs/multi-session/RULES.md`, version 2026-09-18.3.
 Project facts: `.claude/multi-session.json`. Lanes run `/lane-start` and `/lane-close`.
 If you read nothing else: **your role is your checkout, a lane writes only its own worktree and PR, and nothing
 shared rides a code PR.**
